@@ -1,12 +1,12 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
-import { format, startOfWeek, endOfWeek, addWeeks } from "date-fns";
 import { useState, useEffect, useRef } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { MapPin, ChevronLeft, ChevronRight, Route, Navigation, Truck, Store } from "lucide-react";
+import { MapPin, Route, Navigation, Truck, Store } from "lucide-react";
+import { DateFilter, DateRangeLabel, useDateFilter } from "@/components/date-filter";
 
 type DeliveryAddress = {
   id: number;
@@ -18,16 +18,14 @@ type DeliveryAddress = {
 };
 
 export default function DeliveryRoutesPage() {
-  const [weekOffset, setWeekOffset] = useState(0);
+  const dateFilter = useDateFilter();
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
   const [geocodedAddresses, setGeocodedAddresses] = useState<DeliveryAddress[]>([]);
   const [isGeocoding, setIsGeocoding] = useState(false);
   const [routeOptimized, setRouteOptimized] = useState(false);
 
-  const now = new Date();
-  const from = startOfWeek(addWeeks(now, weekOffset), { weekStartsOn: 1 });
-  const to = endOfWeek(addWeeks(now, weekOffset), { weekStartsOn: 1 });
+  const { from, to } = dateFilter;
 
   const { data: addresses, isLoading } = useQuery<DeliveryAddress[]>({
     queryKey: ["/api/delivery-addresses", `?from=${from.toISOString()}&to=${to.toISOString()}`],
@@ -160,20 +158,10 @@ export default function DeliveryRoutesPage() {
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight" data-testid="text-routes-title">Delivery Routes</h1>
-          <p className="text-sm text-muted-foreground">
-            {format(from, "MMM d")} - {format(to, "MMM d, yyyy")}
-          </p>
+          <DateRangeLabel from={from} to={to} />
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex items-center gap-1">
-            <Button size="icon" variant="ghost" onClick={() => setWeekOffset(w => w - 1)} data-testid="button-route-prev">
-              <ChevronLeft className="w-4 h-4" />
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => setWeekOffset(0)} data-testid="button-route-this-week">This Week</Button>
-            <Button size="icon" variant="ghost" onClick={() => setWeekOffset(w => w + 1)} data-testid="button-route-next">
-              <ChevronRight className="w-4 h-4" />
-            </Button>
-          </div>
+          <DateFilter {...dateFilter} testIdPrefix="route" />
           {validAddresses.length > 1 && (
             <Button
               size="sm"

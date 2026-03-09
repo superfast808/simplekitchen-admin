@@ -1,6 +1,6 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { format, startOfWeek, endOfWeek, addWeeks } from "date-fns";
+import { format } from "date-fns";
 import { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,20 +9,19 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Trash2, Package, ChevronLeft, ChevronRight } from "lucide-react";
+import { Plus, Trash2, Package } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { DateFilter, DateRangeLabel, useDateFilter } from "@/components/date-filter";
 import type { Product, ManualQuantity } from "@shared/schema";
 
 export default function ManualStockPage() {
   const { toast } = useToast();
-  const [weekOffset, setWeekOffset] = useState(0);
+  const dateFilter = useDateFilter();
   const [selectedProductId, setSelectedProductId] = useState<string>("");
   const [quantity, setQuantity] = useState("");
   const [note, setNote] = useState("");
 
-  const now = new Date();
-  const from = startOfWeek(addWeeks(now, weekOffset), { weekStartsOn: 1 });
-  const to = endOfWeek(addWeeks(now, weekOffset), { weekStartsOn: 1 });
+  const { from, to } = dateFilter;
 
   const { data: products } = useQuery<Product[]>({ queryKey: ["/api/products"] });
 
@@ -77,19 +76,9 @@ export default function ManualStockPage() {
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight" data-testid="text-stock-title">Manual Stock</h1>
-          <p className="text-sm text-muted-foreground">
-            Track quantities for local shops and non-website orders
-          </p>
+          <DateRangeLabel from={from} to={to} />
         </div>
-        <div className="flex items-center gap-1">
-          <Button size="icon" variant="ghost" onClick={() => setWeekOffset(w => w - 1)} data-testid="button-stock-prev">
-            <ChevronLeft className="w-4 h-4" />
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => setWeekOffset(0)} data-testid="button-stock-this-week">This Week</Button>
-          <Button size="icon" variant="ghost" onClick={() => setWeekOffset(w => w + 1)} data-testid="button-stock-next">
-            <ChevronRight className="w-4 h-4" />
-          </Button>
-        </div>
+        <DateFilter {...dateFilter} testIdPrefix="stock" />
       </div>
 
       <Card>

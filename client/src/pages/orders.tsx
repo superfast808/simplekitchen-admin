@@ -1,32 +1,31 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { format, startOfWeek, endOfWeek, addWeeks } from "date-fns";
+import { format } from "date-fns";
 import { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from "@/components/ui/table";
-import { RefreshCw, ChevronLeft, ChevronRight, Trash2, Plus, ShoppingCart, Download } from "lucide-react";
+import { RefreshCw, Trash2, Plus, ShoppingCart, Download } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { DateFilter, DateRangeLabel, useDateFilter } from "@/components/date-filter";
 import type { Order, OrderItem } from "@shared/schema";
 
 type OrderWithItems = Order & { items: OrderItem[] };
 
 export default function OrdersPage() {
   const { toast } = useToast();
-  const [weekOffset, setWeekOffset] = useState(0);
+  const dateFilter = useDateFilter();
   const [showManualDialog, setShowManualDialog] = useState(false);
 
-  const now = new Date();
-  const currentWeekStart = startOfWeek(addWeeks(now, weekOffset), { weekStartsOn: 1 });
-  const currentWeekEnd = endOfWeek(addWeeks(now, weekOffset), { weekStartsOn: 1 });
+  const { from, to } = dateFilter;
 
   const { data: orders, isLoading } = useQuery<OrderWithItems[]>({
-    queryKey: ["/api/orders", `?from=${currentWeekStart.toISOString()}&to=${currentWeekEnd.toISOString()}`],
+    queryKey: ["/api/orders", `?from=${from.toISOString()}&to=${to.toISOString()}`],
   });
 
   const syncMutation = useMutation({
@@ -69,8 +68,8 @@ export default function OrdersPage() {
 
   const handleExport = () => {
     const params = new URLSearchParams({
-      from: currentWeekStart.toISOString(),
-      to: currentWeekEnd.toISOString(),
+      from: from.toISOString(),
+      to: to.toISOString(),
     });
     window.open(`/api/orders/export?${params.toString()}`, "_blank");
   };
@@ -80,20 +79,10 @@ export default function OrdersPage() {
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight" data-testid="text-page-title">Orders</h1>
-          <p className="text-sm text-muted-foreground">
-            {format(currentWeekStart, "MMM d")} - {format(currentWeekEnd, "MMM d, yyyy")}
-          </p>
+          <DateRangeLabel from={from} to={to} />
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex items-center gap-1">
-            <Button size="icon" variant="ghost" onClick={() => setWeekOffset(w => w - 1)} data-testid="button-prev-week">
-              <ChevronLeft className="w-4 h-4" />
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => setWeekOffset(0)} data-testid="button-this-week">This Week</Button>
-            <Button size="icon" variant="ghost" onClick={() => setWeekOffset(w => w + 1)} data-testid="button-next-week">
-              <ChevronRight className="w-4 h-4" />
-            </Button>
-          </div>
+          <DateFilter {...dateFilter} testIdPrefix="orders" showMonth />
           <Button size="sm" onClick={() => syncMutation.mutate()} disabled={syncMutation.isPending} data-testid="button-sync-orders">
             <RefreshCw className={`w-4 h-4 mr-1 ${syncMutation.isPending ? "animate-spin" : ""}`} />
             Sync from Woo
@@ -117,7 +106,7 @@ export default function OrdersPage() {
           ) : !orders || orders.length === 0 ? (
             <div className="p-12 text-center">
               <ShoppingCart className="w-12 h-12 mx-auto text-muted-foreground/40 mb-3" />
-              <p className="text-muted-foreground font-medium">No orders for this week</p>
+              <p className="text-muted-foreground font-medium">No orders for this period</p>
               <p className="text-sm text-muted-foreground mt-1">Sync from WooCommerce or add a manual order</p>
             </div>
           ) : (
