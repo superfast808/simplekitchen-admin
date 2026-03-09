@@ -196,6 +196,16 @@ export default function OrdersPage() {
                   ))}
                 </TableBody>
                 <TableFooter>
+                  <TableRow className="border-t-2">
+                    <TableCell className="font-bold text-xs text-muted-foreground">Customer</TableCell>
+                    {allProductNames.map(name => (
+                      <TableCell key={name} className="text-center font-bold text-xs text-muted-foreground">{name}</TableCell>
+                    ))}
+                    <TableCell className="font-bold text-xs text-muted-foreground">Delivery Address</TableCell>
+                    <TableCell className="font-bold text-xs text-muted-foreground">Type</TableCell>
+                    <TableCell className="font-bold text-xs text-muted-foreground">Status</TableCell>
+                    <TableCell></TableCell>
+                  </TableRow>
                   <TableRow className="bg-muted/50" data-testid="row-order-totals">
                     <TableCell className="font-bold text-sm">TOTAL</TableCell>
                     {allProductNames.map(name => (
