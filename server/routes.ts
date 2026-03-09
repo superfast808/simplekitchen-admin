@@ -10,6 +10,24 @@ let syncInterval: ReturnType<typeof setInterval> | null = null;
 let syncInProgress = false;
 let startupTimeout: ReturnType<typeof setTimeout> | null = null;
 
+function buildAddressVariants(raw: string): string[] {
+  const variants: string[] = [raw];
+  let cleaned = raw.replace(/,\s*GB$/i, "").trim();
+  if (cleaned !== raw) variants.push(cleaned);
+  const noFlat = cleaned.replace(/^(Flat|Unit|Apt|Suite)\s+\S+,?\s*/i, "").trim();
+  if (noFlat !== cleaned) variants.push(noFlat);
+  const noSubunit = cleaned.replace(/^\d+\/\d+\s+/i, "").trim();
+  if (noSubunit !== cleaned && !variants.includes(noSubunit)) variants.push(noSubunit);
+  const postcodeMatch = raw.match(/([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})/i);
+  if (postcodeMatch) {
+    const cityMatch = raw.match(/,\s*([^,]+),\s*[A-Z]{1,2}\d/i);
+    const city = cityMatch ? cityMatch[1].trim() : "";
+    if (city) variants.push(`${postcodeMatch[1]}, ${city}`);
+    variants.push(postcodeMatch[1]);
+  }
+  return variants;
+}
+
 function detectFulfillmentType(wooOrder: any): string {
   const shippingLines = wooOrder.shipping_lines || [];
   if (shippingLines.length === 0) return "collection";
@@ -78,13 +96,11 @@ async function performSync() {
 
       const fulfillmentType = detectFulfillmentType(wo);
 
-      const orderData = {
+      const orderData: Record<string, any> = {
         wooId: wo.id,
         customerName,
         customerEmail: billing.email || null,
         deliveryAddress: address || null,
-        deliveryLat: null,
-        deliveryLng: null,
         orderDate: new Date(wo.date_created),
         status: wo.status,
         fulfillmentType,
@@ -92,6 +108,10 @@ async function performSync() {
       };
 
       if (existing) {
+        if (!existing.deliveryLat || !existing.deliveryLng) {
+          orderData.deliveryLat = null;
+          orderData.deliveryLng = null;
+        }
         await storage.updateOrder(existing.id, orderData);
         await storage.deleteOrderItemsByOrderId(existing.id);
         for (const item of wo.line_items || []) {
@@ -106,6 +126,8 @@ async function performSync() {
         }
         updated++;
       } else {
+        orderData.deliveryLat = null;
+        orderData.deliveryLng = null;
         const order = await storage.createOrder(orderData);
         for (const item of wo.line_items || []) {
           const product = await storage.getProductByWooId(item.product_id);
@@ -409,13 +431,11 @@ export async function registerRoutes(
 
         const fulfillmentType = detectFulfillmentType(wo);
 
-        const orderData = {
+        const orderData: Record<string, any> = {
           wooId: wo.id,
           customerName,
           customerEmail: billing.email || null,
           deliveryAddress: address || null,
-          deliveryLat: null,
-          deliveryLng: null,
           orderDate: new Date(wo.date_created),
           status: wo.status,
           fulfillmentType,
@@ -423,6 +443,10 @@ export async function registerRoutes(
         };
 
         if (existing) {
+          if (!existing.deliveryLat || !existing.deliveryLng) {
+            orderData.deliveryLat = null;
+            orderData.deliveryLng = null;
+          }
           await storage.updateOrder(existing.id, orderData);
           await storage.deleteOrderItemsByOrderId(existing.id);
           for (const item of wo.line_items || []) {
@@ -437,6 +461,8 @@ export async function registerRoutes(
           }
           updated++;
         } else {
+          orderData.deliveryLat = null;
+          orderData.deliveryLng = null;
           const order = await storage.createOrder(orderData);
           for (const item of wo.line_items || []) {
             const product = await storage.getProductByWooId(item.product_id);
@@ -513,24 +539,32 @@ export async function registerRoutes(
     try {
       const { address, orderId } = req.body;
       if (!address) return res.status(400).json({ message: "Address is required" });
-      const response = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&limit=1`,
-        { headers: { "User-Agent": "PartnerPortal/1.0" } }
-      );
-      const data = await response.json();
-      if (data && data.length > 0) {
-        const lat = parseFloat(data[0].lat);
-        const lng = parseFloat(data[0].lon);
-        if (orderId) {
-          await storage.updateOrder(parseInt(orderId), {
-            deliveryLat: String(lat),
-            deliveryLng: String(lng),
-          });
+
+      const variants = buildAddressVariants(address);
+      let lat: number | null = null;
+      let lng: number | null = null;
+
+      for (const variant of variants) {
+        const response = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(variant)}&limit=1`,
+          { headers: { "User-Agent": "PartnerPortal/1.0" } }
+        );
+        const data = await response.json();
+        if (data && data.length > 0) {
+          lat = parseFloat(data[0].lat);
+          lng = parseFloat(data[0].lon);
+          break;
         }
-        res.json({ lat, lng });
-      } else {
-        res.json({ lat: null, lng: null });
+        await new Promise(r => setTimeout(r, 1100));
       }
+
+      if (lat !== null && lng !== null && orderId) {
+        await storage.updateOrder(parseInt(orderId), {
+          deliveryLat: String(lat),
+          deliveryLng: String(lng),
+        });
+      }
+      res.json({ lat, lng });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
