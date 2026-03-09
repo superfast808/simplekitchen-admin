@@ -29,6 +29,26 @@ function buildAddressVariants(raw: string): string[] {
   return variants;
 }
 
+function applyAddDeliveryUpgrades(ordersWithItems: Array<{ customerEmail: string | null; customerName: string; fulfillmentType: string | null; items: Array<{ productName: string }> }>): void {
+  const deliveryEmails = new Set<string>();
+  const deliveryNames = new Set<string>();
+  for (const o of ordersWithItems) {
+    const hasAddDelivery = o.items.some(i => i.productName.toLowerCase().includes("add delivery"));
+    if (hasAddDelivery) {
+      if (o.customerEmail) deliveryEmails.add(o.customerEmail.toLowerCase());
+      deliveryNames.add(o.customerName.toLowerCase());
+    }
+  }
+  for (const o of ordersWithItems) {
+    if (o.fulfillmentType === "delivery") continue;
+    const emailMatch = o.customerEmail && deliveryEmails.has(o.customerEmail.toLowerCase());
+    const nameMatch = deliveryNames.has(o.customerName.toLowerCase());
+    if (emailMatch || nameMatch) {
+      o.fulfillmentType = "delivery";
+    }
+  }
+}
+
 function detectFulfillmentType(wooOrder: any): string {
   const shippingLines = wooOrder.shipping_lines || [];
   if (shippingLines.length === 0) return "collection";
@@ -241,6 +261,7 @@ export async function registerRoutes(
           return { ...order, items };
         })
       );
+      applyAddDeliveryUpgrades(ordersWithItems);
       res.json(ordersWithItems);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
@@ -520,7 +541,14 @@ export async function registerRoutes(
       const from = req.query.from ? new Date(req.query.from as string) : undefined;
       const to = req.query.to ? new Date(req.query.to as string) : undefined;
       const ordersList = await storage.getOrders(from, to);
-      const addresses = ordersList
+      const ordersWithItems = await Promise.all(
+        ordersList.map(async (order) => {
+          const items = await storage.getOrderItems(order.id);
+          return { ...order, items };
+        })
+      );
+      applyAddDeliveryUpgrades(ordersWithItems);
+      const addresses = ordersWithItems
         .filter(o => o.deliveryAddress)
         .map(o => ({
           id: o.id,
@@ -629,6 +657,7 @@ export async function registerRoutes(
           return { ...order, items };
         })
       );
+      applyAddDeliveryUpgrades(ordersWithItems);
 
       const allProductNames = Array.from(
         new Set(ordersWithItems.flatMap(o => o.items.map(i => i.productName)))
@@ -689,6 +718,7 @@ export async function registerRoutes(
           return { ...order, items };
         })
       );
+      applyAddDeliveryUpgrades(ordersWithItems);
 
       const PT = 2.83465;
       const pageW = 210 * PT;
