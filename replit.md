@@ -15,7 +15,7 @@ A partner portal for managing food orders from a WooCommerce store. It imports o
 3. **Product Totals** - Date-filterable summary of products ordered (online + manual/shop quantities)
 4. **Ingredient Summary** - Calculates total ingredient quantities needed based on orders
 5. **Manual Stock** - Input quantities for items sold in local shops or non-website orders
-6. **Delivery Routes** - OSM map with geocoded addresses and nearest-neighbor route optimization
+6. **Delivery Routes** - Planned delivery route starting from Unit 33 depot (Glasgow G45 9EE), showing only delivery customers on map with nearest-neighbor optimization; customer breakdown shows delivery/collection counts
 7. **Settings** - Configurable auto-sync interval, sync enable/disable, order window (default: Sat noon to Wed midnight)
 
 ## Data Model

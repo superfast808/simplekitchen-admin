@@ -1,12 +1,19 @@
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useState, useEffect, useRef } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { MapPin, Route, Navigation, Truck, Store } from "lucide-react";
+import { MapPin, Route, Navigation, Truck, Store, Home } from "lucide-react";
 import { DateFilter, DateRangeLabel, useDateFilter } from "@/components/date-filter";
+
+const DEPOT = {
+  customerName: "Unit 33 (Start)",
+  address: "Unit 33, Enterprise Park, 147 Drakemire Dr, Glasgow G45 9EE",
+  lat: 55.8156,
+  lng: -4.2211,
+};
 
 type DeliveryAddress = {
   id: number;
@@ -23,7 +30,6 @@ export default function DeliveryRoutesPage() {
   const mapInstanceRef = useRef<any>(null);
   const [geocodedAddresses, setGeocodedAddresses] = useState<DeliveryAddress[]>([]);
   const [isGeocoding, setIsGeocoding] = useState(false);
-  const [routeOptimized, setRouteOptimized] = useState(false);
 
   const { from, to } = dateFilter;
 
@@ -60,37 +66,42 @@ export default function DeliveryRoutesPage() {
     setIsGeocoding(false);
   }
 
-  const validAddresses = geocodedAddresses.filter(a => a.lat && a.lng);
-
   const deliveryCustomers = geocodedAddresses.filter(a => a.fulfillment === "delivery");
   const collectionCustomers = geocodedAddresses.filter(a => a.fulfillment === "collection");
+  const deliveryStops = deliveryCustomers.filter(a => a.lat && a.lng);
 
   function optimizeRoute(points: DeliveryAddress[]): DeliveryAddress[] {
-    if (points.length <= 2) return points;
+    if (points.length === 0) return [];
     const remaining = [...points];
-    const route: DeliveryAddress[] = [remaining.shift()!];
+    const route: DeliveryAddress[] = [];
+    let lastLat = DEPOT.lat;
+    let lastLng = DEPOT.lng;
 
     while (remaining.length > 0) {
-      const last = route[route.length - 1];
       let closestIdx = 0;
       let closestDist = Infinity;
       for (let i = 0; i < remaining.length; i++) {
         const dist = Math.sqrt(
-          Math.pow((remaining[i].lat! - last.lat!), 2) +
-          Math.pow((remaining[i].lng! - last.lng!), 2)
+          Math.pow((remaining[i].lat! - lastLat), 2) +
+          Math.pow((remaining[i].lng! - lastLng), 2)
         );
         if (dist < closestDist) {
           closestDist = dist;
           closestIdx = i;
         }
       }
-      route.push(remaining.splice(closestIdx, 1)[0]);
+      const next = remaining.splice(closestIdx, 1)[0];
+      route.push(next);
+      lastLat = next.lat!;
+      lastLng = next.lng!;
     }
     return route;
   }
 
+  const routeStops = optimizeRoute(deliveryStops);
+
   useEffect(() => {
-    if (!mapRef.current || validAddresses.length === 0) return;
+    if (!mapRef.current) return;
 
     const loadMap = async () => {
       if (!document.querySelector('link[href*="leaflet"]')) {
@@ -114,28 +125,43 @@ export default function DeliveryRoutesPage() {
         mapInstanceRef.current.remove();
       }
 
-      const map = L.map(mapRef.current).setView([validAddresses[0].lat!, validAddresses[0].lng!], 11);
+      const map = L.map(mapRef.current).setView([DEPOT.lat, DEPOT.lng], 11);
       mapInstanceRef.current = map;
 
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
       }).addTo(map);
 
-      const displayOrder = routeOptimized ? optimizeRoute([...validAddresses]) : validAddresses;
       const bounds: [number, number][] = [];
 
-      displayOrder.forEach((addr, idx) => {
-        const marker = L.marker([addr.lat!, addr.lng!]).addTo(map);
-        const typeLabel = addr.fulfillment === "delivery" ? "Delivery" : "Collection";
-        marker.bindPopup(`<strong>${idx + 1}. ${addr.customerName}</strong><br/>${addr.address}<br/><em>${typeLabel}</em>`);
+      const depotIcon = L.divIcon({
+        html: '<div style="background:#16a34a;color:white;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:14px;border:2px solid white;box-shadow:0 2px 4px rgba(0,0,0,0.3);">S</div>',
+        className: '',
+        iconSize: [28, 28],
+        iconAnchor: [14, 14],
+      });
+      const depotMarker = L.marker([DEPOT.lat, DEPOT.lng], { icon: depotIcon }).addTo(map);
+      depotMarker.bindPopup(`<strong>Start: ${DEPOT.customerName}</strong><br/>${DEPOT.address}`);
+      bounds.push([DEPOT.lat, DEPOT.lng]);
+
+      routeStops.forEach((addr, idx) => {
+        const stopIcon = L.divIcon({
+          html: `<div style="background:#2563eb;color:white;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:12px;border:2px solid white;box-shadow:0 2px 4px rgba(0,0,0,0.3);">${idx + 1}</div>`,
+          className: '',
+          iconSize: [24, 24],
+          iconAnchor: [12, 12],
+        });
+        const marker = L.marker([addr.lat!, addr.lng!], { icon: stopIcon }).addTo(map);
+        marker.bindPopup(`<strong>${idx + 1}. ${addr.customerName}</strong><br/>${addr.address}`);
         bounds.push([addr.lat!, addr.lng!]);
       });
 
-      if (displayOrder.length > 1) {
-        const polyline = L.polyline(
-          displayOrder.map(a => [a.lat!, a.lng!]),
-          { color: "hsl(142, 76%, 36%)", weight: 3, opacity: 0.7, dashArray: routeOptimized ? undefined : "10, 10" }
-        ).addTo(map);
+      if (routeStops.length > 0) {
+        const routeCoords: [number, number][] = [
+          [DEPOT.lat, DEPOT.lng],
+          ...routeStops.map(a => [a.lat!, a.lng!] as [number, number]),
+        ];
+        L.polyline(routeCoords, { color: "#2563eb", weight: 3, opacity: 0.7 }).addTo(map);
       }
 
       if (bounds.length > 0) {
@@ -151,28 +177,17 @@ export default function DeliveryRoutesPage() {
         mapInstanceRef.current = null;
       }
     };
-  }, [validAddresses, routeOptimized]);
+  }, [routeStops]);
 
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight" data-testid="text-routes-title">Delivery Routes</h1>
+          <h1 className="text-2xl font-semibold tracking-tight" data-testid="text-routes-title">Planned Delivery Route</h1>
           <DateRangeLabel from={from} to={to} />
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <DateFilter {...dateFilter} testIdPrefix="route" />
-          {validAddresses.length > 1 && (
-            <Button
-              size="sm"
-              variant={routeOptimized ? "default" : "outline"}
-              onClick={() => setRouteOptimized(!routeOptimized)}
-              data-testid="button-optimize-route"
-            >
-              <Navigation className="w-4 h-4 mr-1" />
-              {routeOptimized ? "Optimized Route" : "Optimize Route"}
-            </Button>
-          )}
         </div>
       </div>
 
@@ -259,12 +274,12 @@ export default function DeliveryRoutesPage() {
                     </p>
                   </div>
                 </div>
-              ) : validAddresses.length === 0 ? (
+              ) : deliveryStops.length === 0 ? (
                 <div className="h-[500px] flex items-center justify-center">
                   <div className="text-center">
-                    <MapPin className="w-12 h-12 mx-auto text-muted-foreground/40 mb-3" />
-                    <p className="text-muted-foreground font-medium">No delivery addresses to map</p>
-                    <p className="text-sm text-muted-foreground mt-1">Sync orders with delivery addresses to see the route</p>
+                    <Truck className="w-12 h-12 mx-auto text-muted-foreground/40 mb-3" />
+                    <p className="text-muted-foreground font-medium">No delivery stops to map</p>
+                    <p className="text-sm text-muted-foreground mt-1">Only delivery orders appear on this route</p>
                   </div>
                 </div>
               ) : (
@@ -279,39 +294,47 @@ export default function DeliveryRoutesPage() {
             <CardContent className="p-4">
               <h3 className="text-sm font-medium mb-3 flex items-center gap-2">
                 <Route className="w-4 h-4" />
-                Delivery Stops
-                <Badge variant="secondary">{validAddresses.length}</Badge>
+                Planned Route
+                <Badge variant="secondary">{routeStops.length} stops</Badge>
               </h3>
               {isLoading ? (
                 <div className="space-y-2">
                   {[1, 2, 3].map(i => <Skeleton key={i} className="h-14 w-full" />)}
                 </div>
-              ) : validAddresses.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No stops to display</p>
               ) : (
                 <div className="space-y-2 max-h-[440px] overflow-y-auto">
-                  {(routeOptimized ? optimizeRoute([...validAddresses]) : validAddresses).map((addr, idx) => (
-                    <div
-                      key={addr.id}
-                      className="flex items-start gap-3 p-2 rounded-md bg-muted/50"
-                      data-testid={`card-stop-${addr.id}`}
-                    >
-                      <div className="flex items-center justify-center w-6 h-6 rounded-full bg-primary text-primary-foreground text-xs font-medium flex-shrink-0 mt-0.5">
-                        {idx + 1}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5">
-                          <p className="text-sm font-medium truncate" data-testid={`text-stop-name-${addr.id}`}>{addr.customerName}</p>
-                          {addr.fulfillment === "delivery" ? (
-                            <Badge variant="default" className="text-[10px] px-1 py-0 bg-blue-600 flex-shrink-0">Delivery</Badge>
-                          ) : (
-                            <Badge variant="outline" className="text-[10px] px-1 py-0 flex-shrink-0">Collection</Badge>
-                          )}
-                        </div>
-                        <p className="text-xs text-muted-foreground truncate" data-testid={`text-stop-address-${addr.id}`}>{addr.address}</p>
-                      </div>
+                  <div
+                    className="flex items-start gap-3 p-2 rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800"
+                    data-testid="card-stop-depot"
+                  >
+                    <div className="flex items-center justify-center w-6 h-6 rounded-full bg-green-600 text-white text-xs font-bold flex-shrink-0 mt-0.5">
+                      S
                     </div>
-                  ))}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium" data-testid="text-stop-depot-name">Unit 33 (Start)</p>
+                      <p className="text-xs text-muted-foreground truncate">Enterprise Park, 147 Drakemire Dr, Glasgow G45 9EE</p>
+                    </div>
+                  </div>
+
+                  {routeStops.length === 0 ? (
+                    <p className="text-sm text-muted-foreground py-2">No delivery stops for this period</p>
+                  ) : (
+                    routeStops.map((addr, idx) => (
+                      <div
+                        key={addr.id}
+                        className="flex items-start gap-3 p-2 rounded-md bg-muted/50"
+                        data-testid={`card-stop-${addr.id}`}
+                      >
+                        <div className="flex items-center justify-center w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-medium flex-shrink-0 mt-0.5">
+                          {idx + 1}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium truncate" data-testid={`text-stop-name-${addr.id}`}>{addr.customerName}</p>
+                          <p className="text-xs text-muted-foreground truncate" data-testid={`text-stop-address-${addr.id}`}>{addr.address}</p>
+                        </div>
+                      </div>
+                    ))
+                  )}
                 </div>
               )}
             </CardContent>
