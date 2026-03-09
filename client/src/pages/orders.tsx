@@ -1,0 +1,297 @@
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { queryClient, apiRequest } from "@/lib/queryClient";
+import { format, startOfWeek, endOfWeek, addWeeks, subWeeks } from "date-fns";
+import { useState } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { RefreshCw, ChevronLeft, ChevronRight, Trash2, Plus, ShoppingCart } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import type { Order, OrderItem } from "@shared/schema";
+
+type OrderWithItems = Order & { items: OrderItem[] };
+
+export default function OrdersPage() {
+  const { toast } = useToast();
+  const [weekOffset, setWeekOffset] = useState(0);
+  const [showManualDialog, setShowManualDialog] = useState(false);
+
+  const now = new Date();
+  const currentWeekStart = startOfWeek(addWeeks(now, weekOffset), { weekStartsOn: 1 });
+  const currentWeekEnd = endOfWeek(addWeeks(now, weekOffset), { weekStartsOn: 1 });
+
+  const { data: orders, isLoading } = useQuery<OrderWithItems[]>({
+    queryKey: ["/api/orders", `?from=${currentWeekStart.toISOString()}&to=${currentWeekEnd.toISOString()}`],
+  });
+
+  const syncMutation = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/woo/sync-orders"),
+    onSuccess: async (res) => {
+      const data = await res.json();
+      toast({ title: "Orders synced", description: `Imported: ${data.imported}, Updated: ${data.updated}` });
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Sync failed", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => apiRequest("DELETE", `/api/orders/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      toast({ title: "Order deleted" });
+    },
+  });
+
+  const allProductNames = Array.from(new Set((orders || []).flatMap(o => o.items.map(i => i.productName)))).sort();
+
+  const statusColor = (status: string) => {
+    switch (status) {
+      case "completed": return "default";
+      case "processing": return "secondary";
+      case "on-hold": return "outline";
+      default: return "secondary";
+    }
+  };
+
+  return (
+    <div className="p-6 space-y-6 max-w-full">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight" data-testid="text-page-title">Orders</h1>
+          <p className="text-sm text-muted-foreground">
+            {format(currentWeekStart, "MMM d")} - {format(currentWeekEnd, "MMM d, yyyy")}
+          </p>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1">
+            <Button size="icon" variant="ghost" onClick={() => setWeekOffset(w => w - 1)} data-testid="button-prev-week">
+              <ChevronLeft className="w-4 h-4" />
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setWeekOffset(0)} data-testid="button-this-week">This Week</Button>
+            <Button size="icon" variant="ghost" onClick={() => setWeekOffset(w => w + 1)} data-testid="button-next-week">
+              <ChevronRight className="w-4 h-4" />
+            </Button>
+          </div>
+          <Button size="sm" onClick={() => syncMutation.mutate()} disabled={syncMutation.isPending} data-testid="button-sync-orders">
+            <RefreshCw className={`w-4 h-4 mr-1 ${syncMutation.isPending ? "animate-spin" : ""}`} />
+            Sync from Woo
+          </Button>
+          <ManualOrderDialog open={showManualDialog} onOpenChange={setShowManualDialog} />
+        </div>
+      </div>
+
+      <Card>
+        <CardContent className="p-0">
+          {isLoading ? (
+            <div className="p-6 space-y-3">
+              {[1, 2, 3].map(i => <Skeleton key={i} className="h-12 w-full" />)}
+            </div>
+          ) : !orders || orders.length === 0 ? (
+            <div className="p-12 text-center">
+              <ShoppingCart className="w-12 h-12 mx-auto text-muted-foreground/40 mb-3" />
+              <p className="text-muted-foreground font-medium">No orders for this week</p>
+              <p className="text-sm text-muted-foreground mt-1">Sync from WooCommerce or add a manual order</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="min-w-[140px]">Customer</TableHead>
+                    {allProductNames.map(name => (
+                      <TableHead key={name} className="text-center min-w-[80px]">{name}</TableHead>
+                    ))}
+                    <TableHead className="min-w-[200px]">Delivery Address</TableHead>
+                    <TableHead className="w-[80px]">Status</TableHead>
+                    <TableHead className="w-[50px]"></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {orders.map((order) => (
+                    <TableRow key={order.id} data-testid={`row-order-${order.id}`}>
+                      <TableCell className="font-medium">
+                        <div>
+                          <span data-testid={`text-customer-${order.id}`}>{order.customerName}</span>
+                          {order.isManual && (
+                            <Badge variant="outline" className="ml-2 text-xs">Manual</Badge>
+                          )}
+                        </div>
+                        <span className="text-xs text-muted-foreground">
+                          {format(new Date(order.orderDate), "EEE, MMM d")}
+                        </span>
+                      </TableCell>
+                      {allProductNames.map(name => {
+                        const item = order.items.find(i => i.productName === name);
+                        return (
+                          <TableCell key={name} className="text-center">
+                            {item ? (
+                              <span className="font-medium" data-testid={`text-qty-${order.id}-${name}`}>{item.quantity}</span>
+                            ) : (
+                              <span className="text-muted-foreground/30">-</span>
+                            )}
+                          </TableCell>
+                        );
+                      })}
+                      <TableCell>
+                        <span className="text-sm" data-testid={`text-address-${order.id}`}>
+                          {order.deliveryAddress || "No address"}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={statusColor(order.status)} data-testid={`badge-status-${order.id}`}>
+                          {order.status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => deleteMutation.mutate(order.id)}
+                          data-testid={`button-delete-order-${order.id}`}
+                        >
+                          <Trash2 className="w-4 h-4 text-muted-foreground" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+  const { toast } = useToast();
+  const [customerName, setCustomerName] = useState("");
+  const [address, setAddress] = useState("");
+  const [itemLines, setItemLines] = useState([{ productName: "", quantity: 1 }]);
+
+  const { data: products } = useQuery<any[]>({ queryKey: ["/api/products"] });
+
+  const createMutation = useMutation({
+    mutationFn: (data: any) => apiRequest("POST", "/api/orders", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      toast({ title: "Manual order created" });
+      onOpenChange(false);
+      setCustomerName("");
+      setAddress("");
+      setItemLines([{ productName: "", quantity: 1 }]);
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to create order", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const handleSubmit = () => {
+    const validItems = itemLines.filter(i => i.productName.trim());
+    if (!customerName.trim() || validItems.length === 0) {
+      toast({ title: "Please fill in customer name and at least one item", variant: "destructive" });
+      return;
+    }
+    createMutation.mutate({
+      customerName,
+      deliveryAddress: address || null,
+      items: validItems.map(i => ({
+        productName: i.productName,
+        quantity: i.quantity,
+        productId: products?.find(p => p.name === i.productName)?.id || null,
+      })),
+    });
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogTrigger asChild>
+        <Button size="sm" variant="outline" data-testid="button-add-manual-order">
+          <Plus className="w-4 h-4 mr-1" />
+          Manual Order
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Add Manual Order</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div>
+            <Label>Customer Name</Label>
+            <Input
+              value={customerName}
+              onChange={(e) => setCustomerName(e.target.value)}
+              placeholder="Customer name"
+              data-testid="input-manual-customer"
+            />
+          </div>
+          <div>
+            <Label>Delivery Address</Label>
+            <Input
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
+              placeholder="Delivery address (optional)"
+              data-testid="input-manual-address"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Items</Label>
+            {itemLines.map((line, idx) => (
+              <div key={idx} className="flex gap-2">
+                <Input
+                  value={line.productName}
+                  onChange={(e) => {
+                    const newLines = [...itemLines];
+                    newLines[idx].productName = e.target.value;
+                    setItemLines(newLines);
+                  }}
+                  placeholder="Product name"
+                  className="flex-1"
+                  list="product-suggestions"
+                  data-testid={`input-manual-item-${idx}`}
+                />
+                <Input
+                  type="number"
+                  value={line.quantity}
+                  onChange={(e) => {
+                    const newLines = [...itemLines];
+                    newLines[idx].quantity = parseInt(e.target.value) || 1;
+                    setItemLines(newLines);
+                  }}
+                  className="w-20"
+                  min={1}
+                  data-testid={`input-manual-qty-${idx}`}
+                />
+              </div>
+            ))}
+            <datalist id="product-suggestions">
+              {(products || []).map(p => (
+                <option key={p.id} value={p.name} />
+              ))}
+            </datalist>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setItemLines([...itemLines, { productName: "", quantity: 1 }])}
+              data-testid="button-add-item-line"
+            >
+              <Plus className="w-3 h-3 mr-1" />
+              Add Item
+            </Button>
+          </div>
+          <Button onClick={handleSubmit} disabled={createMutation.isPending} className="w-full" data-testid="button-submit-manual-order">
+            {createMutation.isPending ? "Creating..." : "Create Order"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}

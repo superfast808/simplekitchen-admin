@@ -1,0 +1,60 @@
+const WC_STORE_URL = process.env.WC_STORE_URL || "";
+const WC_CONSUMER_KEY = process.env.WC_CONSUMER_KEY || "";
+const WC_CONSUMER_SECRET = process.env.WC_CONSUMER_SECRET || "";
+
+function getAuthParams(): string {
+  return `consumer_key=${encodeURIComponent(WC_CONSUMER_KEY)}&consumer_secret=${encodeURIComponent(WC_CONSUMER_SECRET)}`;
+}
+
+function buildUrl(endpoint: string, params: Record<string, string> = {}): string {
+  const base = WC_STORE_URL.replace(/\/+$/, "");
+  const queryParts = [getAuthParams()];
+  for (const [key, value] of Object.entries(params)) {
+    queryParts.push(`${encodeURIComponent(key)}=${encodeURIComponent(value)}`);
+  }
+  return `${base}/wp-json/wc/v3/${endpoint}?${queryParts.join("&")}`;
+}
+
+export async function fetchWooOrders(params: Record<string, string> = {}): Promise<any[]> {
+  const allOrders: any[] = [];
+  let page = 1;
+  const perPage = "100";
+
+  while (true) {
+    const url = buildUrl("orders", { ...params, per_page: perPage, page: String(page) });
+    const response = await fetch(url);
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`WooCommerce API error (${response.status}): ${text}`);
+    }
+    const orders = await response.json();
+    if (!Array.isArray(orders) || orders.length === 0) break;
+    allOrders.push(...orders);
+    if (orders.length < parseInt(perPage)) break;
+    page++;
+  }
+
+  return allOrders;
+}
+
+export async function fetchWooProducts(params: Record<string, string> = {}): Promise<any[]> {
+  const allProducts: any[] = [];
+  let page = 1;
+  const perPage = "100";
+
+  while (true) {
+    const url = buildUrl("products", { ...params, per_page: perPage, page: String(page) });
+    const response = await fetch(url);
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`WooCommerce API error (${response.status}): ${text}`);
+    }
+    const products = await response.json();
+    if (!Array.isArray(products) || products.length === 0) break;
+    allProducts.push(...products);
+    if (products.length < parseInt(perPage)) break;
+    page++;
+  }
+
+  return allProducts;
+}

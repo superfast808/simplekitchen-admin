@@ -1,0 +1,65 @@
+import { Package, ShoppingCart, ChefHat, MapPin, BarChart3, Plus } from "lucide-react";
+import { Link, useLocation } from "wouter";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarHeader,
+  SidebarFooter,
+} from "@/components/ui/sidebar";
+
+const menuItems = [
+  { title: "Orders", url: "/", icon: ShoppingCart },
+  { title: "Products", url: "/products", icon: Package },
+  { title: "Product Totals", url: "/product-totals", icon: BarChart3 },
+  { title: "Ingredients", url: "/ingredients", icon: ChefHat },
+  { title: "Manual Stock", url: "/manual-stock", icon: Plus },
+  { title: "Delivery Routes", url: "/routes", icon: MapPin },
+];
+
+export function AppSidebar() {
+  const [location] = useLocation();
+
+  return (
+    <Sidebar>
+      <SidebarHeader className="p-4">
+        <div className="flex items-center gap-2">
+          <div className="flex items-center justify-center w-8 h-8 rounded-md bg-primary">
+            <Package className="w-4 h-4 text-primary-foreground" />
+          </div>
+          <div>
+            <h2 className="text-sm font-semibold" data-testid="text-app-title">Partner Portal</h2>
+            <p className="text-xs text-muted-foreground">WooCommerce Manager</p>
+          </div>
+        </div>
+      </SidebarHeader>
+      <SidebarContent>
+        <SidebarGroup>
+          <SidebarGroupLabel>Navigation</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {menuItems.map((item) => (
+                <SidebarMenuItem key={item.title}>
+                  <SidebarMenuButton asChild data-active={location === item.url}>
+                    <Link href={item.url} data-testid={`link-nav-${item.title.toLowerCase().replace(/\s+/g, "-")}`}>
+                      <item.icon />
+                      <span>{item.title}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      </SidebarContent>
+      <SidebarFooter className="p-4">
+        <p className="text-xs text-muted-foreground">Syncs with WooCommerce</p>
+      </SidebarFooter>
+    </Sidebar>
+  );
+}

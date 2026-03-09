@@ -1,16 +1,379 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
+import { fetchWooOrders, fetchWooProducts } from "./woocommerce";
+import { insertProductSchema, insertIngredientSchema, insertOrderSchema, insertOrderItemSchema, insertManualQuantitySchema } from "@shared/schema";
 
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  // put application routes here
-  // prefix all routes with /api
 
-  // use storage to perform CRUD operations on the storage interface
-  // e.g. storage.insertUser(user) or storage.getUserByUsername(username)
+  app.get("/api/products", async (_req, res) => {
+    try {
+      const products = await storage.getProducts();
+      res.json(products);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/products/:id", async (req, res) => {
+    try {
+      const product = await storage.getProduct(parseInt(req.params.id));
+      if (!product) return res.status(404).json({ message: "Product not found" });
+      res.json(product);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/products/:id/ingredients", async (req, res) => {
+    try {
+      const ingredientsList = await storage.getIngredients(parseInt(req.params.id));
+      res.json(ingredientsList);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/products/:id/ingredients", async (req, res) => {
+    try {
+      const productId = parseInt(req.params.id);
+      const ingredientsList = req.body.ingredients as Array<{ name: string; quantityPerUnit: string; unit: string }>;
+      await storage.deleteIngredientsByProductId(productId);
+      const created = [];
+      for (const ing of ingredientsList) {
+        const result = await storage.createIngredient({
+          productId,
+          name: ing.name,
+          quantityPerUnit: ing.quantityPerUnit,
+          unit: ing.unit,
+        });
+        created.push(result);
+      }
+      res.json(created);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/orders", async (req, res) => {
+    try {
+      const from = req.query.from ? new Date(req.query.from as string) : undefined;
+      const to = req.query.to ? new Date(req.query.to as string) : undefined;
+      const ordersList = await storage.getOrders(from, to);
+      const ordersWithItems = await Promise.all(
+        ordersList.map(async (order) => {
+          const items = await storage.getOrderItems(order.id);
+          return { ...order, items };
+        })
+      );
+      res.json(ordersWithItems);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/orders", async (req, res) => {
+    try {
+      const { items, ...orderData } = req.body;
+      if (!orderData.customerName || typeof orderData.customerName !== "string") {
+        return res.status(400).json({ message: "Customer name is required" });
+      }
+      const order = await storage.createOrder({
+        ...orderData,
+        isManual: true,
+        orderDate: orderData.orderDate ? new Date(orderData.orderDate) : new Date(),
+      });
+      if (items && Array.isArray(items)) {
+        for (const item of items) {
+          await storage.createOrderItem({
+            orderId: order.id,
+            productId: item.productId || null,
+            productName: item.productName,
+            quantity: item.quantity,
+            price: item.price || "0",
+          });
+        }
+      }
+      const orderItems = await storage.getOrderItems(order.id);
+      res.json({ ...order, items: orderItems });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/orders/:id", async (req, res) => {
+    try {
+      await storage.deleteOrder(parseInt(req.params.id));
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/order-items", async (req, res) => {
+    try {
+      const from = req.query.from ? new Date(req.query.from as string) : undefined;
+      const to = req.query.to ? new Date(req.query.to as string) : undefined;
+      const items = await storage.getOrderItemsByDateRange(from, to);
+      res.json(items);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/product-totals", async (req, res) => {
+    try {
+      const from = req.query.from ? new Date(req.query.from as string) : undefined;
+      const to = req.query.to ? new Date(req.query.to as string) : undefined;
+      const items = await storage.getOrderItemsByDateRange(from, to);
+      const manualQtys = await storage.getManualQuantities(from, to);
+
+      const totals: Record<string, { productName: string; productId: number | null; totalOrdered: number; manualQuantity: number }> = {};
+      for (const item of items) {
+        const key = item.productName;
+        if (!totals[key]) {
+          totals[key] = { productName: key, productId: item.productId, totalOrdered: 0, manualQuantity: 0 };
+        }
+        totals[key].totalOrdered += item.quantity;
+      }
+      for (const mq of manualQtys) {
+        const product = await storage.getProduct(mq.productId);
+        if (product) {
+          const key = product.name;
+          if (!totals[key]) {
+            totals[key] = { productName: key, productId: product.id, totalOrdered: 0, manualQuantity: 0 };
+          }
+          totals[key].manualQuantity += mq.quantity;
+        }
+      }
+
+      res.json(Object.values(totals));
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/ingredient-summary", async (req, res) => {
+    try {
+      const from = req.query.from ? new Date(req.query.from as string) : undefined;
+      const to = req.query.to ? new Date(req.query.to as string) : undefined;
+      const items = await storage.getOrderItemsByDateRange(from, to);
+      const manualQtys = await storage.getManualQuantities(from, to);
+      const allIngredients = await storage.getAllIngredients();
+
+      const productQuantities: Record<number, number> = {};
+      for (const item of items) {
+        if (item.productId) {
+          productQuantities[item.productId] = (productQuantities[item.productId] || 0) + item.quantity;
+        }
+      }
+      for (const mq of manualQtys) {
+        productQuantities[mq.productId] = (productQuantities[mq.productId] || 0) + mq.quantity;
+      }
+
+      const summary: Record<string, { name: string; totalQuantity: number; unit: string }> = {};
+      for (const ingredient of allIngredients) {
+        const productQty = productQuantities[ingredient.productId] || 0;
+        if (productQty > 0) {
+          const key = `${ingredient.name}_${ingredient.unit}`;
+          const needed = productQty * parseFloat(ingredient.quantityPerUnit);
+          if (!summary[key]) {
+            summary[key] = { name: ingredient.name, totalQuantity: 0, unit: ingredient.unit };
+          }
+          summary[key].totalQuantity += needed;
+        }
+      }
+
+      res.json(Object.values(summary).sort((a, b) => a.name.localeCompare(b.name)));
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/manual-quantities", async (req, res) => {
+    try {
+      const from = req.query.from ? new Date(req.query.from as string) : undefined;
+      const to = req.query.to ? new Date(req.query.to as string) : undefined;
+      const quantities = await storage.getManualQuantities(from, to);
+      res.json(quantities);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/manual-quantities", async (req, res) => {
+    try {
+      const { productId, quantity } = req.body;
+      if (!productId || !quantity || typeof quantity !== "number" || quantity < 1) {
+        return res.status(400).json({ message: "Valid productId and quantity (>= 1) are required" });
+      }
+      const mq = await storage.createManualQuantity({
+        productId,
+        quantity,
+        date: req.body.date ? new Date(req.body.date) : new Date(),
+        note: req.body.note || null,
+      });
+      res.json(mq);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/manual-quantities/:id", async (req, res) => {
+    try {
+      await storage.deleteManualQuantity(parseInt(req.params.id));
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/woo/sync-orders", async (_req, res) => {
+    try {
+      const wooOrders = await fetchWooOrders({ status: "processing,completed,on-hold" });
+      let imported = 0;
+      let updated = 0;
+
+      for (const wo of wooOrders) {
+        const existing = await storage.getOrderByWooId(wo.id);
+        const shipping = wo.shipping || {};
+        const billing = wo.billing || {};
+        const customerName = `${shipping.first_name || billing.first_name || ""} ${shipping.last_name || billing.last_name || ""}`.trim() || "Unknown";
+        const address = [
+          shipping.address_1 || billing.address_1,
+          shipping.address_2 || billing.address_2,
+          shipping.city || billing.city,
+          shipping.postcode || billing.postcode,
+          shipping.country || billing.country,
+        ].filter(Boolean).join(", ");
+
+        const orderData = {
+          wooId: wo.id,
+          customerName,
+          customerEmail: billing.email || null,
+          deliveryAddress: address || null,
+          deliveryLat: null,
+          deliveryLng: null,
+          orderDate: new Date(wo.date_created),
+          status: wo.status,
+          isManual: false,
+        };
+
+        if (existing) {
+          await storage.updateOrder(existing.id, orderData);
+          await storage.deleteOrderItemsByOrderId(existing.id);
+          for (const item of wo.line_items || []) {
+            const product = await storage.getProductByWooId(item.product_id);
+            await storage.createOrderItem({
+              orderId: existing.id,
+              productId: product?.id || null,
+              productName: item.name,
+              quantity: item.quantity,
+              price: String(item.total || "0"),
+            });
+          }
+          updated++;
+        } else {
+          const order = await storage.createOrder(orderData);
+          for (const item of wo.line_items || []) {
+            const product = await storage.getProductByWooId(item.product_id);
+            await storage.createOrderItem({
+              orderId: order.id,
+              productId: product?.id || null,
+              productName: item.name,
+              quantity: item.quantity,
+              price: String(item.total || "0"),
+            });
+          }
+          imported++;
+        }
+      }
+
+      res.json({ imported, updated, total: wooOrders.length });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/woo/sync-products", async (_req, res) => {
+    try {
+      const wooProducts = await fetchWooProducts({ status: "publish" });
+      let imported = 0;
+      let updated = 0;
+
+      for (const wp of wooProducts) {
+        const existing = await storage.getProductByWooId(wp.id);
+        const productData = {
+          wooId: wp.id,
+          name: wp.name,
+          price: String(wp.price || "0"),
+          imageUrl: wp.images?.[0]?.src || null,
+        };
+
+        if (existing) {
+          await storage.updateProduct(existing.id, productData);
+          updated++;
+        } else {
+          await storage.createProduct(productData);
+          imported++;
+        }
+      }
+
+      res.json({ imported, updated, total: wooProducts.length });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/delivery-addresses", async (req, res) => {
+    try {
+      const from = req.query.from ? new Date(req.query.from as string) : undefined;
+      const to = req.query.to ? new Date(req.query.to as string) : undefined;
+      const ordersList = await storage.getOrders(from, to);
+      const addresses = ordersList
+        .filter(o => o.deliveryAddress)
+        .map(o => ({
+          id: o.id,
+          customerName: o.customerName,
+          address: o.deliveryAddress,
+          lat: o.deliveryLat ? parseFloat(o.deliveryLat) : null,
+          lng: o.deliveryLng ? parseFloat(o.deliveryLng) : null,
+        }));
+      res.json(addresses);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/geocode", async (req, res) => {
+    try {
+      const { address, orderId } = req.body;
+      if (!address) return res.status(400).json({ message: "Address is required" });
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&limit=1`,
+        { headers: { "User-Agent": "PartnerPortal/1.0" } }
+      );
+      const data = await response.json();
+      if (data && data.length > 0) {
+        const lat = parseFloat(data[0].lat);
+        const lng = parseFloat(data[0].lon);
+        if (orderId) {
+          await storage.updateOrder(parseInt(orderId), {
+            deliveryLat: String(lat),
+            deliveryLng: String(lng),
+          });
+        }
+        res.json({ lat, lng });
+      } else {
+        res.json({ lat: null, lng: null });
+      }
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
 
   return httpServer;
 }
