@@ -868,10 +868,18 @@ export async function registerRoutes(
         doc.save();
         doc.rect(marginLeft + col * labelW, marginTop + row * labelH, labelW, labelH).clip();
 
+        const isDelivery = order.fulfillmentType === "delivery";
+        const tag = isDelivery ? "DELIVERY" : "COLLECTION";
+
         doc.font("Helvetica-Bold").fontSize(11);
         doc.text(order.customerName, x, y, { width: contentW, lineBreak: true });
 
-        let currentY = doc.y + 2;
+        let currentY = doc.y + 1;
+
+        doc.font("Helvetica-Bold").fontSize(7);
+        const tagText = `[ ${tag} ]`;
+        doc.text(tagText, x, currentY, { width: contentW });
+        currentY = doc.y + 2;
 
         if (order.deliveryAddress) {
           doc.font("Helvetica").fontSize(8);
