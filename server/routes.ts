@@ -5,7 +5,11 @@ import { fetchWooOrders, fetchWooProducts, decodeHtmlEntities } from "./woocomme
 import { insertProductSchema, insertIngredientSchema, insertOrderSchema, insertOrderItemSchema, insertManualQuantitySchema } from "@shared/schema";
 import * as XLSX from "xlsx";
 import PDFDocument from "pdfkit";
+import multer from "multer";
+import bcrypt from "bcrypt";
 import { log } from "./index";
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
 let syncInterval: ReturnType<typeof setInterval> | null = null;
 let syncInProgress = false;
@@ -200,6 +204,114 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+
+  const userCount = await storage.countUsers();
+  if (userCount === 0) {
+    const hashedPassword = await bcrypt.hash("admin", 10);
+    await storage.createUser({ username: "admin", password: hashedPassword });
+    log("Created default admin user (username: admin)", "auth");
+  }
+
+  app.post("/api/auth/login", async (req, res) => {
+    try {
+      const { username, password } = req.body;
+      if (!username || !password) {
+        return res.status(400).json({ message: "Username and password are required" });
+      }
+      const user = await storage.getUserByUsername(username);
+      if (!user) {
+        return res.status(401).json({ message: "Invalid credentials" });
+      }
+      const valid = await bcrypt.compare(password, user.password);
+      if (!valid) {
+        return res.status(401).json({ message: "Invalid credentials" });
+      }
+      req.session.regenerate((err) => {
+        if (err) {
+          return res.status(500).json({ message: "Session error" });
+        }
+        req.session.userId = user.id;
+        req.session.save(() => {
+          res.json({ id: user.id, username: user.username });
+        });
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/auth/logout", (req, res) => {
+    req.session.destroy(() => {
+      res.json({ message: "Logged out" });
+    });
+  });
+
+  app.get("/api/auth/logo", async (_req, res) => {
+    try {
+      const logo = await storage.getSetting("logo");
+      if (logo) {
+        res.json({ logo });
+      } else {
+        res.status(404).json({ logo: null });
+      }
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/auth/me", async (req, res) => {
+    if (!req.session.userId) {
+      return res.status(401).json({ message: "Not authenticated" });
+    }
+    const user = await storage.getUserById(req.session.userId);
+    if (!user) {
+      return res.status(401).json({ message: "User not found" });
+    }
+    res.json({ id: user.id, username: user.username });
+  });
+
+  app.get("/api/users", async (_req, res) => {
+    try {
+      const usersList = await storage.getUsers();
+      res.json(usersList.map(u => ({ id: u.id, username: u.username })));
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/users", async (req, res) => {
+    try {
+      const { username, password } = req.body;
+      if (!username || !password) {
+        return res.status(400).json({ message: "Username and password are required" });
+      }
+      if (password.length < 4) {
+        return res.status(400).json({ message: "Password must be at least 4 characters" });
+      }
+      const existing = await storage.getUserByUsername(username);
+      if (existing) {
+        return res.status(409).json({ message: "Username already exists" });
+      }
+      const hashedPassword = await bcrypt.hash(password, 10);
+      const user = await storage.createUser({ username, password: hashedPassword });
+      res.json({ id: user.id, username: user.username });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/users/:id", async (req, res) => {
+    try {
+      const count = await storage.countUsers();
+      if (count <= 1) {
+        return res.status(400).json({ message: "Cannot delete the last user" });
+      }
+      await storage.deleteUser(req.params.id);
+      res.json({ message: "User deleted" });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
 
   app.get("/api/products", async (_req, res) => {
     try {
@@ -798,6 +910,40 @@ export async function registerRoutes(
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `attachment; filename="labels_${dateLabel}.pdf"`);
       res.send(pdfBuf);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/settings/logo", upload.single("logo"), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: "No file uploaded" });
+      }
+      const base64 = `data:${req.file.mimetype};base64,${req.file.buffer.toString("base64")}`;
+      await storage.setSetting("logo", base64);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/settings/logo", async (_req, res) => {
+    try {
+      const logo = await storage.getSetting("logo");
+      if (!logo) {
+        return res.status(404).json({ message: "No logo set" });
+      }
+      res.json({ logo });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/settings/logo", async (_req, res) => {
+    try {
+      await storage.setSetting("logo", "");
+      res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }

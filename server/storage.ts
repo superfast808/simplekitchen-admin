@@ -1,13 +1,13 @@
 import { db } from "./db";
 import { eq, gte, lte, and, sql } from "drizzle-orm";
 import {
-  products, ingredients, orders, orderItems, manualQuantities, settings,
+  products, ingredients, orders, orderItems, manualQuantities, settings, users,
   type Product, type InsertProduct,
   type Ingredient, type InsertIngredient,
   type Order, type InsertOrder,
   type OrderItem, type InsertOrderItem,
   type ManualQuantity, type InsertManualQuantity,
-  type Setting,
+  type Setting, type User, type InsertUser,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -44,6 +44,13 @@ export interface IStorage {
   getSetting(key: string): Promise<string | undefined>;
   getAllSettings(): Promise<Setting[]>;
   setSetting(key: string, value: string): Promise<void>;
+
+  getUsers(): Promise<User[]>;
+  getUserByUsername(username: string): Promise<User | undefined>;
+  getUserById(id: string): Promise<User | undefined>;
+  createUser(user: InsertUser): Promise<User>;
+  deleteUser(id: string): Promise<void>;
+  countUsers(): Promise<number>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -201,6 +208,34 @@ export class DatabaseStorage implements IStorage {
     } else {
       await db.insert(settings).values({ key, value });
     }
+  }
+
+  async getUsers(): Promise<User[]> {
+    return db.select().from(users).orderBy(users.username);
+  }
+
+  async getUserByUsername(username: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.username, username));
+    return user;
+  }
+
+  async getUserById(id: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.id, id));
+    return user;
+  }
+
+  async createUser(user: InsertUser): Promise<User> {
+    const [created] = await db.insert(users).values(user).returning();
+    return created;
+  }
+
+  async deleteUser(id: string): Promise<void> {
+    await db.delete(users).where(eq(users.id, id));
+  }
+
+  async countUsers(): Promise<number> {
+    const result = await db.select({ count: sql<number>`count(*)` }).from(users);
+    return Number(result[0].count);
   }
 }
 

@@ -16,7 +16,7 @@ A partner portal for managing food orders from a WooCommerce store. It imports o
 4. **Ingredient Summary** - Calculates total ingredient quantities needed based on orders
 5. **Manual Stock** - Input quantities for items sold in local shops or non-website orders
 6. **Delivery Routes** - Planned delivery route starting from Unit 33 depot (Glasgow G45 9EE), showing only delivery customers on map with nearest-neighbor optimization; customer breakdown shows delivery/collection counts
-7. **Settings** - Configurable auto-sync interval, sync enable/disable, order window (default: Sat noon to Wed midnight)
+7. **Settings** - Configurable auto-sync interval, sync enable/disable, order window (default: Sat noon to Wed midnight), logo upload (branding), user management (add/delete users)
 
 ## Data Model
 - `products` - Products with optional WooCommerce ID, name, price, image
@@ -24,10 +24,20 @@ A partner portal for managing food orders from a WooCommerce store. It imports o
 - `orders` - Orders (WooCommerce or manual) with customer, address, geocoordinates, fulfillmentType (delivery/collection)
 - `order_items` - Line items per order
 - `manual_quantities` - Manual stock entries per product
-- `settings` - Key-value store for app configuration (sync interval, order window, etc.)
+- `settings` - Key-value store for app configuration (sync interval, order window, logo, etc.)
+- `users` - Portal users with hashed passwords (UUID primary key)
+
+## Authentication
+- Session-based auth using `express-session` with `SESSION_SECRET` env var
+- Passwords hashed with `bcrypt`
+- Default admin user seeded on startup (username: `admin`, password: `admin`) if no users exist
+- Auth middleware protects all `/api/*` routes except `/api/auth/*`
+- Login page shown when not authenticated; logout button in header
+- User management (add/delete) available in Settings page
 
 ## Environment Variables
 - `DATABASE_URL` - PostgreSQL connection string
+- `SESSION_SECRET` - Session encryption secret
 - `WC_STORE_URL` - WooCommerce store URL
 - `WC_CONSUMER_KEY` - WooCommerce API consumer key
 - `WC_CONSUMER_SECRET` - WooCommerce API consumer secret
@@ -63,4 +73,7 @@ A partner portal for managing food orders from a WooCommerce store. It imports o
 - `date-fns` - Date formatting and manipulation
 - `leaflet` / `react-leaflet` - Map rendering for delivery routes
 - `drizzle-orm` / `drizzle-zod` - ORM and validation
+- `bcrypt` - Password hashing
+- `express-session` - Session management
+- `multer` - File upload handling (logo)
 - Currency: GBP (£) throughout

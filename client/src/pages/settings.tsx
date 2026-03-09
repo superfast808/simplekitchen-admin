@@ -1,6 +1,6 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,7 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Save, RefreshCw } from "lucide-react";
+import { Save, RefreshCw, Upload, Trash2, Image, UserPlus, X } from "lucide-react";
 
 const DAYS = [
   { value: "0", label: "Sunday" },
@@ -25,6 +25,106 @@ const HOURS = Array.from({ length: 25 }, (_, i) => ({
   value: String(i),
   label: i === 24 ? "Midnight (end of day)" : i === 0 ? "12:00 AM" : i === 12 ? "12:00 PM" : i < 12 ? `${i}:00 AM` : `${i - 12}:00 PM`,
 }));
+
+function UserManagementCard() {
+  const { toast } = useToast();
+  const [newUsername, setNewUsername] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+
+  const { data: usersList, isLoading: usersLoading } = useQuery<Array<{ id: string; username: string }>>({
+    queryKey: ["/api/users"],
+  });
+
+  const createUserMutation = useMutation({
+    mutationFn: (data: { username: string; password: string }) =>
+      apiRequest("POST", "/api/users", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/users"] });
+      setNewUsername("");
+      setNewPassword("");
+      toast({ title: "User created", description: "New user has been added." });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to create user", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const deleteUserMutation = useMutation({
+    mutationFn: (id: string) => apiRequest("DELETE", `/api/users/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/users"] });
+      toast({ title: "User deleted" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to delete user", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const handleAddUser = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newUsername.trim() || !newPassword.trim()) return;
+    createUserMutation.mutate({ username: newUsername.trim(), password: newPassword });
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>User Management</CardTitle>
+        <CardDescription>Manage users who can access this portal</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {usersLoading ? (
+          <Skeleton className="h-20 w-full" />
+        ) : (
+          <div className="space-y-2">
+            {usersList?.map(user => (
+              <div key={user.id} className="flex items-center justify-between p-2 rounded-md border" data-testid={`row-user-${user.id}`}>
+                <span className="text-sm font-medium" data-testid={`text-username-${user.id}`}>{user.username}</span>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  onClick={() => deleteUserMutation.mutate(user.id)}
+                  disabled={deleteUserMutation.isPending || (usersList?.length || 0) <= 1}
+                  data-testid={`button-delete-user-${user.id}`}
+                  title="Delete user"
+                >
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+        <form onSubmit={handleAddUser} className="flex items-end gap-2">
+          <div className="flex-1 space-y-1">
+            <Label htmlFor="new-username">Username</Label>
+            <Input
+              id="new-username"
+              value={newUsername}
+              onChange={e => setNewUsername(e.target.value)}
+              placeholder="New username"
+              data-testid="input-new-username"
+            />
+          </div>
+          <div className="flex-1 space-y-1">
+            <Label htmlFor="new-password">Password</Label>
+            <Input
+              id="new-password"
+              type="password"
+              value={newPassword}
+              onChange={e => setNewPassword(e.target.value)}
+              placeholder="Password"
+              data-testid="input-new-password"
+            />
+          </div>
+          <Button type="submit" disabled={createUserMutation.isPending} data-testid="button-add-user">
+            <UserPlus className="w-4 h-4 mr-1" />
+            Add
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function SettingsPage() {
   const { toast } = useToast();
@@ -87,6 +187,51 @@ export default function SettingsPage() {
     });
   };
 
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const { data: logoData } = useQuery<{ logo: string }>({
+    queryKey: ["/api/settings/logo"],
+    retry: false,
+  });
+
+  const uploadLogoMutation = useMutation({
+    mutationFn: async (file: File) => {
+      const formData = new FormData();
+      formData.append("logo", file);
+      const res = await fetch("/api/settings/logo", { method: "POST", body: formData, credentials: "include" });
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/settings/logo"] });
+      toast({ title: "Logo uploaded", description: "Your logo has been saved." });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Upload failed", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const removeLogoMutation = useMutation({
+    mutationFn: () => apiRequest("DELETE", "/api/settings/logo"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/settings/logo"] });
+      toast({ title: "Logo removed", description: "Default icon will be shown." });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to remove logo", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      uploadLogoMutation.mutate(file);
+    }
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="p-6 space-y-6 max-w-2xl">
@@ -96,12 +241,76 @@ export default function SettingsPage() {
     );
   }
 
+  const hasLogo = logoData?.logo && logoData.logo.length > 0;
+
   return (
     <div className="p-6 space-y-6 max-w-2xl">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight" data-testid="text-page-title">Settings</h1>
         <p className="text-sm text-muted-foreground">Configure sync schedule and order window</p>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Branding</CardTitle>
+          <CardDescription>Upload a logo to display in the sidebar</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center gap-4">
+            {hasLogo ? (
+              <div className="flex items-center justify-center w-16 h-16 rounded-md border overflow-hidden">
+                <img
+                  src={logoData.logo}
+                  alt="Logo"
+                  className="w-full h-full object-contain"
+                  data-testid="img-logo-preview"
+                />
+              </div>
+            ) : (
+              <div className="flex items-center justify-center w-16 h-16 rounded-md border bg-muted">
+                <Image className="w-6 h-6 text-muted-foreground" />
+              </div>
+            )}
+            <div className="space-y-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleFileChange}
+                className="hidden"
+                data-testid="input-logo-upload"
+              />
+              <div className="flex items-center gap-2 flex-wrap">
+                <Button
+                  variant="outline"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploadLogoMutation.isPending}
+                  data-testid="button-upload-logo"
+                >
+                  <Upload className="w-4 h-4 mr-1" />
+                  {uploadLogoMutation.isPending ? "Uploading..." : "Upload Logo"}
+                </Button>
+                {hasLogo && (
+                  <Button
+                    variant="outline"
+                    onClick={() => removeLogoMutation.mutate()}
+                    disabled={removeLogoMutation.isPending}
+                    data-testid="button-remove-logo"
+                  >
+                    <Trash2 className="w-4 h-4 mr-1" />
+                    Remove
+                  </Button>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Recommended: Square image, max 5MB
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <UserManagementCard />
 
       <Card>
         <CardHeader>

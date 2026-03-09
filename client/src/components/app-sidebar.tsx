@@ -1,5 +1,6 @@
 import { Package, ShoppingCart, ChefHat, MapPin, BarChart3, Plus, Settings } from "lucide-react";
 import { Link, useLocation } from "wouter";
+import { useQuery } from "@tanstack/react-query";
 import {
   Sidebar,
   SidebarContent,
@@ -26,13 +27,31 @@ const menuItems = [
 export function AppSidebar() {
   const [location] = useLocation();
 
+  const { data: logoData } = useQuery<{ logo: string }>({
+    queryKey: ["/api/settings/logo"],
+    retry: false,
+  });
+
+  const hasLogo = logoData?.logo && logoData.logo.length > 0;
+
   return (
     <Sidebar>
       <SidebarHeader className="p-4">
         <div className="flex items-center gap-2">
-          <div className="flex items-center justify-center w-8 h-8 rounded-md bg-primary">
-            <Package className="w-4 h-4 text-primary-foreground" />
-          </div>
+          {hasLogo ? (
+            <div className="flex items-center justify-center w-8 h-8 rounded-md overflow-hidden">
+              <img
+                src={logoData.logo}
+                alt="Logo"
+                className="w-full h-full object-contain"
+                data-testid="img-sidebar-logo"
+              />
+            </div>
+          ) : (
+            <div className="flex items-center justify-center w-8 h-8 rounded-md bg-primary">
+              <Package className="w-4 h-4 text-primary-foreground" />
+            </div>
+          )}
           <div>
             <h2 className="text-sm font-semibold" data-testid="text-app-title">Partner Portal</h2>
             <p className="text-xs text-muted-foreground">WooCommerce Manager</p>
