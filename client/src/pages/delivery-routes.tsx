@@ -6,7 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { MapPin, ChevronLeft, ChevronRight, Route, Navigation } from "lucide-react";
+import { MapPin, ChevronLeft, ChevronRight, Route, Navigation, Truck, Store } from "lucide-react";
 
 type DeliveryAddress = {
   id: number;
@@ -14,6 +14,7 @@ type DeliveryAddress = {
   address: string;
   lat: number | null;
   lng: number | null;
+  fulfillment: "delivery" | "collection";
 };
 
 export default function DeliveryRoutesPage() {
@@ -62,6 +63,9 @@ export default function DeliveryRoutesPage() {
   }
 
   const validAddresses = geocodedAddresses.filter(a => a.lat && a.lng);
+
+  const deliveryCustomers = geocodedAddresses.filter(a => a.fulfillment === "delivery");
+  const collectionCustomers = geocodedAddresses.filter(a => a.fulfillment === "collection");
 
   function optimizeRoute(points: DeliveryAddress[]): DeliveryAddress[] {
     if (points.length <= 2) return points;
@@ -124,7 +128,8 @@ export default function DeliveryRoutesPage() {
 
       displayOrder.forEach((addr, idx) => {
         const marker = L.marker([addr.lat!, addr.lng!]).addTo(map);
-        marker.bindPopup(`<strong>${idx + 1}. ${addr.customerName}</strong><br/>${addr.address}`);
+        const typeLabel = addr.fulfillment === "delivery" ? "Delivery" : "Collection";
+        marker.bindPopup(`<strong>${idx + 1}. ${addr.customerName}</strong><br/>${addr.address}<br/><em>${typeLabel}</em>`);
         bounds.push([addr.lat!, addr.lng!]);
       });
 
@@ -183,6 +188,76 @@ export default function DeliveryRoutesPage() {
         </div>
       </div>
 
+      <Card data-testid="card-fulfillment-breakdown">
+        <CardContent className="p-4">
+          <h3 className="text-sm font-medium mb-3">Customer Breakdown</h3>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+            <div className="flex items-center gap-3 p-3 rounded-md bg-muted/50" data-testid="tile-delivery-count">
+              <div className="flex items-center justify-center w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/30">
+                <Truck className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold" data-testid="text-delivery-count">{deliveryCustomers.length}</p>
+                <p className="text-xs text-muted-foreground">Delivery</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 p-3 rounded-md bg-muted/50" data-testid="tile-collection-count">
+              <div className="flex items-center justify-center w-10 h-10 rounded-full bg-amber-100 dark:bg-amber-900/30">
+                <Store className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold" data-testid="text-collection-count">{collectionCustomers.length}</p>
+                <p className="text-xs text-muted-foreground">Collection</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 p-3 rounded-md bg-muted/50" data-testid="tile-total-count">
+              <div className="flex items-center justify-center w-10 h-10 rounded-full bg-green-100 dark:bg-green-900/30">
+                <MapPin className="w-5 h-5 text-green-600 dark:text-green-400" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold" data-testid="text-total-customers">{geocodedAddresses.length}</p>
+                <p className="text-xs text-muted-foreground">Total</p>
+              </div>
+            </div>
+          </div>
+
+          {(deliveryCustomers.length > 0 || collectionCustomers.length > 0) && (
+            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+              {deliveryCustomers.length > 0 && (
+                <div>
+                  <h4 className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1">
+                    <Truck className="w-3 h-3" /> Delivery Customers
+                  </h4>
+                  <div className="space-y-1">
+                    {deliveryCustomers.map(c => (
+                      <div key={c.id} className="flex items-center gap-2 text-sm py-1" data-testid={`text-delivery-customer-${c.id}`}>
+                        <Badge variant="default" className="text-[10px] px-1.5 py-0 bg-blue-600">Delivery</Badge>
+                        <span className="truncate">{c.customerName}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {collectionCustomers.length > 0 && (
+                <div>
+                  <h4 className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1">
+                    <Store className="w-3 h-3" /> Collection Customers
+                  </h4>
+                  <div className="space-y-1">
+                    {collectionCustomers.map(c => (
+                      <div key={c.id} className="flex items-center gap-2 text-sm py-1" data-testid={`text-collection-customer-${c.id}`}>
+                        <Badge variant="outline" className="text-[10px] px-1.5 py-0">Collection</Badge>
+                        <span className="truncate">{c.customerName}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2">
           <Card>
@@ -236,8 +311,15 @@ export default function DeliveryRoutesPage() {
                       <div className="flex items-center justify-center w-6 h-6 rounded-full bg-primary text-primary-foreground text-xs font-medium flex-shrink-0 mt-0.5">
                         {idx + 1}
                       </div>
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium truncate" data-testid={`text-stop-name-${addr.id}`}>{addr.customerName}</p>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <p className="text-sm font-medium truncate" data-testid={`text-stop-name-${addr.id}`}>{addr.customerName}</p>
+                          {addr.fulfillment === "delivery" ? (
+                            <Badge variant="default" className="text-[10px] px-1 py-0 bg-blue-600 flex-shrink-0">Delivery</Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-[10px] px-1 py-0 flex-shrink-0">Collection</Badge>
+                          )}
+                        </div>
                         <p className="text-xs text-muted-foreground truncate" data-testid={`text-stop-address-${addr.id}`}>{addr.address}</p>
                       </div>
                     </div>
