@@ -86,7 +86,7 @@ export default function ProductsPage() {
                   <div className="flex-1 min-w-0">
                     <h3 className="font-medium text-sm truncate" data-testid={`text-product-name-${product.id}`}>{product.name}</h3>
                     <p className="text-sm text-muted-foreground mt-0.5">
-                      {product.price ? `$${parseFloat(product.price).toFixed(2)}` : "No price"}
+                      {product.price ? `£${parseFloat(product.price).toFixed(2)}` : "No price"}
                     </p>
                     {product.wooId && (
                       <Badge variant="outline" className="mt-1.5 text-xs">WC #{product.wooId}</Badge>

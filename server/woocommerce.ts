@@ -1,3 +1,16 @@
+function decodeHtmlEntities(text: string): string {
+  return text
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#039;/g, "'")
+    .replace(/&#8211;/g, "-")
+    .replace(/&#8217;/g, "'");
+}
+
+export { decodeHtmlEntities };
+
 const WC_STORE_URL = process.env.WC_STORE_URL || "";
 const WC_CONSUMER_KEY = process.env.WC_CONSUMER_KEY || "";
 const WC_CONSUMER_SECRET = process.env.WC_CONSUMER_SECRET || "";

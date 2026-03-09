@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { fetchWooOrders, fetchWooProducts } from "./woocommerce";
+import { fetchWooOrders, fetchWooProducts, decodeHtmlEntities } from "./woocommerce";
 import { insertProductSchema, insertIngredientSchema, insertOrderSchema, insertOrderItemSchema, insertManualQuantitySchema } from "@shared/schema";
 
 export async function registerRoutes(
@@ -231,9 +231,17 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/woo/sync-orders", async (_req, res) => {
+  app.post("/api/woo/sync-orders", async (req, res) => {
     try {
-      const wooOrders = await fetchWooOrders({ status: "processing,completed,on-hold" });
+      const params: Record<string, string> = { status: "processing,completed,on-hold" };
+      if (req.query.after) {
+        params.after = req.query.after as string;
+      } else {
+        const fourWeeksAgo = new Date();
+        fourWeeksAgo.setDate(fourWeeksAgo.getDate() - 28);
+        params.after = fourWeeksAgo.toISOString();
+      }
+      const wooOrders = await fetchWooOrders(params);
       let imported = 0;
       let updated = 0;
 
@@ -270,7 +278,7 @@ export async function registerRoutes(
             await storage.createOrderItem({
               orderId: existing.id,
               productId: product?.id || null,
-              productName: item.name,
+              productName: decodeHtmlEntities(item.name),
               quantity: item.quantity,
               price: String(item.total || "0"),
             });
@@ -283,7 +291,7 @@ export async function registerRoutes(
             await storage.createOrderItem({
               orderId: order.id,
               productId: product?.id || null,
-              productName: item.name,
+              productName: decodeHtmlEntities(item.name),
               quantity: item.quantity,
               price: String(item.total || "0"),
             });
@@ -308,7 +316,7 @@ export async function registerRoutes(
         const existing = await storage.getProductByWooId(wp.id);
         const productData = {
           wooId: wp.id,
-          name: wp.name,
+          name: decodeHtmlEntities(wp.name),
           price: String(wp.price || "0"),
           imageUrl: wp.images?.[0]?.src || null,
         };
