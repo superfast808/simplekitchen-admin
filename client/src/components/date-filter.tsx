@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, addWeeks } from "date-fns";
+import { format, startOfMonth, endOfMonth, addDays, subDays } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -7,30 +7,58 @@ import { ChevronLeft, ChevronRight, Calendar } from "lucide-react";
 
 export type DateRange = { from: Date; to: Date };
 
+function getOrderWindow(offset: number): { from: Date; to: Date } {
+  const now = new Date();
+  const ukNow = new Date(now.toLocaleString("en-US", { timeZone: "Europe/London" }));
+  const dayOfWeek = ukNow.getDay();
+
+  let saturdayDate: Date;
+  if (dayOfWeek === 6) {
+    saturdayDate = new Date(ukNow);
+  } else {
+    const daysBack = dayOfWeek === 0 ? 1 : dayOfWeek + 1;
+    saturdayDate = subDays(ukNow, daysBack);
+  }
+
+  if (offset !== 0) {
+    saturdayDate = addDays(saturdayDate, offset * 7);
+  }
+
+  const from = new Date(saturdayDate);
+  from.setHours(0, 0, 0, 0);
+
+  const wednesday = addDays(saturdayDate, 4);
+  const to = new Date(wednesday);
+  to.setHours(23, 59, 59, 999);
+
+  return { from, to };
+}
+
 export function useDateFilter() {
-  const [weekOffset, setWeekOffset] = useState(0);
+  const [windowOffset, setWindowOffset] = useState(0);
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
-  const [mode, setMode] = useState<"week" | "month" | "custom">("week");
+  const [mode, setMode] = useState<"window" | "month" | "custom">("window");
 
-  const now = new Date();
   let from: Date, to: Date;
   if (mode === "custom" && customFrom && customTo) {
     from = new Date(customFrom + "T00:00:00");
     to = new Date(customTo + "T23:59:59");
   } else if (mode === "month") {
+    const now = new Date();
     from = startOfMonth(now);
     to = endOfMonth(now);
   } else {
-    from = startOfWeek(addWeeks(now, weekOffset), { weekStartsOn: 1 });
-    to = endOfWeek(addWeeks(now, weekOffset), { weekStartsOn: 1 });
+    const window = getOrderWindow(windowOffset);
+    from = window.from;
+    to = window.to;
   }
 
   return {
     from,
     to,
-    weekOffset,
-    setWeekOffset,
+    windowOffset,
+    setWindowOffset,
     customFrom,
     setCustomFrom,
     customTo,
@@ -46,8 +74,8 @@ type DateFilterProps = Omit<ReturnType<typeof useDateFilter>, "from" | "to"> & {
 };
 
 export function DateFilter({
-  weekOffset,
-  setWeekOffset,
+  windowOffset,
+  setWindowOffset,
   customFrom,
   setCustomFrom,
   customTo,
@@ -62,11 +90,11 @@ export function DateFilter({
       <div className="flex gap-1">
         <Button
           size="sm"
-          variant={mode === "week" ? "default" : "outline"}
-          onClick={() => { setMode("week"); setWeekOffset(0); }}
+          variant={mode === "window" ? "default" : "outline"}
+          onClick={() => { setMode("window"); setWindowOffset(0); }}
           data-testid={`button-${testIdPrefix}-mode-week`}
         >
-          Week
+          Sat–Wed
         </Button>
         {showMonth && (
           <Button
@@ -88,15 +116,15 @@ export function DateFilter({
           Custom
         </Button>
       </div>
-      {mode === "week" && (
+      {mode === "window" && (
         <div className="flex items-center gap-1">
-          <Button size="icon" variant="ghost" onClick={() => setWeekOffset(w => w - 1)} data-testid={`button-${testIdPrefix}-prev`}>
+          <Button size="icon" variant="ghost" onClick={() => setWindowOffset(w => w - 1)} data-testid={`button-${testIdPrefix}-prev`}>
             <ChevronLeft className="w-4 h-4" />
           </Button>
-          <Button size="sm" variant="outline" onClick={() => setWeekOffset(0)} data-testid={`button-${testIdPrefix}-this-week`}>
-            This Week
+          <Button size="sm" variant="outline" onClick={() => setWindowOffset(0)} data-testid={`button-${testIdPrefix}-this-week`}>
+            Current
           </Button>
-          <Button size="icon" variant="ghost" onClick={() => setWeekOffset(w => w + 1)} data-testid={`button-${testIdPrefix}-next`}>
+          <Button size="icon" variant="ghost" onClick={() => setWindowOffset(w => w + 1)} data-testid={`button-${testIdPrefix}-next`}>
             <ChevronRight className="w-4 h-4" />
           </Button>
         </div>
@@ -133,7 +161,7 @@ export function DateFilter({
 export function DateRangeLabel({ from, to }: { from: Date; to: Date }) {
   return (
     <span className="text-sm text-muted-foreground">
-      {format(from, "MMM d")} - {format(to, "MMM d, yyyy")}
+      {format(from, "EEE, MMM d")} – {format(to, "EEE, MMM d, yyyy")}
     </span>
   );
 }

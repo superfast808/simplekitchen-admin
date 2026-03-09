@@ -35,6 +35,7 @@ export const orders = pgTable("orders", {
   deliveryLng: decimal("delivery_lng", { precision: 10, scale: 7 }),
   orderDate: timestamp("order_date").notNull().defaultNow(),
   status: text("status").notNull().default("processing"),
+  fulfillmentType: text("fulfillment_type").default("collection"),
   isManual: boolean("is_manual").notNull().default(false),
 });
 

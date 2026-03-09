@@ -10,6 +10,19 @@ let syncInterval: ReturnType<typeof setInterval> | null = null;
 let syncInProgress = false;
 let startupTimeout: ReturnType<typeof setTimeout> | null = null;
 
+function detectFulfillmentType(wooOrder: any): string {
+  const shippingLines = wooOrder.shipping_lines || [];
+  if (shippingLines.length === 0) return "collection";
+  for (const line of shippingLines) {
+    const methodTitle = (line.method_title || "").toLowerCase();
+    const methodId = (line.method_id || "").toLowerCase();
+    if (methodTitle.startsWith("delivery") || methodId === "flat_rate") {
+      return "delivery";
+    }
+  }
+  return "collection";
+}
+
 const DEFAULT_SETTINGS: Record<string, string> = {
   sync_interval_minutes: "60",
   sync_enabled: "true",
@@ -63,6 +76,8 @@ async function performSync() {
         shipping.country || billing.country,
       ].filter(Boolean).join(", ");
 
+      const fulfillmentType = detectFulfillmentType(wo);
+
       const orderData = {
         wooId: wo.id,
         customerName,
@@ -72,6 +87,7 @@ async function performSync() {
         deliveryLng: null,
         orderDate: new Date(wo.date_created),
         status: wo.status,
+        fulfillmentType,
         isManual: false,
       };
 
@@ -391,6 +407,8 @@ export async function registerRoutes(
           shipping.country || billing.country,
         ].filter(Boolean).join(", ");
 
+        const fulfillmentType = detectFulfillmentType(wo);
+
         const orderData = {
           wooId: wo.id,
           customerName,
@@ -400,6 +418,7 @@ export async function registerRoutes(
           deliveryLng: null,
           orderDate: new Date(wo.date_created),
           status: wo.status,
+          fulfillmentType,
           isManual: false,
         };
 
@@ -474,22 +493,16 @@ export async function registerRoutes(
       const from = req.query.from ? new Date(req.query.from as string) : undefined;
       const to = req.query.to ? new Date(req.query.to as string) : undefined;
       const ordersList = await storage.getOrders(from, to);
-      const addresses = await Promise.all(
-        ordersList
-          .filter(o => o.deliveryAddress)
-          .map(async (o) => {
-            const items = await storage.getOrderItems(o.id);
-            const hasDelivery = items.some(i => i.productName.toLowerCase().includes("add delivery"));
-            return {
-              id: o.id,
-              customerName: o.customerName,
-              address: o.deliveryAddress,
-              lat: o.deliveryLat ? parseFloat(o.deliveryLat) : null,
-              lng: o.deliveryLng ? parseFloat(o.deliveryLng) : null,
-              fulfillment: hasDelivery ? "delivery" as const : "collection" as const,
-            };
-          })
-      );
+      const addresses = ordersList
+        .filter(o => o.deliveryAddress)
+        .map(o => ({
+          id: o.id,
+          customerName: o.customerName,
+          address: o.deliveryAddress,
+          lat: o.deliveryLat ? parseFloat(o.deliveryLat) : null,
+          lng: o.deliveryLng ? parseFloat(o.deliveryLng) : null,
+          fulfillment: (o.fulfillmentType || "collection") as "delivery" | "collection",
+        }));
       res.json(addresses);
     } catch (error: any) {
       res.status(500).json({ message: error.message });

@@ -21,7 +21,7 @@ A partner portal for managing food orders from a WooCommerce store. It imports o
 ## Data Model
 - `products` - Products with optional WooCommerce ID, name, price, image
 - `ingredients` - Per-product ingredients with quantity per unit and unit
-- `orders` - Orders (WooCommerce or manual) with customer, address, geocoordinates
+- `orders` - Orders (WooCommerce or manual) with customer, address, geocoordinates, fulfillmentType (delivery/collection)
 - `order_items` - Line items per order
 - `manual_quantities` - Manual stock entries per product
 - `settings` - Key-value store for app configuration (sync interval, order window, etc.)
@@ -40,6 +40,16 @@ A partner portal for managing food orders from a WooCommerce store. It imports o
 - `server/routes.ts` - Express API routes
 - `client/src/pages/` - Page components (orders, products, product-totals, ingredients, manual-stock, delivery-routes, settings)
 - `client/src/components/` - Shared components (app-sidebar, theme-provider, theme-toggle)
+
+## Delivery/Collection Detection
+- Uses WooCommerce `shipping_lines[0].method_id`: `flat_rate` = Delivery, `free_shipping` = Collection
+- Stored in `orders.fulfillment_type` column, populated during sync
+- Shown as badge on Orders page and used in Delivery Routes page breakdown
+
+## Date Filtering
+- Default date window: most recent Saturday → following Wednesday (order window), UK/London timezone
+- All pages use shared `DateFilter`/`useDateFilter` components with Sat–Wed/Month/Custom modes
+- Navigation arrows step by 7 days (one week)
 
 ## Auto-Sync
 - Runs every N minutes (configurable via Settings page, default 60)

@@ -119,6 +119,7 @@ export default function OrdersPage() {
                       <TableHead key={name} className="text-center min-w-[80px]">{name}</TableHead>
                     ))}
                     <TableHead className="min-w-[200px]">Delivery Address</TableHead>
+                    <TableHead className="w-[90px]">Type</TableHead>
                     <TableHead className="w-[80px]">Status</TableHead>
                     <TableHead className="w-[50px]"></TableHead>
                   </TableRow>
@@ -155,6 +156,14 @@ export default function OrdersPage() {
                         </span>
                       </TableCell>
                       <TableCell>
+                        <Badge
+                          variant={order.fulfillmentType === "delivery" ? "default" : "outline"}
+                          data-testid={`badge-fulfillment-${order.id}`}
+                        >
+                          {order.fulfillmentType === "delivery" ? "Delivery" : "Collection"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
                         <Badge variant={statusColor(order.status)} data-testid={`badge-status-${order.id}`}>
                           {order.status}
                         </Badge>
@@ -180,6 +189,7 @@ export default function OrdersPage() {
                         {productTotals[name] || 0}
                       </TableCell>
                     ))}
+                    <TableCell></TableCell>
                     <TableCell></TableCell>
                     <TableCell></TableCell>
                     <TableCell></TableCell>
