@@ -14,6 +14,7 @@ import ProductTotalsPage from "@/pages/product-totals";
 import IngredientsPage from "@/pages/ingredients";
 import ManualStockPage from "@/pages/manual-stock";
 import DeliveryRoutesPage from "@/pages/delivery-routes";
+import SettingsPage from "@/pages/settings";
 
 function Router() {
   return (
@@ -24,6 +25,7 @@ function Router() {
       <Route path="/ingredients" component={IngredientsPage} />
       <Route path="/manual-stock" component={ManualStockPage} />
       <Route path="/routes" component={DeliveryRoutesPage} />
+      <Route path="/settings" component={SettingsPage} />
       <Route component={NotFound} />
     </Switch>
   );

@@ -55,6 +55,12 @@ export const manualQuantities = pgTable("manual_quantities", {
   note: text("note"),
 });
 
+export const settings = pgTable("settings", {
+  id: serial("id").primaryKey(),
+  key: text("key").notNull().unique(),
+  value: text("value").notNull(),
+});
+
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
   password: true,
@@ -78,3 +84,4 @@ export type OrderItem = typeof orderItems.$inferSelect;
 export type InsertOrderItem = z.infer<typeof insertOrderItemSchema>;
 export type ManualQuantity = typeof manualQuantities.$inferSelect;
 export type InsertManualQuantity = z.infer<typeof insertManualQuantitySchema>;
+export type Setting = typeof settings.$inferSelect;

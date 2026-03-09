@@ -10,12 +10,13 @@ A partner portal for managing food orders from a WooCommerce store. It imports o
 - **External APIs**: WooCommerce REST API v3, OpenStreetMap Nominatim (geocoding), Leaflet (maps)
 
 ## Key Features
-1. **Orders View** - Weekly view of all orders (WooCommerce + manual), with items in columns, customer name, delivery address, status
+1. **Orders View** - Weekly view of all orders (WooCommerce + manual), with product columns, bold TOTAL row at bottom, and XLSX export
 2. **Products** - Import products from WooCommerce, manage ingredient lists per product
 3. **Product Totals** - Date-filterable summary of products ordered (online + manual/shop quantities)
 4. **Ingredient Summary** - Calculates total ingredient quantities needed based on orders
 5. **Manual Stock** - Input quantities for items sold in local shops or non-website orders
 6. **Delivery Routes** - OSM map with geocoded addresses and nearest-neighbor route optimization
+7. **Settings** - Configurable auto-sync interval, sync enable/disable, order window (default: Sat noon to Wed midnight)
 
 ## Data Model
 - `products` - Products with optional WooCommerce ID, name, price, image
@@ -23,6 +24,7 @@ A partner portal for managing food orders from a WooCommerce store. It imports o
 - `orders` - Orders (WooCommerce or manual) with customer, address, geocoordinates
 - `order_items` - Line items per order
 - `manual_quantities` - Manual stock entries per product
+- `settings` - Key-value store for app configuration (sync interval, order window, etc.)
 
 ## Environment Variables
 - `DATABASE_URL` - PostgreSQL connection string
@@ -36,5 +38,18 @@ A partner portal for managing food orders from a WooCommerce store. It imports o
 - `server/storage.ts` - Data access layer (DatabaseStorage class)
 - `server/woocommerce.ts` - WooCommerce API client
 - `server/routes.ts` - Express API routes
-- `client/src/pages/` - Page components (orders, products, product-totals, ingredients, manual-stock, delivery-routes)
+- `client/src/pages/` - Page components (orders, products, product-totals, ingredients, manual-stock, delivery-routes, settings)
 - `client/src/components/` - Shared components (app-sidebar, theme-provider, theme-toggle)
+
+## Auto-Sync
+- Runs every N minutes (configurable via Settings page, default 60)
+- Syncs last 4 weeks of orders from WooCommerce on each run
+- Initial sync runs 5 seconds after server start
+- Order window: Saturday 12:00 PM to Wednesday midnight (configurable)
+
+## NPM Packages
+- `xlsx` - XLSX export for orders table
+- `date-fns` - Date formatting and manipulation
+- `leaflet` / `react-leaflet` - Map rendering for delivery routes
+- `drizzle-orm` / `drizzle-zod` - ORM and validation
+- Currency: GBP (£) throughout

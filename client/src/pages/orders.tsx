@@ -1,13 +1,13 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { format, startOfWeek, endOfWeek, addWeeks, subWeeks } from "date-fns";
+import { format, startOfWeek, endOfWeek, addWeeks } from "date-fns";
 import { useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { RefreshCw, ChevronLeft, ChevronRight, Trash2, Plus, ShoppingCart } from "lucide-react";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from "@/components/ui/table";
+import { RefreshCw, ChevronLeft, ChevronRight, Trash2, Plus, ShoppingCart, Download } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -51,13 +51,28 @@ export default function OrdersPage() {
 
   const allProductNames = Array.from(new Set((orders || []).flatMap(o => o.items.map(i => i.productName)))).sort();
 
+  const productTotals: Record<string, number> = {};
+  for (const name of allProductNames) {
+    productTotals[name] = (orders || []).reduce((sum, order) => {
+      return sum + order.items.filter(i => i.productName === name).reduce((s, i) => s + i.quantity, 0);
+    }, 0);
+  }
+
   const statusColor = (status: string) => {
     switch (status) {
-      case "completed": return "default";
-      case "processing": return "secondary";
-      case "on-hold": return "outline";
-      default: return "secondary";
+      case "completed": return "default" as const;
+      case "processing": return "secondary" as const;
+      case "on-hold": return "outline" as const;
+      default: return "secondary" as const;
     }
+  };
+
+  const handleExport = () => {
+    const params = new URLSearchParams({
+      from: currentWeekStart.toISOString(),
+      to: currentWeekEnd.toISOString(),
+    });
+    window.open(`/api/orders/export?${params.toString()}`, "_blank");
   };
 
   return (
@@ -83,6 +98,12 @@ export default function OrdersPage() {
             <RefreshCw className={`w-4 h-4 mr-1 ${syncMutation.isPending ? "animate-spin" : ""}`} />
             Sync from Woo
           </Button>
+          {orders && orders.length > 0 && (
+            <Button size="sm" variant="outline" onClick={handleExport} data-testid="button-export-xlsx">
+              <Download className="w-4 h-4 mr-1" />
+              Export XLSX
+            </Button>
+          )}
           <ManualOrderDialog open={showManualDialog} onOpenChange={setShowManualDialog} />
         </div>
       </div>
@@ -128,11 +149,11 @@ export default function OrdersPage() {
                         </span>
                       </TableCell>
                       {allProductNames.map(name => {
-                        const item = order.items.find(i => i.productName === name);
+                        const qty = order.items.filter(i => i.productName === name).reduce((s, i) => s + i.quantity, 0);
                         return (
                           <TableCell key={name} className="text-center">
-                            {item ? (
-                              <span className="font-medium" data-testid={`text-qty-${order.id}-${name}`}>{item.quantity}</span>
+                            {qty > 0 ? (
+                              <span className="font-medium" data-testid={`text-qty-${order.id}-${name}`}>{qty}</span>
                             ) : (
                               <span className="text-muted-foreground/30">-</span>
                             )}
@@ -162,6 +183,19 @@ export default function OrdersPage() {
                     </TableRow>
                   ))}
                 </TableBody>
+                <TableFooter>
+                  <TableRow className="bg-muted/50" data-testid="row-order-totals">
+                    <TableCell className="font-bold text-sm">TOTAL</TableCell>
+                    {allProductNames.map(name => (
+                      <TableCell key={name} className="text-center font-bold text-sm" data-testid={`text-total-${name}`}>
+                        {productTotals[name] || 0}
+                      </TableCell>
+                    ))}
+                    <TableCell></TableCell>
+                    <TableCell></TableCell>
+                    <TableCell></TableCell>
+                  </TableRow>
+                </TableFooter>
               </Table>
             </div>
           )}

@@ -1,12 +1,13 @@
 import { db } from "./db";
 import { eq, gte, lte, and, sql } from "drizzle-orm";
 import {
-  products, ingredients, orders, orderItems, manualQuantities,
+  products, ingredients, orders, orderItems, manualQuantities, settings,
   type Product, type InsertProduct,
   type Ingredient, type InsertIngredient,
   type Order, type InsertOrder,
   type OrderItem, type InsertOrderItem,
   type ManualQuantity, type InsertManualQuantity,
+  type Setting,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -39,6 +40,10 @@ export interface IStorage {
   getManualQuantities(from?: Date, to?: Date): Promise<ManualQuantity[]>;
   createManualQuantity(mq: InsertManualQuantity): Promise<ManualQuantity>;
   deleteManualQuantity(id: number): Promise<void>;
+
+  getSetting(key: string): Promise<string | undefined>;
+  getAllSettings(): Promise<Setting[]>;
+  setSetting(key: string, value: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -178,6 +183,24 @@ export class DatabaseStorage implements IStorage {
 
   async deleteManualQuantity(id: number): Promise<void> {
     await db.delete(manualQuantities).where(eq(manualQuantities.id, id));
+  }
+
+  async getSetting(key: string): Promise<string | undefined> {
+    const [setting] = await db.select().from(settings).where(eq(settings.key, key));
+    return setting?.value;
+  }
+
+  async getAllSettings(): Promise<Setting[]> {
+    return db.select().from(settings);
+  }
+
+  async setSetting(key: string, value: string): Promise<void> {
+    const existing = await this.getSetting(key);
+    if (existing !== undefined) {
+      await db.update(settings).set({ value }).where(eq(settings.key, key));
+    } else {
+      await db.insert(settings).values({ key, value });
+    }
   }
 }
 
