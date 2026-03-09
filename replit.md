@@ -10,7 +10,7 @@ A partner portal for managing food orders from a WooCommerce store. It imports o
 - **External APIs**: WooCommerce REST API v3, OpenStreetMap Nominatim (geocoding), Leaflet (maps)
 
 ## Key Features
-1. **Orders View** - Weekly view of all orders (WooCommerce + manual), with product columns, bold TOTAL row at bottom, and XLSX export
+1. **Orders View** - Weekly view of all orders (WooCommerce + manual), with product columns, bold TOTAL row at bottom, XLSX export, and printable address labels PDF (L7173/J8173 format, 99.1×57mm, 10 per A4 page)
 2. **Products** - Import products from WooCommerce, manage ingredient lists per product
 3. **Product Totals** - Date-filterable summary of products ordered (online + manual/shop quantities)
 4. **Ingredient Summary** - Calculates total ingredient quantities needed based on orders
@@ -59,6 +59,7 @@ A partner portal for managing food orders from a WooCommerce store. It imports o
 
 ## NPM Packages
 - `xlsx` - XLSX export for orders table
+- `pdfkit` - PDF generation for printable address labels
 - `date-fns` - Date formatting and manipulation
 - `leaflet` / `react-leaflet` - Map rendering for delivery routes
 - `drizzle-orm` / `drizzle-zod` - ORM and validation

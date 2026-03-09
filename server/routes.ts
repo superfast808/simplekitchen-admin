@@ -4,6 +4,7 @@ import { storage } from "./storage";
 import { fetchWooOrders, fetchWooProducts, decodeHtmlEntities } from "./woocommerce";
 import { insertProductSchema, insertIngredientSchema, insertOrderSchema, insertOrderItemSchema, insertManualQuantitySchema } from "@shared/schema";
 import * as XLSX from "xlsx";
+import PDFDocument from "pdfkit";
 import { log } from "./index";
 
 let syncInterval: ReturnType<typeof setInterval> | null = null;
@@ -672,6 +673,101 @@ export async function registerRoutes(
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
       res.setHeader("Content-Disposition", `attachment; filename="orders_${dateLabel}.xlsx"`);
       res.send(buf);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/orders/labels", async (req, res) => {
+    try {
+      const from = req.query.from ? new Date(req.query.from as string) : undefined;
+      const to = req.query.to ? new Date(req.query.to as string) : undefined;
+      const ordersList = await storage.getOrders(from, to);
+      const ordersWithItems = await Promise.all(
+        ordersList.map(async (order) => {
+          const items = await storage.getOrderItems(order.id);
+          return { ...order, items };
+        })
+      );
+
+      const PT = 2.83465;
+      const pageW = 210 * PT;
+      const pageH = 297 * PT;
+      const labelW = 99.1 * PT;
+      const labelH = 57 * PT;
+      const cols = 2;
+      const rows = 5;
+      const marginLeft = (pageW - cols * labelW) / 2;
+      const marginTop = (pageH - rows * labelH) / 2;
+      const padX = 6 * PT;
+      const padY = 4 * PT;
+
+      const doc = new PDFDocument({ size: "A4", margin: 0, autoFirstPage: false });
+      const chunks: Buffer[] = [];
+      doc.on("data", (chunk: Buffer) => chunks.push(chunk));
+
+      const pdfReady = new Promise<Buffer>((resolve) => {
+        doc.on("end", () => resolve(Buffer.concat(chunks)));
+      });
+
+      let labelIndex = 0;
+      for (const order of ordersWithItems) {
+        if (labelIndex % (cols * rows) === 0) {
+          doc.addPage();
+        }
+        const posInPage = labelIndex % (cols * rows);
+        const col = posInPage % cols;
+        const row = Math.floor(posInPage / cols);
+        const x = marginLeft + col * labelW + padX;
+        const y = marginTop + row * labelH + padY;
+        const contentW = labelW - padX * 2;
+        const contentH = labelH - padY * 2;
+
+        doc.save();
+        doc.rect(marginLeft + col * labelW, marginTop + row * labelH, labelW, labelH).clip();
+
+        doc.font("Helvetica-Bold").fontSize(11);
+        doc.text(order.customerName, x, y, { width: contentW, lineBreak: true });
+
+        let currentY = doc.y + 2;
+
+        if (order.deliveryAddress) {
+          doc.font("Helvetica").fontSize(8);
+          doc.text(order.deliveryAddress, x, currentY, { width: contentW, lineBreak: true });
+          currentY = doc.y + 3;
+        }
+
+        const itemSummary: Record<string, number> = {};
+        for (const item of order.items) {
+          const name = item.productName;
+          if (name.toLowerCase().includes("add delivery")) continue;
+          itemSummary[name] = (itemSummary[name] || 0) + item.quantity;
+        }
+        const summaryParts = Object.entries(itemSummary).map(([name, qty]) => `${qty} x ${name}`);
+        if (summaryParts.length > 0) {
+          doc.font("Helvetica").fontSize(7);
+          const maxSummaryH = (marginTop + row * labelH + labelH - padY) - currentY;
+          if (maxSummaryH > 8) {
+            doc.text(summaryParts.join(", "), x, currentY, {
+              width: contentW,
+              height: maxSummaryH,
+              lineBreak: true,
+              ellipsis: true,
+            });
+          }
+        }
+
+        doc.restore();
+        labelIndex++;
+      }
+
+      doc.end();
+      const pdfBuf = await pdfReady;
+
+      const dateLabel = from ? `${from.toISOString().split("T")[0]}` : "all";
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="labels_${dateLabel}.pdf"`);
+      res.send(pdfBuf);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }

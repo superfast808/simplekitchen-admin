@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from "@/components/ui/table";
-import { RefreshCw, Trash2, Plus, ShoppingCart, Download } from "lucide-react";
+import { RefreshCw, Trash2, Plus, ShoppingCart, Download, Tag } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -74,6 +74,14 @@ export default function OrdersPage() {
     window.open(`/api/orders/export?${params.toString()}`, "_blank");
   };
 
+  const handleLabels = () => {
+    const params = new URLSearchParams({
+      from: from.toISOString(),
+      to: to.toISOString(),
+    });
+    window.open(`/api/orders/labels?${params.toString()}`, "_blank");
+  };
+
   return (
     <div className="p-6 space-y-6 max-w-full">
       <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -88,10 +96,16 @@ export default function OrdersPage() {
             Sync from Woo
           </Button>
           {orders && orders.length > 0 && (
-            <Button size="sm" variant="outline" onClick={handleExport} data-testid="button-export-xlsx">
-              <Download className="w-4 h-4 mr-1" />
-              Export XLSX
-            </Button>
+            <>
+              <Button size="sm" variant="outline" onClick={handleExport} data-testid="button-export-xlsx">
+                <Download className="w-4 h-4 mr-1" />
+                Export XLSX
+              </Button>
+              <Button size="sm" variant="outline" onClick={handleLabels} data-testid="button-print-labels">
+                <Tag className="w-4 h-4 mr-1" />
+                Labels
+              </Button>
+            </>
           )}
           <ManualOrderDialog open={showManualDialog} onOpenChange={setShowManualDialog} />
         </div>
