@@ -16,7 +16,8 @@ A partner portal for managing food orders from a WooCommerce store. It imports o
 4. **Ingredient Summary** - Calculates total ingredient quantities needed based on orders
 5. **Manual Stock** - Input quantities for items sold in local shops or non-website orders
 6. **Delivery Routes** - Planned delivery route starting from Unit 33 depot (Glasgow G45 9EE), showing only delivery customers on map with nearest-neighbor optimization; customer breakdown shows delivery/collection counts
-7. **Settings** - Configurable auto-sync interval, sync enable/disable, order window (default: Sat noon to Wed midnight), logo upload (branding), user management (add/delete users)
+7. **Weekly Stats** - Dashboard-style page with 8 stat cards: meals sold, revenue, avg order value, delivery stops, new/returning customers, top/worst sellers. Week navigation with chevrons, current week visible until Saturday noon then auto-shows previous week
+8. **Settings** - Configurable auto-sync interval, sync enable/disable, order window (default: Sat noon to Wed midnight), logo upload (branding), user management (add/delete users)
 
 ## Data Model
 - `products` - Products with optional WooCommerce ID, name, price, image

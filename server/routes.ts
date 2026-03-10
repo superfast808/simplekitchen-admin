@@ -1050,6 +1050,93 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/weekly-stats", async (req, res) => {
+    try {
+      const from = req.query.from ? new Date(req.query.from as string) : undefined;
+      const to = req.query.to ? new Date(req.query.to as string) : undefined;
+      if (!from || !to) {
+        return res.status(400).json({ message: "from and to query parameters are required" });
+      }
+
+      const ordersList = await storage.getOrders(from, to);
+      const ordersWithItems = await Promise.all(
+        ordersList.map(async (order) => {
+          const items = await storage.getOrderItems(order.id);
+          return { ...order, items };
+        })
+      );
+      applyAddDeliveryUpgrades(ordersWithItems);
+
+      const priorOrders = await storage.getOrders(undefined, new Date(from.getTime() - 1));
+
+      let mealsSold = 0;
+      let revenue = 0;
+      const mealCounts: Record<string, number> = {};
+
+      for (const order of ordersWithItems) {
+        for (const item of order.items) {
+          const name = item.productName.toLowerCase();
+          if (name.includes("add delivery")) continue;
+          mealsSold += item.quantity;
+          revenue += parseFloat(item.price || "0");
+          mealCounts[item.productName] = (mealCounts[item.productName] || 0) + item.quantity;
+        }
+      }
+
+      const orderCount = ordersWithItems.length;
+      const avgOrderValue = orderCount > 0 ? revenue / orderCount : 0;
+
+      const deliveryStops = ordersWithItems.filter(o => o.fulfillmentType === "delivery").length;
+
+      const priorEmails = new Set<string>();
+      const priorNames = new Set<string>();
+      for (const o of priorOrders) {
+        if (o.customerEmail) priorEmails.add(o.customerEmail.toLowerCase());
+        priorNames.add(o.customerName.toLowerCase());
+      }
+
+      let newCustomers = 0;
+      let returningCustomers = 0;
+      const counted = new Set<string>();
+      for (const o of ordersWithItems) {
+        const key = o.customerEmail ? o.customerEmail.toLowerCase() : o.customerName.toLowerCase();
+        if (counted.has(key)) continue;
+        counted.add(key);
+        const isPrior = o.customerEmail
+          ? priorEmails.has(o.customerEmail.toLowerCase())
+          : priorNames.has(o.customerName.toLowerCase());
+        if (isPrior) {
+          returningCustomers++;
+        } else {
+          newCustomers++;
+        }
+      }
+
+      let topSeller = "-";
+      let worstSeller = "-";
+      const mealEntries = Object.entries(mealCounts);
+      if (mealEntries.length > 0) {
+        mealEntries.sort((a, b) => b[1] - a[1]);
+        topSeller = `${mealEntries[0][0]} (${mealEntries[0][1]})`;
+        worstSeller = `${mealEntries[mealEntries.length - 1][0]} (${mealEntries[mealEntries.length - 1][1]})`;
+      }
+
+      res.json({
+        mealsSold,
+        revenue,
+        avgOrderValue,
+        deliveryStops,
+        newCustomers,
+        returningCustomers,
+        topSeller,
+        worstSeller,
+        orderCount,
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   startAutoSync();
 
   return httpServer;

@@ -1,4 +1,4 @@
-import { Package, ShoppingCart, ChefHat, MapPin, BarChart3, Plus, Settings, HelpCircle } from "lucide-react";
+import { Package, ShoppingCart, ChefHat, MapPin, BarChart3, Plus, Settings, HelpCircle, Activity } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -21,6 +21,7 @@ const menuItems = [
   { title: "Ingredients", url: "/ingredients", icon: ChefHat },
   { title: "Manual Stock", url: "/manual-stock", icon: Plus },
   { title: "Delivery Routes", url: "/routes", icon: MapPin },
+  { title: "Weekly Stats", url: "/weekly-stats", icon: Activity },
   { title: "Settings", url: "/settings", icon: Settings },
   { title: "Help", url: "/help", icon: HelpCircle },
 ];

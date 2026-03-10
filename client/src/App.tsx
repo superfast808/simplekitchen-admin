@@ -18,6 +18,7 @@ import ManualStockPage from "@/pages/manual-stock";
 import DeliveryRoutesPage from "@/pages/delivery-routes";
 import SettingsPage from "@/pages/settings";
 import HelpPage from "@/pages/help";
+import WeeklyStatsPage from "@/pages/weekly-stats";
 import LoginPage from "@/pages/login";
 
 function PageRouter() {
@@ -29,6 +30,7 @@ function PageRouter() {
       <Route path="/ingredients" component={IngredientsPage} />
       <Route path="/manual-stock" component={ManualStockPage} />
       <Route path="/routes" component={DeliveryRoutesPage} />
+      <Route path="/weekly-stats" component={WeeklyStatsPage} />
       <Route path="/settings" component={SettingsPage} />
       <Route path="/help" component={HelpPage} />
       <Route component={NotFound} />
