@@ -29,9 +29,13 @@ type BreakdownResponse = {
   grandTotals: GrandTotal[];
 };
 
-function formatQty(n: number): string {
-  if (n === 0) return "0";
-  return n % 1 === 0 ? String(n) : n.toFixed(2);
+function formatQty(n: number | string): string {
+  const v = typeof n === "string" ? parseFloat(n) : n;
+  if (isNaN(v)) return "0";
+  if (v === 0) return "0";
+  if (v % 1 === 0) return String(v);
+  const s = v.toFixed(2);
+  return s.replace(/\.?0+$/, "");
 }
 
 function ProductAccordion({ product }: { product: ProductBreakdown }) {
@@ -70,7 +74,7 @@ function ProductAccordion({ product }: { product: ProductBreakdown }) {
               {product.ingredients.map((ing, idx) => (
                 <TableRow key={idx}>
                   <TableCell className="font-medium text-sm">{ing.name}</TableCell>
-                  <TableCell className="text-right tabular-nums text-sm">{ing.quantityPerUnit}</TableCell>
+                  <TableCell className="text-right tabular-nums text-sm">{formatQty(ing.quantityPerUnit)}</TableCell>
                   <TableCell className="text-right tabular-nums text-sm">{product.orderedQuantity}</TableCell>
                   <TableCell className="text-right tabular-nums font-semibold text-sm">{formatQty(ing.totalNeeded)}</TableCell>
                   <TableCell className="text-muted-foreground text-sm">{ing.unit}</TableCell>
