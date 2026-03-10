@@ -62,15 +62,18 @@ const statCards: Array<{
   icon: typeof UtensilsCrossed;
   format?: (v: any) => string;
   span?: boolean;
+  color: string;
+  iconColor: string;
+  bgColor: string;
 }> = [
-  { key: "mealsSold", label: "Meals Sold", icon: UtensilsCrossed },
-  { key: "revenue", label: "Revenue", icon: PoundSterling, format: (v: number) => `£${v.toFixed(2)}` },
-  { key: "avgOrderValue", label: "Avg Order Value", icon: Receipt, format: (v: number) => `£${v.toFixed(2)}` },
-  { key: "deliveryStops", label: "Delivery Stops", icon: Truck },
-  { key: "newCustomers", label: "New Customers", icon: UserPlus },
-  { key: "returningCustomers", label: "Returning Customers", icon: UserCheck },
-  { key: "topSeller", label: "Top Seller", icon: TrendingUp, span: true },
-  { key: "worstSeller", label: "Worst Seller", icon: TrendingDown, span: true },
+  { key: "mealsSold", label: "Meals Sold", icon: UtensilsCrossed, color: "border-l-orange-500", iconColor: "text-orange-500", bgColor: "bg-orange-50 dark:bg-orange-950/30" },
+  { key: "revenue", label: "Revenue", icon: PoundSterling, format: (v: number) => `£${v.toFixed(2)}`, color: "border-l-emerald-500", iconColor: "text-emerald-500", bgColor: "bg-emerald-50 dark:bg-emerald-950/30" },
+  { key: "avgOrderValue", label: "Avg Order Value", icon: Receipt, format: (v: number) => `£${v.toFixed(2)}`, color: "border-l-blue-500", iconColor: "text-blue-500", bgColor: "bg-blue-50 dark:bg-blue-950/30" },
+  { key: "deliveryStops", label: "Delivery Stops", icon: Truck, color: "border-l-violet-500", iconColor: "text-violet-500", bgColor: "bg-violet-50 dark:bg-violet-950/30" },
+  { key: "newCustomers", label: "New Customers", icon: UserPlus, color: "border-l-cyan-500", iconColor: "text-cyan-500", bgColor: "bg-cyan-50 dark:bg-cyan-950/30" },
+  { key: "returningCustomers", label: "Returning Customers", icon: UserCheck, color: "border-l-pink-500", iconColor: "text-pink-500", bgColor: "bg-pink-50 dark:bg-pink-950/30" },
+  { key: "topSeller", label: "Top Seller", icon: TrendingUp, span: true, color: "border-l-green-500", iconColor: "text-green-500", bgColor: "bg-green-50 dark:bg-green-950/30" },
+  { key: "worstSeller", label: "Worst Seller", icon: TrendingDown, span: true, color: "border-l-red-500", iconColor: "text-red-500", bgColor: "bg-red-50 dark:bg-red-950/30" },
 ];
 
 export default function WeeklyStatsPage() {
@@ -158,13 +161,13 @@ export default function WeeklyStatsPage() {
             return (
               <Card
                 key={card.key}
-                className={card.span ? "col-span-2 md:col-span-3" : ""}
+                className={`border-l-4 ${card.color} ${card.bgColor} ${card.span ? "col-span-2 md:col-span-3" : ""}`}
                 data-testid={`card-stat-${card.key}`}
               >
                 <CardContent className="p-5">
-                  <div className="flex items-center gap-2 text-muted-foreground mb-1">
-                    <Icon className="w-4 h-4" />
-                    <span className="text-xs font-medium uppercase tracking-wide">{card.label}</span>
+                  <div className="flex items-center gap-2 mb-1">
+                    <Icon className={`w-4 h-4 ${card.iconColor}`} />
+                    <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{card.label}</span>
                   </div>
                   <p className={`font-bold ${card.span ? "text-lg" : "text-2xl"} tabular-nums`} data-testid={`text-stat-${card.key}`}>
                     {displayValue}
