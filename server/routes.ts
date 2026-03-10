@@ -498,6 +498,99 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/ingredient-breakdown", async (req, res) => {
+    try {
+      const from = req.query.from ? new Date(req.query.from as string) : undefined;
+      const to = req.query.to ? new Date(req.query.to as string) : undefined;
+      const items = await storage.getOrderItemsByDateRange(from, to);
+      const manualQtys = await storage.getManualQuantities(from, to);
+      const allIngredients = await storage.getAllIngredients();
+      const allProducts = await storage.getProducts();
+
+      const productQuantities: Record<number, number> = {};
+      for (const item of items) {
+        if (item.productId) {
+          productQuantities[item.productId] = (productQuantities[item.productId] || 0) + item.quantity;
+        }
+      }
+      for (const mq of manualQtys) {
+        productQuantities[mq.productId] = (productQuantities[mq.productId] || 0) + mq.quantity;
+      }
+
+      const ingredientsByProduct: Record<number, typeof allIngredients> = {};
+      for (const ing of allIngredients) {
+        if (!ingredientsByProduct[ing.productId]) {
+          ingredientsByProduct[ing.productId] = [];
+        }
+        ingredientsByProduct[ing.productId].push(ing);
+      }
+
+      const productBreakdowns: Array<{
+        productId: number;
+        productName: string;
+        orderedQuantity: number;
+        ingredients: Array<{
+          name: string;
+          quantityPerUnit: string;
+          unit: string;
+          totalNeeded: number;
+        }>;
+      }> = [];
+
+      const grandTotals: Record<string, { name: string; totalQuantity: number; unit: string }> = {};
+
+      for (const product of allProducts) {
+        const pIngredients = ingredientsByProduct[product.id];
+        if (!pIngredients || pIngredients.length === 0) continue;
+        const orderedQty = productQuantities[product.id] || 0;
+
+        productBreakdowns.push({
+          productId: product.id,
+          productName: product.name,
+          orderedQuantity: orderedQty,
+          ingredients: pIngredients.map(ing => {
+            const totalNeeded = orderedQty * parseFloat(ing.quantityPerUnit);
+            const key = `${ing.name}_${ing.unit}`;
+            if (!grandTotals[key]) {
+              grandTotals[key] = { name: ing.name, totalQuantity: 0, unit: ing.unit };
+            }
+            grandTotals[key].totalQuantity += totalNeeded;
+            return {
+              name: ing.name,
+              quantityPerUnit: ing.quantityPerUnit,
+              unit: ing.unit,
+              totalNeeded,
+            };
+          }),
+        });
+      }
+
+      productBreakdowns.sort((a, b) => {
+        if (a.orderedQuantity > 0 && b.orderedQuantity === 0) return -1;
+        if (a.orderedQuantity === 0 && b.orderedQuantity > 0) return 1;
+        return a.productName.localeCompare(b.productName);
+      });
+
+      res.json({
+        products: productBreakdowns,
+        grandTotals: Object.values(grandTotals).sort((a, b) => a.name.localeCompare(b.name)),
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/ingredient-names", async (_req, res) => {
+    try {
+      const allIngredients = await storage.getAllIngredients();
+      const uniqueNames = Array.from(new Set(allIngredients.map(i => i.name))).sort();
+      const uniqueUnits = Array.from(new Set(allIngredients.map(i => i.unit))).sort();
+      res.json({ names: uniqueNames, units: uniqueUnits });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   app.get("/api/manual-quantities", async (req, res) => {
     try {
       const from = req.query.from ? new Date(req.query.from as string) : undefined;

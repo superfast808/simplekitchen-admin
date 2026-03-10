@@ -1,16 +1,103 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { RefreshCw, Package, ChevronRight, X, Plus, Save } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { Product, Ingredient } from "@shared/schema";
+
+function AutocompleteInput({
+  value,
+  onChange,
+  suggestions,
+  placeholder,
+  className,
+  "data-testid": testId,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  suggestions: string[];
+  placeholder: string;
+  className?: string;
+  "data-testid"?: string;
+}) {
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [focusedIdx, setFocusedIdx] = useState(-1);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  const filtered = value.trim()
+    ? suggestions.filter(s => s.toLowerCase().includes(value.toLowerCase()) && s.toLowerCase() !== value.toLowerCase())
+    : [];
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+        setShowDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (!showDropdown || filtered.length === 0) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setFocusedIdx(prev => Math.min(prev + 1, filtered.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setFocusedIdx(prev => Math.max(prev - 1, 0));
+    } else if (e.key === "Enter" && focusedIdx >= 0) {
+      e.preventDefault();
+      onChange(filtered[focusedIdx]);
+      setShowDropdown(false);
+      setFocusedIdx(-1);
+    } else if (e.key === "Escape") {
+      setShowDropdown(false);
+    }
+  };
+
+  return (
+    <div ref={wrapperRef} className={`relative ${className || ""}`}>
+      <Input
+        value={value}
+        onChange={(e) => {
+          onChange(e.target.value);
+          setShowDropdown(true);
+          setFocusedIdx(-1);
+        }}
+        onFocus={() => setShowDropdown(true)}
+        onKeyDown={handleKeyDown}
+        placeholder={placeholder}
+        data-testid={testId}
+      />
+      {showDropdown && filtered.length > 0 && (
+        <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-popover border rounded-md shadow-md max-h-40 overflow-y-auto">
+          {filtered.map((item, i) => (
+            <button
+              key={item}
+              type="button"
+              className={`w-full text-left px-3 py-1.5 text-sm ${i === focusedIdx ? "bg-accent" : ""}`}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                onChange(item);
+                setShowDropdown(false);
+              }}
+              data-testid={`option-autocomplete-${i}`}
+            >
+              {item}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function ProductsPage() {
   const { toast } = useToast();
@@ -119,6 +206,11 @@ function IngredientsDialog({ product, open, onOpenChange }: { product: Product; 
     enabled: open,
   });
 
+  const { data: knownIngredients } = useQuery<{ names: string[]; units: string[] }>({
+    queryKey: ["/api/ingredient-names"],
+    enabled: open,
+  });
+
   const [ingredientLines, setIngredientLines] = useState<Array<{ name: string; quantityPerUnit: string; unit: string }>>([]);
   const [initialized, setInitialized] = useState(false);
 
@@ -141,6 +233,8 @@ function IngredientsDialog({ product, open, onOpenChange }: { product: Product; 
       toast({ title: "Ingredients saved" });
       queryClient.invalidateQueries({ queryKey: ["/api/products", product.id, "ingredients"] });
       queryClient.invalidateQueries({ queryKey: ["/api/ingredient-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/ingredient-breakdown"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/ingredient-names"] });
     },
     onError: (error: Error) => {
       toast({ title: "Failed to save", description: error.message, variant: "destructive" });
@@ -184,12 +278,14 @@ function IngredientsDialog({ product, open, onOpenChange }: { product: Product; 
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">
               Enter each ingredient with the quantity needed per unit of this product.
+              Start typing to see suggestions from existing ingredients.
             </p>
             {ingredientLines.map((line, idx) => (
               <div key={idx} className="flex gap-2 items-center">
-                <Input
+                <AutocompleteInput
                   value={line.name}
-                  onChange={(e) => updateLine(idx, "name", e.target.value)}
+                  onChange={(v) => updateLine(idx, "name", v)}
+                  suggestions={knownIngredients?.names || []}
                   placeholder="Ingredient name"
                   className="flex-1"
                   data-testid={`input-ingredient-name-${idx}`}
@@ -203,9 +299,10 @@ function IngredientsDialog({ product, open, onOpenChange }: { product: Product; 
                   step="0.001"
                   data-testid={`input-ingredient-qty-${idx}`}
                 />
-                <Input
+                <AutocompleteInput
                   value={line.unit}
-                  onChange={(e) => updateLine(idx, "unit", e.target.value)}
+                  onChange={(v) => updateLine(idx, "unit", v)}
+                  suggestions={knownIngredients?.units || []}
                   placeholder="Unit"
                   className="w-20"
                   data-testid={`input-ingredient-unit-${idx}`}
