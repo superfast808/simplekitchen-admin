@@ -1427,8 +1427,120 @@ export async function registerRoutes(
       }
 
       await storage.updateSubscriptionInviteStatus(invite.id, "completed");
+      await storage.setSubscriptionInviteSelectionsOrder(invite.id, order.id);
 
       res.json({ success: true, orderId: order.id });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/subscription-invites/:id/meals", async (req, res) => {
+    try {
+      const invite = await storage.getSubscriptionInviteById(parseInt(req.params.id));
+      if (!invite) return res.status(404).json({ message: "Invite not found" });
+
+      const ordersList = await storage.getOrders(invite.weekFrom, invite.weekTo);
+      const ordersWithItems = await Promise.all(
+        ordersList.map(async (order) => {
+          const items = await storage.getOrderItems(order.id);
+          return { ...order, items };
+        })
+      );
+
+      const mealCounts: Record<string, number> = {};
+      const subscriptionPattern = /meal\s+subscription/i;
+      const addDeliveryPattern = /add\s+delivery/i;
+      for (const order of ordersWithItems) {
+        for (const item of order.items) {
+          if (subscriptionPattern.test(item.productName)) continue;
+          if (addDeliveryPattern.test(item.productName)) continue;
+          if (parseFloat(item.price || "0") === 7.50) {
+            mealCounts[item.productName] = (mealCounts[item.productName] || 0) + item.quantity;
+          }
+        }
+      }
+
+      const availableMeals = Object.entries(mealCounts)
+        .sort((a, b) => b[1] - a[1])
+        .map(([name, count]) => ({ name, popularity: count }));
+
+      const existingSelections = await storage.getSubscriptionSelections(invite.id);
+      res.json({
+        customerName: invite.customerName,
+        subscriptionQuantity: invite.subscriptionQuantity,
+        availableMeals,
+        selections: existingSelections,
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.patch("/api/subscription-invites/:id/selections", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const invite = await storage.getSubscriptionInviteById(id);
+      if (!invite) return res.status(404).json({ message: "Invite not found" });
+
+      const { selections } = req.body;
+      if (!Array.isArray(selections) || selections.length === 0) {
+        return res.status(400).json({ message: "Please select at least one meal" });
+      }
+
+      const totalQty = selections.reduce((sum: number, s: any) => sum + (parseInt(s.quantity, 10) || 0), 0);
+      if (totalQty > invite.subscriptionQuantity) {
+        return res.status(400).json({ message: `Maximum ${invite.subscriptionQuantity} meals allowed` });
+      }
+
+      await storage.deleteSubscriptionSelectionsByInviteId(id);
+      for (const sel of selections) {
+        if (!sel.productName?.trim()) continue;
+        await storage.createSubscriptionSelection({
+          inviteId: id,
+          productName: sel.productName,
+          quantity: parseInt(sel.quantity, 10) || 1,
+        });
+      }
+
+      if (invite.selectionsOrderId) {
+        await storage.deleteOrderItemsByOrderId(invite.selectionsOrderId);
+        for (const sel of selections) {
+          if (!sel.productName?.trim()) continue;
+          await storage.createOrderItem({
+            orderId: invite.selectionsOrderId,
+            productId: null,
+            productName: sel.productName,
+            quantity: parseInt(sel.quantity, 10) || 1,
+            price: "7.50",
+          });
+        }
+      } else {
+        const order = await storage.createOrder({
+          customerName: invite.customerName,
+          customerEmail: invite.customerEmail,
+          deliveryAddress: null,
+          orderDate: new Date(),
+          status: "processing",
+          fulfillmentType: "delivery",
+          isManual: true,
+        });
+        for (const sel of selections) {
+          if (!sel.productName?.trim()) continue;
+          await storage.createOrderItem({
+            orderId: order.id,
+            productId: null,
+            productName: sel.productName,
+            quantity: parseInt(sel.quantity, 10) || 1,
+            price: "7.50",
+          });
+        }
+        await storage.setSubscriptionInviteSelectionsOrder(id, order.id);
+      }
+
+      await storage.updateSubscriptionInviteStatus(id, "completed");
+      const updatedSelections = await storage.getSubscriptionSelections(id);
+      res.json({ success: true, selections: updatedSelections });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }

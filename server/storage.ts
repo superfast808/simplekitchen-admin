@@ -61,6 +61,8 @@ export interface IStorage {
   getSubscriptionInviteByToken(token: string): Promise<SubscriptionInvite | undefined>;
   getSubscriptionInvites(from?: Date, to?: Date): Promise<SubscriptionInvite[]>;
   updateSubscriptionInviteStatus(id: number, status: string): Promise<void>;
+  setSubscriptionInviteSelectionsOrder(id: number, orderId: number): Promise<void>;
+  getSubscriptionInviteById(id: number): Promise<SubscriptionInvite | undefined>;
   createSubscriptionSelection(selection: InsertSubscriptionSelection): Promise<SubscriptionSelection>;
   getSubscriptionSelections(inviteId: number): Promise<SubscriptionSelection[]>;
   deleteSubscriptionSelectionsByInviteId(inviteId: number): Promise<void>;
@@ -283,6 +285,15 @@ export class DatabaseStorage implements IStorage {
 
   async updateSubscriptionInviteStatus(id: number, status: string): Promise<void> {
     await db.update(subscriptionInvites).set({ status }).where(eq(subscriptionInvites.id, id));
+  }
+
+  async setSubscriptionInviteSelectionsOrder(id: number, orderId: number): Promise<void> {
+    await db.update(subscriptionInvites).set({ selectionsOrderId: orderId }).where(eq(subscriptionInvites.id, id));
+  }
+
+  async getSubscriptionInviteById(id: number): Promise<SubscriptionInvite | undefined> {
+    const [invite] = await db.select().from(subscriptionInvites).where(eq(subscriptionInvites.id, id));
+    return invite;
   }
 
   async createSubscriptionSelection(selection: InsertSubscriptionSelection): Promise<SubscriptionSelection> {

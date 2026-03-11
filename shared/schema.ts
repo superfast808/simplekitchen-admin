@@ -68,6 +68,7 @@ export const settings = pgTable("settings", {
 export const subscriptionInvites = pgTable("subscription_invites", {
   id: serial("id").primaryKey(),
   orderId: integer("order_id"),
+  selectionsOrderId: integer("selections_order_id"),
   customerEmail: text("customer_email").notNull(),
   customerName: text("customer_name").notNull(),
   token: text("token").notNull().unique(),
