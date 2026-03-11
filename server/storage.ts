@@ -2,7 +2,7 @@ import { db } from "./db";
 import { eq, gte, lte, and, sql } from "drizzle-orm";
 import {
   products, ingredients, orders, orderItems, manualQuantities, settings, users,
-  subscriptionInvites, subscriptionSelections,
+  subscriptionInvites, subscriptionSelections, recurringOrders, recurringOrderItems,
   type Product, type InsertProduct,
   type Ingredient, type InsertIngredient,
   type Order, type InsertOrder,
@@ -11,6 +11,8 @@ import {
   type Setting, type User, type InsertUser,
   type SubscriptionInvite, type InsertSubscriptionInvite,
   type SubscriptionSelection, type InsertSubscriptionSelection,
+  type RecurringOrder, type InsertRecurringOrder,
+  type RecurringOrderItem, type InsertRecurringOrderItem,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -62,6 +64,15 @@ export interface IStorage {
   createSubscriptionSelection(selection: InsertSubscriptionSelection): Promise<SubscriptionSelection>;
   getSubscriptionSelections(inviteId: number): Promise<SubscriptionSelection[]>;
   deleteSubscriptionSelectionsByInviteId(inviteId: number): Promise<void>;
+
+  getRecurringOrders(): Promise<RecurringOrder[]>;
+  getRecurringOrder(id: number): Promise<RecurringOrder | undefined>;
+  createRecurringOrder(order: InsertRecurringOrder): Promise<RecurringOrder>;
+  updateRecurringOrder(id: number, order: Partial<InsertRecurringOrder>): Promise<RecurringOrder | undefined>;
+  deleteRecurringOrder(id: number): Promise<void>;
+  getRecurringOrderItems(recurringOrderId: number): Promise<RecurringOrderItem[]>;
+  createRecurringOrderItem(item: InsertRecurringOrderItem): Promise<RecurringOrderItem>;
+  deleteRecurringOrderItemsByOrderId(recurringOrderId: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -283,6 +294,43 @@ export class DatabaseStorage implements IStorage {
 
   async deleteSubscriptionSelectionsByInviteId(inviteId: number): Promise<void> {
     await db.delete(subscriptionSelections).where(eq(subscriptionSelections.inviteId, inviteId));
+  }
+
+  async getRecurringOrders(): Promise<RecurringOrder[]> {
+    return db.select().from(recurringOrders).orderBy(recurringOrders.customerName);
+  }
+
+  async getRecurringOrder(id: number): Promise<RecurringOrder | undefined> {
+    const [order] = await db.select().from(recurringOrders).where(eq(recurringOrders.id, id));
+    return order;
+  }
+
+  async createRecurringOrder(order: InsertRecurringOrder): Promise<RecurringOrder> {
+    const [created] = await db.insert(recurringOrders).values(order).returning();
+    return created;
+  }
+
+  async updateRecurringOrder(id: number, order: Partial<InsertRecurringOrder>): Promise<RecurringOrder | undefined> {
+    const [updated] = await db.update(recurringOrders).set(order).where(eq(recurringOrders.id, id)).returning();
+    return updated;
+  }
+
+  async deleteRecurringOrder(id: number): Promise<void> {
+    await db.delete(recurringOrderItems).where(eq(recurringOrderItems.recurringOrderId, id));
+    await db.delete(recurringOrders).where(eq(recurringOrders.id, id));
+  }
+
+  async getRecurringOrderItems(recurringOrderId: number): Promise<RecurringOrderItem[]> {
+    return db.select().from(recurringOrderItems).where(eq(recurringOrderItems.recurringOrderId, recurringOrderId));
+  }
+
+  async createRecurringOrderItem(item: InsertRecurringOrderItem): Promise<RecurringOrderItem> {
+    const [created] = await db.insert(recurringOrderItems).values(item).returning();
+    return created;
+  }
+
+  async deleteRecurringOrderItemsByOrderId(recurringOrderId: number): Promise<void> {
+    await db.delete(recurringOrderItems).where(eq(recurringOrderItems.recurringOrderId, recurringOrderId));
   }
 }
 

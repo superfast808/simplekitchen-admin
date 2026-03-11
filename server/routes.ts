@@ -1357,6 +1357,134 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/recurring-orders", async (req, res) => {
+    try {
+      const recurringOrdersList = await storage.getRecurringOrders();
+      const result = [];
+      for (const ro of recurringOrdersList) {
+        const items = await storage.getRecurringOrderItems(ro.id);
+        result.push({ ...ro, items });
+      }
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/recurring-orders", async (req, res) => {
+    try {
+      const { items, ...orderData } = req.body;
+      if (!orderData.customerName || typeof orderData.customerName !== "string") {
+        return res.status(400).json({ message: "Customer name is required" });
+      }
+      const ro = await storage.createRecurringOrder({
+        customerName: orderData.customerName,
+        deliveryAddress: orderData.deliveryAddress || null,
+        fulfillmentType: orderData.fulfillmentType || "delivery",
+        active: orderData.active !== false,
+      });
+      if (items && Array.isArray(items)) {
+        for (const item of items) {
+          if (item.productName && item.productName.trim()) {
+            await storage.createRecurringOrderItem({
+              recurringOrderId: ro.id,
+              productName: item.productName,
+              quantity: item.quantity || 1,
+            });
+          }
+        }
+      }
+      const orderItems = await storage.getRecurringOrderItems(ro.id);
+      res.json({ ...ro, items: orderItems });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.patch("/api/recurring-orders/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const existing = await storage.getRecurringOrder(id);
+      if (!existing) {
+        return res.status(404).json({ message: "Recurring order not found" });
+      }
+      const { items, ...updates } = req.body;
+      const orderUpdate: any = {};
+      if (updates.customerName !== undefined) orderUpdate.customerName = updates.customerName;
+      if (updates.deliveryAddress !== undefined) orderUpdate.deliveryAddress = updates.deliveryAddress;
+      if (updates.fulfillmentType !== undefined) orderUpdate.fulfillmentType = updates.fulfillmentType;
+      if (updates.active !== undefined) orderUpdate.active = updates.active;
+
+      const updated = await storage.updateRecurringOrder(id, orderUpdate);
+
+      if (items && Array.isArray(items)) {
+        await storage.deleteRecurringOrderItemsByOrderId(id);
+        for (const item of items) {
+          if (item.productName && item.productName.trim()) {
+            await storage.createRecurringOrderItem({
+              recurringOrderId: id,
+              productName: item.productName,
+              quantity: item.quantity || 1,
+            });
+          }
+        }
+      }
+      const orderItems = await storage.getRecurringOrderItems(id);
+      res.json({ ...updated, items: orderItems });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/recurring-orders/:id", async (req, res) => {
+    try {
+      await storage.deleteRecurringOrder(parseInt(req.params.id));
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/recurring-orders/generate", async (req, res) => {
+    try {
+      const recurringOrdersList = await storage.getRecurringOrders();
+      const active = recurringOrdersList.filter(ro => ro.active);
+      if (active.length === 0) {
+        return res.json({ created: 0, message: "No active recurring orders" });
+      }
+
+      let created = 0;
+      for (const ro of active) {
+        const items = await storage.getRecurringOrderItems(ro.id);
+        if (items.length === 0) continue;
+
+        const order = await storage.createOrder({
+          customerName: ro.customerName,
+          deliveryAddress: ro.deliveryAddress || null,
+          fulfillmentType: ro.fulfillmentType,
+          orderDate: new Date(),
+          status: "processing",
+          isManual: true,
+        });
+
+        for (const item of items) {
+          await storage.createOrderItem({
+            orderId: order.id,
+            productId: null,
+            productName: item.productName,
+            quantity: item.quantity,
+            price: "0",
+          });
+        }
+        created++;
+      }
+
+      res.json({ created, total: active.length });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   app.get("/api/weekly-stats", async (req, res) => {
     try {
       const from = req.query.from ? new Date(req.query.from as string) : undefined;

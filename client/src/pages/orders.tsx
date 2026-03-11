@@ -283,7 +283,7 @@ function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
     }
     createMutation.mutate({
       customerName,
-      deliveryAddress: address || null,
+      deliveryAddress: fulfillmentType === "delivery" ? (address || null) : null,
       fulfillmentType,
       items: validItems.map(i => ({
         productName: i.productName,

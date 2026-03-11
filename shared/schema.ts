@@ -82,6 +82,21 @@ export const subscriptionSelections = pgTable("subscription_selections", {
   quantity: integer("quantity").notNull().default(1),
 });
 
+export const recurringOrders = pgTable("recurring_orders", {
+  id: serial("id").primaryKey(),
+  customerName: text("customer_name").notNull(),
+  deliveryAddress: text("delivery_address"),
+  fulfillmentType: text("fulfillment_type").notNull().default("delivery"),
+  active: boolean("active").notNull().default(true),
+});
+
+export const recurringOrderItems = pgTable("recurring_order_items", {
+  id: serial("id").primaryKey(),
+  recurringOrderId: integer("recurring_order_id").notNull(),
+  productName: text("product_name").notNull(),
+  quantity: integer("quantity").notNull().default(1),
+});
+
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
   password: true,
@@ -94,6 +109,8 @@ export const insertOrderItemSchema = createInsertSchema(orderItems).omit({ id: t
 export const insertManualQuantitySchema = createInsertSchema(manualQuantities).omit({ id: true });
 export const insertSubscriptionInviteSchema = createInsertSchema(subscriptionInvites).omit({ id: true, createdAt: true });
 export const insertSubscriptionSelectionSchema = createInsertSchema(subscriptionSelections).omit({ id: true });
+export const insertRecurringOrderSchema = createInsertSchema(recurringOrders).omit({ id: true });
+export const insertRecurringOrderItemSchema = createInsertSchema(recurringOrderItems).omit({ id: true });
 
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
@@ -112,3 +129,7 @@ export type SubscriptionInvite = typeof subscriptionInvites.$inferSelect;
 export type InsertSubscriptionInvite = z.infer<typeof insertSubscriptionInviteSchema>;
 export type SubscriptionSelection = typeof subscriptionSelections.$inferSelect;
 export type InsertSubscriptionSelection = z.infer<typeof insertSubscriptionSelectionSchema>;
+export type RecurringOrder = typeof recurringOrders.$inferSelect;
+export type InsertRecurringOrder = z.infer<typeof insertRecurringOrderSchema>;
+export type RecurringOrderItem = typeof recurringOrderItems.$inferSelect;
+export type InsertRecurringOrderItem = z.infer<typeof insertRecurringOrderItemSchema>;
