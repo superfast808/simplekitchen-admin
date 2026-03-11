@@ -32,6 +32,7 @@ export default function OrdersPage() {
   const [editingOrder, setEditingOrder] = useState<OrderWithItems | null>(null);
   const [showConsistent, setShowConsistent] = useState(true);
   const [stampingCustomer, setStampingCustomer] = useState<RecurringOrderWithItems | null>(null);
+  const [editingConsistentCustomer, setEditingConsistentCustomer] = useState<RecurringOrderWithItems | null>(null);
 
   const { from, to } = dateFilter;
 
@@ -205,6 +206,15 @@ export default function OrdersPage() {
                             >
                               <Stamp className="w-3 h-3 mr-1" />
                               This week
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-7 w-7"
+                              onClick={() => setEditingConsistentCustomer(c)}
+                              data-testid={`button-edit-consistent-${c.id}`}
+                            >
+                              <Pencil className="w-3 h-3" />
                             </Button>
                             <Button
                               size="icon"
@@ -427,6 +437,13 @@ export default function OrdersPage() {
           onOpenChange={(v) => { if (!v) setStampingCustomer(null); }}
         />
       )}
+      {editingConsistentCustomer && (
+        <EditConsistentDialog
+          customer={editingConsistentCustomer}
+          open={!!editingConsistentCustomer}
+          onOpenChange={(v) => { if (!v) setEditingConsistentCustomer(null); }}
+        />
+      )}
     </div>
   );
 }
@@ -439,6 +456,7 @@ function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
   const [isTuesday, setIsTuesday] = useState(false);
   const [notes, setNotes] = useState("");
   const [cashAmount, setCashAmount] = useState("");
+  const [saveAsConsistent, setSaveAsConsistent] = useState(true);
   const [itemLines, setItemLines] = useState([{ productName: "", quantity: 1 }]);
 
   const { data: products } = useQuery<any[]>({ queryKey: ["/api/products"] });
@@ -448,7 +466,10 @@ function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
       queryClient.invalidateQueries({ queryKey: ["/api/recurring-orders"] });
-      toast({ title: "Manual order created", description: "Customer saved for future weeks." });
+      toast({
+        title: "Manual order created",
+        description: saveAsConsistent ? "Customer saved for future weeks." : undefined,
+      });
       onOpenChange(false);
       setCustomerName("");
       setAddress("");
@@ -456,6 +477,7 @@ function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
       setIsTuesday(false);
       setNotes("");
       setCashAmount("");
+      setSaveAsConsistent(true);
       setItemLines([{ productName: "", quantity: 1 }]);
     },
     onError: (error: Error) => {
@@ -476,6 +498,7 @@ function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
       isTuesday,
       notes: notes || null,
       cashAmount: cashAmount ? cashAmount : null,
+      saveAsConsistent,
       items: validItems.map(i => ({
         productName: i.productName,
         quantity: i.quantity,
