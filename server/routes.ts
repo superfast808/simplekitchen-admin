@@ -447,6 +447,8 @@ export async function registerRoutes(
       if (updates.fulfillmentType !== undefined) orderUpdate.fulfillmentType = updates.fulfillmentType;
       if (updates.status !== undefined) orderUpdate.status = updates.status;
       if (updates.isTuesday !== undefined) orderUpdate.isTuesday = updates.isTuesday;
+      if (updates.notes !== undefined) orderUpdate.notes = updates.notes;
+      if (updates.cashAmount !== undefined) orderUpdate.cashAmount = updates.cashAmount;
 
       const updated = await storage.updateOrder(id, orderUpdate);
 
@@ -838,14 +840,20 @@ export async function registerRoutes(
       applyAddDeliveryUpgrades(ordersWithItems);
       const addresses = ordersWithItems
         .filter(o => o.deliveryAddress)
-        .map(o => ({
-          id: o.id,
-          customerName: o.customerName,
-          address: o.deliveryAddress,
-          lat: o.deliveryLat ? parseFloat(o.deliveryLat) : null,
-          lng: o.deliveryLng ? parseFloat(o.deliveryLng) : null,
-          fulfillment: (o.fulfillmentType || "collection") as "delivery" | "collection",
-        }));
+        .map(o => {
+          const fulfillment = (o.fulfillmentType === "delivery" || (!o.fulfillmentType && o.deliveryAddress))
+            ? "delivery"
+            : "collection";
+          return {
+            id: o.id,
+            customerName: o.customerName,
+            address: o.deliveryAddress,
+            lat: o.deliveryLat ? parseFloat(o.deliveryLat) : null,
+            lng: o.deliveryLng ? parseFloat(o.deliveryLng) : null,
+            fulfillment: fulfillment as "delivery" | "collection",
+            isManual: o.isManual,
+          };
+        });
       res.json(addresses);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
@@ -1012,13 +1020,13 @@ export async function registerRoutes(
       const pageW = 210 * PT;
       const pageH = 297 * PT;
       const labelW = 99.1 * PT;
-      const labelH = 57 * PT;
+      const labelH = 38.1 * PT;
       const cols = 2;
-      const rows = 5;
+      const rows = 7;
       const marginLeft = (pageW - cols * labelW) / 2;
       const marginTop = (pageH - rows * labelH) / 2;
-      const padX = 6 * PT;
-      const padY = 4 * PT;
+      const padX = 5 * PT;
+      const padY = 3 * PT;
 
       const doc = new PDFDocument({ size: "A4", margin: 0, autoFirstPage: false });
       const chunks: Buffer[] = [];

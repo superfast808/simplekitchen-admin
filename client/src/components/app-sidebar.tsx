@@ -16,14 +16,14 @@ import {
 
 const menuItems = [
   { title: "Orders", url: "/", icon: ShoppingCart },
-  { title: "Products", url: "/products", icon: Package },
+  { title: "Tuesday Orders", url: "/tuesday", icon: CalendarCheck },
   { title: "Product Totals", url: "/product-totals", icon: BarChart3 },
   { title: "Ingredients", url: "/ingredients", icon: ChefHat },
+  { title: "Subscriptions", url: "/subscriptions", icon: Mail },
   { title: "Manual Stock", url: "/manual-stock", icon: Plus },
   { title: "Delivery Routes", url: "/routes", icon: MapPin },
   { title: "Weekly Stats", url: "/weekly-stats", icon: Activity },
-  { title: "Tuesday Orders", url: "/tuesday", icon: CalendarCheck },
-  { title: "Subscriptions", url: "/subscriptions", icon: Mail },
+  { title: "Products", url: "/products", icon: Package },
   { title: "Settings", url: "/settings", icon: Settings },
   { title: "Help", url: "/help", icon: HelpCircle },
 ];

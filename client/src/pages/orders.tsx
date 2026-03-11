@@ -7,7 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from "@/components/ui/table";
-import { RefreshCw, Trash2, Plus, ShoppingCart, Download, Tag, Pencil, CalendarCheck } from "lucide-react";
+import { RefreshCw, Trash2, Plus, ShoppingCart, Download, Tag, Pencil, CalendarCheck, Banknote, MessageSquare } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
@@ -24,6 +26,7 @@ export default function OrdersPage() {
   const { toast } = useToast();
   const dateFilter = useDateFilter();
   const sourceFilter = useOrderSourceFilter();
+  const [dayFilter, setDayFilter] = useState<"all" | "saturday" | "tuesday">("all");
   const [showManualDialog, setShowManualDialog] = useState(false);
   const [editingOrder, setEditingOrder] = useState<OrderWithItems | null>(null);
 
@@ -33,7 +36,11 @@ export default function OrdersPage() {
     queryKey: ["/api/orders", `?from=${from.toISOString()}&to=${to.toISOString()}`],
   });
 
-  const orders = allOrders?.filter(sourceFilter.filterOrder);
+  const orders = allOrders?.filter(o => {
+    if (dayFilter === "saturday" && o.isTuesday) return false;
+    if (dayFilter === "tuesday" && !o.isTuesday) return false;
+    return sourceFilter.filterOrder(o);
+  });
 
   const syncMutation = useMutation({
     mutationFn: () => apiRequest("POST", "/api/woo/sync-orders"),
@@ -118,6 +125,21 @@ export default function OrdersPage() {
         </div>
       </div>
 
+      <div className="flex items-center gap-2 flex-wrap" data-testid="day-filter-tabs">
+        {(["all", "saturday", "tuesday"] as const).map(d => (
+          <Button
+            key={d}
+            size="sm"
+            variant={dayFilter === d ? "default" : "outline"}
+            onClick={() => setDayFilter(d)}
+            data-testid={`button-day-${d}`}
+            className="capitalize"
+          >
+            {d === "all" ? "All Days" : d === "saturday" ? "Saturday / Website" : "Tuesday"}
+          </Button>
+        ))}
+      </div>
+
       <OrderSourceFilter filter={sourceFilter} testIdPrefix="orders-source" />
 
       <Card>
@@ -137,18 +159,26 @@ export default function OrdersPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="min-w-[140px]">Customer</TableHead>
+                    <TableHead className="min-w-[150px]">Customer</TableHead>
                     {allProductNames.map(name => (
                       <TableHead key={name} className="text-center min-w-[80px]">{name}</TableHead>
                     ))}
-                    <TableHead className="min-w-[200px]">Delivery Address</TableHead>
-                    <TableHead className="w-[90px]">Type</TableHead>
+                    <TableHead className="min-w-[180px]">Delivery Address</TableHead>
+                    <TableHead className="w-[100px]">Type</TableHead>
+                    <TableHead className="w-[70px] text-right">Spend</TableHead>
                     <TableHead className="w-[80px]">Status</TableHead>
+                    <TableHead className="min-w-[120px]">Notes / Cash</TableHead>
                     <TableHead className="w-[50px]"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {orders.map((order) => (
+                  {orders.map((order) => {
+                    const orderSpend = order.items.reduce((sum, i) => sum + i.quantity * parseFloat(i.price || "0"), 0);
+                    const itemSummary = order.items
+                      .filter(i => !i.productName.toLowerCase().includes("add delivery"))
+                      .map(i => `${i.quantity}×${i.productName}`)
+                      .join(", ");
+                    return (
                     <TableRow key={order.id} data-testid={`row-order-${order.id}`}>
                       <TableCell className="font-medium">
                         <div className="flex items-center gap-1 flex-wrap">
@@ -165,6 +195,11 @@ export default function OrdersPage() {
                         <span className="text-xs text-muted-foreground">
                           {format(new Date(order.orderDate), "EEE, MMM d")}
                         </span>
+                        {itemSummary && (
+                          <div className="text-xs text-muted-foreground mt-0.5 leading-tight" data-testid={`text-items-summary-${order.id}`}>
+                            {itemSummary}
+                          </div>
+                        )}
                       </TableCell>
                       {allProductNames.map(name => {
                         const qty = order.items.filter(i => i.productName === name).reduce((s, i) => s + i.quantity, 0);
@@ -180,7 +215,7 @@ export default function OrdersPage() {
                       })}
                       <TableCell>
                         <span className="text-sm" data-testid={`text-address-${order.id}`}>
-                          {order.deliveryAddress || "No address"}
+                          {order.deliveryAddress || <span className="text-muted-foreground/40 text-xs">No address</span>}
                         </span>
                       </TableCell>
                       <TableCell>
@@ -191,10 +226,38 @@ export default function OrdersPage() {
                           {order.fulfillmentType === "delivery" ? "Delivery" : "Collection"}
                         </Badge>
                       </TableCell>
+                      <TableCell className="text-right font-medium text-sm" data-testid={`text-spend-${order.id}`}>
+                        {orderSpend > 0 ? `£${orderSpend.toFixed(2)}` : <span className="text-muted-foreground/30">—</span>}
+                      </TableCell>
                       <TableCell>
                         <Badge variant={statusColor(order.status)} data-testid={`badge-status-${order.id}`}>
                           {order.status}
                         </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <div className="space-y-1">
+                          {(order as any).notes && (
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <div className="flex items-center gap-1 text-xs text-muted-foreground cursor-default" data-testid={`text-notes-${order.id}`}>
+                                    <MessageSquare className="w-3 h-3 flex-shrink-0" />
+                                    <span className="truncate max-w-[90px]">{(order as any).notes}</span>
+                                  </div>
+                                </TooltipTrigger>
+                                <TooltipContent side="left" className="max-w-[200px]">
+                                  {(order as any).notes}
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          )}
+                          {(order as any).cashAmount && parseFloat((order as any).cashAmount) > 0 && (
+                            <div className="flex items-center gap-1 text-xs text-green-700 dark:text-green-400 font-medium" data-testid={`text-cash-${order.id}`}>
+                              <Banknote className="w-3 h-3 flex-shrink-0" />
+                              Cash £{parseFloat((order as any).cashAmount).toFixed(2)}
+                            </div>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell>
                         <div className="flex gap-1">
@@ -219,7 +282,8 @@ export default function OrdersPage() {
                         </div>
                       </TableCell>
                     </TableRow>
-                  ))}
+                    );
+                  })}
                 </TableBody>
                 <TableFooter>
                   <TableRow className="border-t-2">
@@ -227,9 +291,11 @@ export default function OrdersPage() {
                     {allProductNames.map(name => (
                       <TableCell key={name} className="text-center font-bold text-xs text-muted-foreground">{name}</TableCell>
                     ))}
-                    <TableCell className="font-bold text-xs text-muted-foreground">Delivery Address</TableCell>
+                    <TableCell className="font-bold text-xs text-muted-foreground">Address</TableCell>
                     <TableCell className="font-bold text-xs text-muted-foreground">Type</TableCell>
+                    <TableCell className="font-bold text-xs text-muted-foreground text-right">Spend</TableCell>
                     <TableCell className="font-bold text-xs text-muted-foreground">Status</TableCell>
+                    <TableCell className="font-bold text-xs text-muted-foreground">Notes / Cash</TableCell>
                     <TableCell></TableCell>
                   </TableRow>
                   <TableRow className="bg-muted/50" data-testid="row-order-totals">
@@ -241,7 +307,16 @@ export default function OrdersPage() {
                     ))}
                     <TableCell></TableCell>
                     <TableCell></TableCell>
+                    <TableCell className="text-right font-bold text-sm" data-testid="text-total-spend">
+                      £{(orders || []).reduce((sum, o) => sum + o.items.reduce((s, i) => s + i.quantity * parseFloat(i.price || "0"), 0), 0).toFixed(2)}
+                    </TableCell>
                     <TableCell></TableCell>
+                    <TableCell className="text-sm font-medium text-green-700 dark:text-green-400" data-testid="text-total-cash">
+                      {(() => {
+                        const totalCash = (orders || []).reduce((sum, o) => sum + (parseFloat((o as any).cashAmount || "0") || 0), 0);
+                        return totalCash > 0 ? `Cash: £${totalCash.toFixed(2)}` : "";
+                      })()}
+                    </TableCell>
                     <TableCell></TableCell>
                   </TableRow>
                 </TableFooter>
@@ -268,6 +343,8 @@ function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
   const [address, setAddress] = useState("");
   const [fulfillmentType, setFulfillmentType] = useState<"delivery" | "collection">("delivery");
   const [isTuesday, setIsTuesday] = useState(false);
+  const [notes, setNotes] = useState("");
+  const [cashAmount, setCashAmount] = useState("");
   const [itemLines, setItemLines] = useState([{ productName: "", quantity: 1 }]);
 
   const { data: products } = useQuery<any[]>({ queryKey: ["/api/products"] });
@@ -282,6 +359,8 @@ function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
       setAddress("");
       setFulfillmentType("delivery");
       setIsTuesday(false);
+      setNotes("");
+      setCashAmount("");
       setItemLines([{ productName: "", quantity: 1 }]);
     },
     onError: (error: Error) => {
@@ -300,6 +379,8 @@ function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
       deliveryAddress: fulfillmentType === "delivery" ? (address || null) : null,
       fulfillmentType,
       isTuesday,
+      notes: notes || null,
+      cashAmount: cashAmount ? cashAmount : null,
       items: validItems.map(i => ({
         productName: i.productName,
         quantity: i.quantity,
@@ -359,6 +440,29 @@ function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
               Tuesday order
             </Label>
             <Switch id="tuesday-toggle" checked={isTuesday} onCheckedChange={setIsTuesday} data-testid="switch-tuesday" />
+          </div>
+          <div>
+            <Label>Notes (optional)</Label>
+            <Textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Any customer notes or special instructions..."
+              rows={2}
+              data-testid="input-manual-notes"
+            />
+          </div>
+          <div>
+            <Label className="flex items-center gap-1"><Banknote className="w-4 h-4" />Cash Payment (optional)</Label>
+            <Input
+              type="number"
+              step="0.01"
+              min="0"
+              value={cashAmount}
+              onChange={(e) => setCashAmount(e.target.value)}
+              placeholder="0.00"
+              data-testid="input-manual-cash"
+            />
+            <p className="text-xs text-muted-foreground mt-1">Enter cash amount if payment wasn't taken online</p>
           </div>
           <div className="space-y-2">
             <Label>Items</Label>
@@ -422,6 +526,8 @@ function EditOrderDialog({ order, open, onOpenChange }: { order: OrderWithItems;
     (order.fulfillmentType as "delivery" | "collection") || "collection"
   );
   const [isTuesday, setIsTuesday] = useState(order.isTuesday || false);
+  const [notes, setNotes] = useState((order as any).notes || "");
+  const [cashAmount, setCashAmount] = useState((order as any).cashAmount ? String(parseFloat((order as any).cashAmount)) : "");
   const [itemLines, setItemLines] = useState(
     order.items.map(i => ({ productName: i.productName, quantity: i.quantity }))
   );
@@ -451,6 +557,8 @@ function EditOrderDialog({ order, open, onOpenChange }: { order: OrderWithItems;
       deliveryAddress: fulfillmentType === "delivery" ? (address || null) : null,
       fulfillmentType,
       isTuesday,
+      notes: notes || null,
+      cashAmount: cashAmount ? cashAmount : null,
       items: validItems.map(i => ({
         productName: i.productName,
         quantity: i.quantity,
@@ -504,6 +612,28 @@ function EditOrderDialog({ order, open, onOpenChange }: { order: OrderWithItems;
               Tuesday order
             </Label>
             <Switch id="edit-tuesday-toggle" checked={isTuesday} onCheckedChange={setIsTuesday} data-testid="switch-edit-tuesday" />
+          </div>
+          <div>
+            <Label>Notes (optional)</Label>
+            <Textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Any customer notes or special instructions..."
+              rows={2}
+              data-testid="input-edit-notes"
+            />
+          </div>
+          <div>
+            <Label className="flex items-center gap-1"><Banknote className="w-4 h-4" />Cash Payment (optional)</Label>
+            <Input
+              type="number"
+              step="0.01"
+              min="0"
+              value={cashAmount}
+              onChange={(e) => setCashAmount(e.target.value)}
+              placeholder="0.00"
+              data-testid="input-edit-cash"
+            />
           </div>
           <div className="space-y-2">
             <Label>Items</Label>

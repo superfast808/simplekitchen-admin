@@ -38,6 +38,8 @@ export const orders = pgTable("orders", {
   fulfillmentType: text("fulfillment_type").default("collection"),
   isManual: boolean("is_manual").notNull().default(false),
   isTuesday: boolean("is_tuesday").notNull().default(false),
+  notes: text("notes"),
+  cashAmount: decimal("cash_amount", { precision: 10, scale: 2 }),
 });
 
 export const orderItems = pgTable("order_items", {
