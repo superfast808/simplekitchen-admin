@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DateFilter, DateRangeLabel, useDateFilter } from "@/components/date-filter";
+import { OrderSourceFilter, useOrderSourceFilter } from "@/components/order-source-filter";
 import type { Order, OrderItem } from "@shared/schema";
 
 type OrderWithItems = Order & { items: OrderItem[] };
@@ -22,14 +23,17 @@ type OrderWithItems = Order & { items: OrderItem[] };
 export default function OrdersPage() {
   const { toast } = useToast();
   const dateFilter = useDateFilter();
+  const sourceFilter = useOrderSourceFilter();
   const [showManualDialog, setShowManualDialog] = useState(false);
   const [editingOrder, setEditingOrder] = useState<OrderWithItems | null>(null);
 
   const { from, to } = dateFilter;
 
-  const { data: orders, isLoading } = useQuery<OrderWithItems[]>({
+  const { data: allOrders, isLoading } = useQuery<OrderWithItems[]>({
     queryKey: ["/api/orders", `?from=${from.toISOString()}&to=${to.toISOString()}`],
   });
+
+  const orders = allOrders?.filter(sourceFilter.filterOrder);
 
   const syncMutation = useMutation({
     mutationFn: () => apiRequest("POST", "/api/woo/sync-orders"),
@@ -113,6 +117,8 @@ export default function OrdersPage() {
           <ManualOrderDialog open={showManualDialog} onOpenChange={setShowManualDialog} />
         </div>
       </div>
+
+      <OrderSourceFilter filter={sourceFilter} testIdPrefix="orders-source" />
 
       <Card>
         <CardContent className="p-0">

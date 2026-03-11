@@ -5,6 +5,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ChefHat, ChevronDown, ChevronRight } from "lucide-react";
 import { DateFilter, DateRangeLabel, useDateFilter } from "@/components/date-filter";
+import { OrderSourceFilter, useOrderSourceFilter } from "@/components/order-source-filter";
 
 type ProductBreakdown = {
   productId: number;
@@ -90,10 +91,11 @@ function ProductAccordion({ product }: { product: ProductBreakdown }) {
 
 export default function IngredientsPage() {
   const dateFilter = useDateFilter();
+  const sourceFilter = useOrderSourceFilter();
   const { from, to } = dateFilter;
 
   const { data, isLoading } = useQuery<BreakdownResponse>({
-    queryKey: ["/api/ingredient-breakdown", `?from=${from.toISOString()}&to=${to.toISOString()}`],
+    queryKey: ["/api/ingredient-breakdown", `?from=${from.toISOString()}&to=${to.toISOString()}&source=${sourceFilter.toQueryParam()}`],
   });
 
   const hasData = data && (data.products.length > 0 || data.grandTotals.length > 0);
@@ -107,6 +109,8 @@ export default function IngredientsPage() {
         </div>
         <DateFilter {...dateFilter} testIdPrefix="ing" />
       </div>
+
+      <OrderSourceFilter filter={sourceFilter} testIdPrefix="ing-source" />
 
       {isLoading ? (
         <div className="space-y-3">

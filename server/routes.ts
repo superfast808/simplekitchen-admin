@@ -13,6 +13,23 @@ import { log } from "./index";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
+function parseSourceFilter(source: string | undefined): { website: boolean; tuesday: boolean; manual: boolean } | null {
+  if (source === undefined || source === null) return null;
+  if (source === "") return { website: false, tuesday: false, manual: false };
+  const parts = source.split(",");
+  return {
+    website: parts.includes("website"),
+    tuesday: parts.includes("tuesday"),
+    manual: parts.includes("manual"),
+  };
+}
+
+function matchesSource(item: { isManual: boolean; isTuesday: boolean }, filter: { website: boolean; tuesday: boolean; manual: boolean }): boolean {
+  if (item.isTuesday) return filter.tuesday;
+  if (item.isManual) return filter.manual;
+  return filter.website;
+}
+
 let syncInterval: ReturnType<typeof setInterval> | null = null;
 let syncInProgress = false;
 let startupTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -477,8 +494,13 @@ export async function registerRoutes(
     try {
       const from = req.query.from ? new Date(req.query.from as string) : undefined;
       const to = req.query.to ? new Date(req.query.to as string) : undefined;
-      const items = await storage.getOrderItemsByDateRange(from, to);
-      const manualQtys = await storage.getManualQuantities(from, to);
+      const sourceFilter = parseSourceFilter(req.query.source as string | undefined);
+      let items = await storage.getOrderItemsByDateRange(from, to);
+      if (sourceFilter) {
+        items = items.filter(item => matchesSource(item, sourceFilter));
+      }
+      const includeManualStock = !sourceFilter || sourceFilter.manual;
+      const manualQtys = includeManualStock ? await storage.getManualQuantities(from, to) : [];
 
       const totals: Record<string, { productName: string; productId: number | null; totalOrdered: number; manualQuantity: number }> = {};
       for (const item of items) {
@@ -509,8 +531,13 @@ export async function registerRoutes(
     try {
       const from = req.query.from ? new Date(req.query.from as string) : undefined;
       const to = req.query.to ? new Date(req.query.to as string) : undefined;
-      const items = await storage.getOrderItemsByDateRange(from, to);
-      const manualQtys = await storage.getManualQuantities(from, to);
+      const sourceFilter = parseSourceFilter(req.query.source as string | undefined);
+      let items = await storage.getOrderItemsByDateRange(from, to);
+      if (sourceFilter) {
+        items = items.filter(item => matchesSource(item, sourceFilter));
+      }
+      const includeManualStock = !sourceFilter || sourceFilter.manual;
+      const manualQtys = includeManualStock ? await storage.getManualQuantities(from, to) : [];
       const allIngredients = await storage.getAllIngredients();
 
       const productQuantities: Record<number, number> = {};
@@ -546,8 +573,13 @@ export async function registerRoutes(
     try {
       const from = req.query.from ? new Date(req.query.from as string) : undefined;
       const to = req.query.to ? new Date(req.query.to as string) : undefined;
-      const items = await storage.getOrderItemsByDateRange(from, to);
-      const manualQtys = await storage.getManualQuantities(from, to);
+      const sourceFilter = parseSourceFilter(req.query.source as string | undefined);
+      let items = await storage.getOrderItemsByDateRange(from, to);
+      if (sourceFilter) {
+        items = items.filter(item => matchesSource(item, sourceFilter));
+      }
+      const includeManualStock = !sourceFilter || sourceFilter.manual;
+      const manualQtys = includeManualStock ? await storage.getManualQuantities(from, to) : [];
       const allIngredients = await storage.getAllIngredients();
       const allProducts = await storage.getProducts();
 

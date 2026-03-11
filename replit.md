@@ -58,7 +58,7 @@ A partner portal for managing food orders from a WooCommerce store. It imports o
 - `server/woocommerce.ts` - WooCommerce API client
 - `server/routes.ts` - Express API routes
 - `client/src/pages/` - Page components (orders, products, product-totals, ingredients, manual-stock, delivery-routes, settings)
-- `client/src/components/` - Shared components (app-sidebar, theme-provider, theme-toggle)
+- `client/src/components/` - Shared components (app-sidebar, date-filter, order-source-filter, theme-provider, theme-toggle)
 
 ## Delivery/Collection Detection
 - Uses WooCommerce `shipping_lines[0].method_id`: `flat_rate` = Delivery, `free_shipping` = Collection
@@ -69,6 +69,13 @@ A partner portal for managing food orders from a WooCommerce store. It imports o
 - Default date window: most recent Saturday → following Wednesday (order window), UK/London timezone
 - All pages use shared `DateFilter`/`useDateFilter` components with Sat–Wed/Month/Custom modes
 - Navigation arrows step by 7 days (one week)
+
+## Order Source Filtering
+- Reusable `OrderSourceFilter` component with checkboxes: Website, Tuesday, Manual + All/None buttons
+- Used on Orders (client-side filter), Product Totals (server-side), Ingredients (server-side)
+- Backend endpoints accept `?source=website,tuesday,manual` query param for server-side filtering
+- Categories: Website = WooCommerce synced (!isManual), Tuesday = isTuesday flag, Manual = isManual && !isTuesday
+- Tuesday orders: `isTuesday` boolean on orders table, set via toggle in manual order dialogs and auto-set by Tuesday recurring order generator
 
 ## Auto-Sync
 - Runs every N minutes (configurable via Settings page, default 60)

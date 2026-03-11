@@ -38,7 +38,7 @@ export interface IStorage {
   deleteOrder(id: number): Promise<void>;
 
   getOrderItems(orderId: number): Promise<OrderItem[]>;
-  getOrderItemsByDateRange(from?: Date, to?: Date): Promise<(OrderItem & { orderId: number })[]>;
+  getOrderItemsByDateRange(from?: Date, to?: Date): Promise<(OrderItem & { orderId: number; isManual: boolean; isTuesday: boolean })[]>;
   createOrderItem(item: InsertOrderItem): Promise<OrderItem>;
   deleteOrderItemsByOrderId(orderId: number): Promise<void>;
 
@@ -168,7 +168,7 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(orderItems).where(eq(orderItems.orderId, orderId));
   }
 
-  async getOrderItemsByDateRange(from?: Date, to?: Date): Promise<(OrderItem & { orderId: number })[]> {
+  async getOrderItemsByDateRange(from?: Date, to?: Date): Promise<(OrderItem & { orderId: number; isManual: boolean; isTuesday: boolean })[]> {
     const conditions = [];
     if (from) conditions.push(gte(orders.orderDate, from));
     if (to) conditions.push(lte(orders.orderDate, to));
@@ -180,6 +180,8 @@ export class DatabaseStorage implements IStorage {
       productName: orderItems.productName,
       quantity: orderItems.quantity,
       price: orderItems.price,
+      isManual: orders.isManual,
+      isTuesday: orders.isTuesday,
     }).from(orderItems)
       .innerJoin(orders, eq(orderItems.orderId, orders.id))
       .where(conditions.length > 0 ? and(...conditions) : undefined);

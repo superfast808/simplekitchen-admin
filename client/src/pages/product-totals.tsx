@@ -4,6 +4,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { BarChart3 } from "lucide-react";
 import { DateFilter, DateRangeLabel, useDateFilter } from "@/components/date-filter";
+import { OrderSourceFilter, useOrderSourceFilter } from "@/components/order-source-filter";
 
 type ProductTotal = {
   productName: string;
@@ -14,10 +15,11 @@ type ProductTotal = {
 
 export default function ProductTotalsPage() {
   const dateFilter = useDateFilter();
+  const sourceFilter = useOrderSourceFilter();
   const { from, to } = dateFilter;
 
   const { data: totals, isLoading } = useQuery<ProductTotal[]>({
-    queryKey: ["/api/product-totals", `?from=${from.toISOString()}&to=${to.toISOString()}`],
+    queryKey: ["/api/product-totals", `?from=${from.toISOString()}&to=${to.toISOString()}&source=${sourceFilter.toQueryParam()}`],
   });
 
   return (
@@ -29,6 +31,8 @@ export default function ProductTotalsPage() {
         </div>
         <DateFilter {...dateFilter} testIdPrefix="totals" showMonth />
       </div>
+
+      <OrderSourceFilter filter={sourceFilter} testIdPrefix="totals-source" />
 
       <Card>
         <CardContent className="p-0">
