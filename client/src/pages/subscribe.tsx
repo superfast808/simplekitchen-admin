@@ -20,6 +20,36 @@ type InviteData = {
   selections: Array<{ productName: string; quantity: number }>;
 };
 
+function BrandLogo({ size = "lg" }: { size?: "lg" | "sm" }) {
+  const { data: logoData } = useQuery<{ logo: string }>({
+    queryKey: ["/api/auth/logo"],
+    queryFn: async () => {
+      const res = await fetch("/api/auth/logo");
+      if (!res.ok) return { logo: "" };
+      return res.json();
+    },
+    retry: false,
+    staleTime: Infinity,
+  });
+
+  const dims = size === "lg" ? "w-16 h-16" : "w-14 h-14";
+  const iconDims = size === "lg" ? "w-8 h-8" : "w-7 h-7";
+
+  if (logoData?.logo) {
+    return (
+      <div className={`${dims} mx-auto rounded-2xl overflow-hidden shadow-lg`}>
+        <img src={logoData.logo} alt="Simple Kitchen Prep" className="w-full h-full object-contain" />
+      </div>
+    );
+  }
+
+  return (
+    <div className={`${dims} mx-auto rounded-2xl bg-gradient-to-br from-emerald-500 to-emerald-600 flex items-center justify-center shadow-lg`}>
+      <ChefHat className={`${iconDims} text-white`} />
+    </div>
+  );
+}
+
 export default function SubscribePage({ params }: { params: { token: string } }) {
   const token = params.token;
   const [email, setEmail] = useState("");
@@ -173,9 +203,7 @@ export default function SubscribePage({ params }: { params: { token: string } })
       <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-orange-50 dark:from-gray-900 dark:via-gray-900 dark:to-gray-900 flex items-center justify-center p-4">
         <Card className="w-full max-w-md">
           <CardHeader className="text-center space-y-3">
-            <div className="w-16 h-16 mx-auto rounded-2xl bg-gradient-to-br from-emerald-500 to-emerald-600 flex items-center justify-center shadow-lg">
-              <ChefHat className="w-8 h-8 text-white" />
-            </div>
+            <BrandLogo size="lg" />
             <div>
               <CardTitle className="text-xl">Simple Kitchen Prep</CardTitle>
               <CardDescription className="mt-1">
@@ -213,8 +241,8 @@ export default function SubscribePage({ params }: { params: { token: string } })
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-orange-50 dark:from-gray-900 dark:via-gray-900 dark:to-gray-900">
       <div className="max-w-lg mx-auto p-4 pb-32">
         <div className="text-center py-6">
-          <div className="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-emerald-500 to-emerald-600 flex items-center justify-center shadow-lg mb-3">
-            <ChefHat className="w-7 h-7 text-white" />
+          <div className="mb-3">
+            <BrandLogo size="sm" />
           </div>
           <h1 className="text-xl font-bold" data-testid="text-subscribe-title">
             Choose Your Meals
