@@ -42,7 +42,7 @@ export default function OrdersPage() {
 
   const { data: allConsistentCustomers } = useQuery<RecurringOrderWithItems[]>({
     queryKey: ["/api/recurring-orders"],
-    select: (data) => data.filter((c: any) => c.isTuesday === false),
+    select: (data) => data.filter((c: any) => c.isTuesday === false && c.active !== false),
   });
 
   const deleteConsistentMutation = useMutation({
@@ -945,6 +945,7 @@ function EditConsistentDialog({ customer, open, onOpenChange }: {
     (customer.fulfillmentType as "delivery" | "collection") || "delivery"
   );
   const [notes, setNotes] = useState((customer as any).notes || "");
+  const [active, setActive] = useState(customer.active !== false);
   const [itemLines, setItemLines] = useState(
     customer.items.length > 0
       ? customer.items.map(i => ({ productName: i.productName, quantity: i.quantity }))
@@ -975,6 +976,7 @@ function EditConsistentDialog({ customer, open, onOpenChange }: {
       customerName,
       deliveryAddress: fulfillmentType === "delivery" ? (address || null) : null,
       fulfillmentType,
+      active,
       notes: notes || null,
       items: validItems.map(i => ({
         productName: i.productName,
@@ -1031,6 +1033,18 @@ function EditConsistentDialog({ customer, open, onOpenChange }: {
               onChange={e => setNotes(e.target.value)}
               placeholder="Any regular notes..."
               data-testid="input-edit-consistent-notes"
+            />
+          </div>
+          <div className="flex items-center justify-between rounded-lg border p-3">
+            <div>
+              <p className="text-sm font-medium">Consistent customer</p>
+              <p className="text-xs text-muted-foreground">Turn off to stop this customer appearing each week</p>
+            </div>
+            <Switch
+              id="edit-consistent-active"
+              checked={active}
+              onCheckedChange={setActive}
+              data-testid="switch-edit-consistent-active"
             />
           </div>
           <div className="space-y-2">
