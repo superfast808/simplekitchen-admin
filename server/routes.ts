@@ -1073,31 +1073,38 @@ export async function registerRoutes(
         const posInPage = labelIndex % (cols * rows);
         const col = posInPage % cols;
         const row = Math.floor(posInPage / cols);
-        const x = marginLeft + col * labelW + padX;
-        const y = marginTop + row * labelH + padY;
+        const labelX = marginLeft + col * labelW;
+        const labelY = marginTop + row * labelH;
+        const x = labelX + padX;
+        const y = labelY + padY;
         const contentW = labelW - padX * 2;
-        const contentH = labelH - padY * 2;
+        const bottomEdge = labelY + labelH - padY;
 
         doc.save();
-        doc.rect(marginLeft + col * labelW, marginTop + row * labelH, labelW, labelH).clip();
+        doc.rect(labelX, labelY, labelW, labelH).clip();
 
         const isDelivery = order.fulfillmentType === "delivery";
         const tag = isDelivery ? "DELIVERY" : "COLLECTION";
 
-        doc.font("Helvetica-Bold").fontSize(11);
-        doc.text(order.customerName, x, y, { width: contentW, lineBreak: true });
+        doc.font("Helvetica-Bold").fontSize(9);
+        const nameH = doc.heightOfString(order.customerName, { width: contentW });
+        doc.text(order.customerName, x, y, { width: contentW, height: Math.min(nameH, 22) });
+        let currentY = Math.min(doc.y, y + 22) + 0.5;
 
-        let currentY = doc.y + 1;
+        if (currentY < bottomEdge - 8) {
+          doc.font("Helvetica-Bold").fontSize(6);
+          doc.text(`[ ${tag} ]`, x, currentY, { width: contentW });
+          currentY = doc.y + 1;
+        }
 
-        doc.font("Helvetica-Bold").fontSize(7);
-        const tagText = `[ ${tag} ]`;
-        doc.text(tagText, x, currentY, { width: contentW });
-        currentY = doc.y + 2;
-
-        if (order.deliveryAddress) {
-          doc.font("Helvetica").fontSize(8);
-          doc.text(order.deliveryAddress, x, currentY, { width: contentW, lineBreak: true });
-          currentY = doc.y + 3;
+        if (order.deliveryAddress && currentY < bottomEdge - 8) {
+          doc.font("Helvetica").fontSize(6.5);
+          const addrH = doc.heightOfString(order.deliveryAddress, { width: contentW });
+          const maxAddrH = Math.min(addrH, bottomEdge - currentY - 12);
+          if (maxAddrH > 7) {
+            doc.text(order.deliveryAddress, x, currentY, { width: contentW, height: maxAddrH });
+            currentY = doc.y + 1.5;
+          }
         }
 
         const itemSummary: Record<string, number> = {};
@@ -1107,17 +1114,15 @@ export async function registerRoutes(
           itemSummary[name] = (itemSummary[name] || 0) + item.quantity;
         }
         const summaryParts = Object.entries(itemSummary).map(([name, qty]) => `${qty} x ${name}`);
-        if (summaryParts.length > 0) {
-          doc.font("Helvetica").fontSize(7);
-          const maxSummaryH = (marginTop + row * labelH + labelH - padY) - currentY;
-          if (maxSummaryH > 8) {
-            doc.text(summaryParts.join(", "), x, currentY, {
-              width: contentW,
-              height: maxSummaryH,
-              lineBreak: true,
-              ellipsis: true,
-            });
-          }
+        if (summaryParts.length > 0 && currentY < bottomEdge - 6) {
+          doc.font("Helvetica").fontSize(6);
+          const maxSummaryH = bottomEdge - currentY;
+          doc.text(summaryParts.join(", "), x, currentY, {
+            width: contentW,
+            height: maxSummaryH,
+            lineBreak: true,
+            ellipsis: true,
+          });
         }
 
         doc.restore();
