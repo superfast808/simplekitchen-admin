@@ -627,6 +627,17 @@ function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
               Add Item
             </Button>
           </div>
+          <div className="flex items-center gap-2 pt-1" data-testid="toggle-save-as-consistent">
+            <Switch
+              id="save-consistent"
+              checked={saveAsConsistent}
+              onCheckedChange={setSaveAsConsistent}
+              data-testid="switch-save-consistent"
+            />
+            <Label htmlFor="save-consistent" className="text-sm cursor-pointer">
+              Save as consistent customer
+            </Label>
+          </div>
           <Button onClick={handleSubmit} disabled={createMutation.isPending} className="w-full" data-testid="button-submit-manual-order">
             {createMutation.isPending ? "Creating..." : "Create Order"}
           </Button>
@@ -915,6 +926,175 @@ function StampDialog({ customer, open, onOpenChange }: {
           <Button onClick={handleStamp} disabled={stampMutation.isPending} className="w-full" data-testid="button-confirm-stamp">
             <Stamp className="w-4 h-4 mr-1" />
             {stampMutation.isPending ? "Creating..." : "Stamp This Week's Order"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function EditConsistentDialog({ customer, open, onOpenChange }: {
+  customer: RecurringOrderWithItems;
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+}) {
+  const { toast } = useToast();
+  const [customerName, setCustomerName] = useState(customer.customerName);
+  const [address, setAddress] = useState(customer.deliveryAddress || "");
+  const [fulfillmentType, setFulfillmentType] = useState<"delivery" | "collection">(
+    (customer.fulfillmentType as "delivery" | "collection") || "delivery"
+  );
+  const [notes, setNotes] = useState((customer as any).notes || "");
+  const [itemLines, setItemLines] = useState(
+    customer.items.length > 0
+      ? customer.items.map(i => ({ productName: i.productName, quantity: i.quantity }))
+      : [{ productName: "", quantity: 1 }]
+  );
+
+  const { data: products } = useQuery<any[]>({ queryKey: ["/api/products"] });
+
+  const updateMutation = useMutation({
+    mutationFn: (data: any) => apiRequest("PATCH", `/api/recurring-orders/${customer.id}`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/recurring-orders"] });
+      toast({ title: "Consistent customer updated" });
+      onOpenChange(false);
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to update", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const handleSave = () => {
+    const validItems = itemLines.filter(i => i.productName.trim());
+    if (!customerName.trim()) {
+      toast({ title: "Customer name is required", variant: "destructive" });
+      return;
+    }
+    updateMutation.mutate({
+      customerName,
+      deliveryAddress: fulfillmentType === "delivery" ? (address || null) : null,
+      fulfillmentType,
+      notes: notes || null,
+      items: validItems.map(i => ({
+        productName: i.productName,
+        quantity: i.quantity,
+        productId: products?.find((p: any) => p.name === i.productName)?.id || null,
+      })),
+    });
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Edit Consistent Customer</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-1">
+            <Label>Customer Name</Label>
+            <Input
+              value={customerName}
+              onChange={e => setCustomerName(e.target.value)}
+              placeholder="Customer name"
+              data-testid="input-edit-consistent-name"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label>Fulfillment</Label>
+            <Select value={fulfillmentType} onValueChange={(v: "delivery" | "collection") => setFulfillmentType(v)}>
+              <SelectTrigger data-testid="select-edit-consistent-fulfillment">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="delivery">Delivery</SelectItem>
+                <SelectItem value="collection">Collection</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {fulfillmentType === "delivery" && (
+            <div className="space-y-1">
+              <Label>Delivery Address</Label>
+              <Textarea
+                value={address}
+                onChange={e => setAddress(e.target.value)}
+                placeholder="Street, City, Postcode"
+                rows={2}
+                data-testid="input-edit-consistent-address"
+              />
+            </div>
+          )}
+          <div className="space-y-1">
+            <Label>Notes</Label>
+            <Input
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+              placeholder="Any regular notes..."
+              data-testid="input-edit-consistent-notes"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Default Items</Label>
+            {itemLines.map((line, idx) => (
+              <div key={idx} className="flex gap-2">
+                <Input
+                  value={line.productName}
+                  onChange={e => {
+                    const next = [...itemLines];
+                    next[idx].productName = e.target.value;
+                    setItemLines(next);
+                  }}
+                  placeholder="Product name"
+                  className="flex-1"
+                  list="edit-consistent-products"
+                  data-testid={`input-edit-consistent-item-${idx}`}
+                />
+                <Input
+                  type="number"
+                  value={line.quantity}
+                  onChange={e => {
+                    const next = [...itemLines];
+                    next[idx].quantity = parseInt(e.target.value) || 1;
+                    setItemLines(next);
+                  }}
+                  className="w-20"
+                  min={1}
+                  data-testid={`input-edit-consistent-qty-${idx}`}
+                />
+                {itemLines.length > 1 && (
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-9 w-9 shrink-0"
+                    onClick={() => setItemLines(itemLines.filter((_, i) => i !== idx))}
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </Button>
+                )}
+              </div>
+            ))}
+            <datalist id="edit-consistent-products">
+              {(products || []).map((p: any) => (
+                <option key={p.id} value={p.name} />
+              ))}
+            </datalist>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setItemLines([...itemLines, { productName: "", quantity: 1 }])}
+              data-testid="button-edit-consistent-add-item"
+            >
+              <Plus className="w-3 h-3 mr-1" />
+              Add Item
+            </Button>
+          </div>
+          <Button
+            onClick={handleSave}
+            disabled={updateMutation.isPending}
+            className="w-full"
+            data-testid="button-save-consistent"
+          >
+            {updateMutation.isPending ? "Saving..." : "Save Changes"}
           </Button>
         </div>
       </DialogContent>
