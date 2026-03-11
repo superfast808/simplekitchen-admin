@@ -29,6 +29,7 @@ export default function TuesdayOrdersPage() {
 
   const { data: orders, isLoading } = useQuery<RecurringOrderWithItems[]>({
     queryKey: ["/api/recurring-orders"],
+    select: (data) => data.filter((o: any) => o.isTuesday !== false),
   });
 
   const { data: manualOrders } = useQuery<OrderWithItems[]>({

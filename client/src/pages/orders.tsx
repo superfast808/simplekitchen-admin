@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from "@/components/ui/table";
-import { RefreshCw, Trash2, Plus, ShoppingCart, Download, Tag, Pencil, CalendarCheck, Banknote, MessageSquare } from "lucide-react";
+import { RefreshCw, Trash2, Plus, ShoppingCart, Download, Tag, Pencil, CalendarCheck, Banknote, MessageSquare, UserCheck, ChevronDown, ChevronUp, Stamp } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -18,9 +18,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DateFilter, DateRangeLabel, useDateFilter } from "@/components/date-filter";
 import { OrderSourceFilter, useOrderSourceFilter } from "@/components/order-source-filter";
-import type { Order, OrderItem } from "@shared/schema";
+import type { Order, OrderItem, RecurringOrder, RecurringOrderItem } from "@shared/schema";
 
 type OrderWithItems = Order & { items: OrderItem[] };
+type RecurringOrderWithItems = RecurringOrder & { items: RecurringOrderItem[] };
 
 export default function OrdersPage() {
   const { toast } = useToast();
@@ -29,11 +30,26 @@ export default function OrdersPage() {
   const [dayFilter, setDayFilter] = useState<"all" | "saturday" | "tuesday">("all");
   const [showManualDialog, setShowManualDialog] = useState(false);
   const [editingOrder, setEditingOrder] = useState<OrderWithItems | null>(null);
+  const [showConsistent, setShowConsistent] = useState(true);
+  const [stampingCustomer, setStampingCustomer] = useState<RecurringOrderWithItems | null>(null);
 
   const { from, to } = dateFilter;
 
   const { data: allOrders, isLoading } = useQuery<OrderWithItems[]>({
     queryKey: ["/api/orders", `?from=${from.toISOString()}&to=${to.toISOString()}`],
+  });
+
+  const { data: allConsistentCustomers } = useQuery<RecurringOrderWithItems[]>({
+    queryKey: ["/api/recurring-orders"],
+    select: (data) => data.filter((c: any) => c.isTuesday === false),
+  });
+
+  const deleteConsistentMutation = useMutation({
+    mutationFn: (id: number) => apiRequest("DELETE", `/api/recurring-orders/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/recurring-orders"] });
+      toast({ title: "Consistent customer removed" });
+    },
   });
 
   const orders = allOrders?.filter(o => {
@@ -139,6 +155,77 @@ export default function OrdersPage() {
           </Button>
         ))}
       </div>
+
+      {(allConsistentCustomers && allConsistentCustomers.length > 0) && (
+        <Card data-testid="card-consistent-customers">
+          <CardContent className="p-0">
+            <button
+              className="w-full flex items-center justify-between px-4 py-3 text-left"
+              onClick={() => setShowConsistent(v => !v)}
+              data-testid="button-toggle-consistent"
+            >
+              <div className="flex items-center gap-2">
+                <UserCheck className="w-4 h-4 text-muted-foreground" />
+                <span className="font-medium text-sm">Consistent Customers</span>
+                <Badge variant="secondary" className="text-xs">{allConsistentCustomers.length}</Badge>
+              </div>
+              {showConsistent ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+            </button>
+            {showConsistent && (
+              <div className="border-t">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Customer</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead>Default Items</TableHead>
+                      <TableHead className="w-[130px]"></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {allConsistentCustomers.map(c => (
+                      <TableRow key={c.id} data-testid={`row-consistent-${c.id}`}>
+                        <TableCell className="font-medium">{c.customerName}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className="text-xs capitalize">{c.fulfillmentType}</Badge>
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {c.items.length === 0
+                            ? <span className="italic">No items set</span>
+                            : c.items.map(i => `${i.quantity}×${i.productName}`).join(", ")}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1">
+                            <Button
+                              size="sm"
+                              variant="default"
+                              className="h-7 text-xs"
+                              onClick={() => setStampingCustomer(c)}
+                              data-testid={`button-stamp-${c.id}`}
+                            >
+                              <Stamp className="w-3 h-3 mr-1" />
+                              This week
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-7 w-7"
+                              onClick={() => deleteConsistentMutation.mutate(c.id)}
+                              data-testid={`button-remove-consistent-${c.id}`}
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <OrderSourceFilter filter={sourceFilter} testIdPrefix="orders-source" />
 
@@ -333,6 +420,13 @@ export default function OrdersPage() {
           onOpenChange={(v) => { if (!v) setEditingOrder(null); }}
         />
       )}
+      {stampingCustomer && (
+        <StampDialog
+          customer={stampingCustomer}
+          open={!!stampingCustomer}
+          onOpenChange={(v) => { if (!v) setStampingCustomer(null); }}
+        />
+      )}
     </div>
   );
 }
@@ -353,7 +447,8 @@ function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
     mutationFn: (data: any) => apiRequest("POST", "/api/orders", data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
-      toast({ title: "Manual order created" });
+      queryClient.invalidateQueries({ queryKey: ["/api/recurring-orders"] });
+      toast({ title: "Manual order created", description: "Customer saved for future weeks." });
       onOpenChange(false);
       setCustomerName("");
       setAddress("");
@@ -682,6 +777,121 @@ function EditOrderDialog({ order, open, onOpenChange }: { order: OrderWithItems;
           </div>
           <Button onClick={handleSubmit} disabled={updateMutation.isPending} className="w-full" data-testid="button-submit-edit-order">
             {updateMutation.isPending ? "Saving..." : "Save Changes"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function StampDialog({ customer, open, onOpenChange }: {
+  customer: RecurringOrderWithItems;
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+}) {
+  const { toast } = useToast();
+  const [itemLines, setItemLines] = useState(
+    customer.items.length > 0
+      ? customer.items.map(i => ({ productName: i.productName, quantity: i.quantity }))
+      : [{ productName: "", quantity: 1 }]
+  );
+
+  const { data: products } = useQuery<any[]>({ queryKey: ["/api/products"] });
+
+  const stampMutation = useMutation({
+    mutationFn: (items: any[]) => apiRequest("POST", `/api/recurring-orders/${customer.id}/stamp`, { items }),
+    onSuccess: async () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      toast({ title: `Order created for ${customer.customerName}` });
+      onOpenChange(false);
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to stamp order", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const handleStamp = () => {
+    const validItems = itemLines.filter(i => i.productName.trim());
+    if (validItems.length === 0) {
+      toast({ title: "Add at least one item", variant: "destructive" });
+      return;
+    }
+    stampMutation.mutate(validItems);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>
+            <span className="flex items-center gap-2">
+              <Stamp className="w-4 h-4" />
+              {customer.customerName} — This Week
+            </span>
+          </DialogTitle>
+        </DialogHeader>
+        <p className="text-sm text-muted-foreground -mt-2">
+          Adjust quantities if needed, then stamp to create this week's order.
+        </p>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label>Items</Label>
+            {itemLines.map((line, idx) => (
+              <div key={idx} className="flex gap-2">
+                <Input
+                  value={line.productName}
+                  onChange={(e) => {
+                    const newLines = [...itemLines];
+                    newLines[idx].productName = e.target.value;
+                    setItemLines(newLines);
+                  }}
+                  placeholder="Product name"
+                  className="flex-1"
+                  list="stamp-product-suggestions"
+                  data-testid={`input-stamp-item-${idx}`}
+                />
+                <Input
+                  type="number"
+                  value={line.quantity}
+                  onChange={(e) => {
+                    const newLines = [...itemLines];
+                    newLines[idx].quantity = parseInt(e.target.value) || 1;
+                    setItemLines(newLines);
+                  }}
+                  className="w-20"
+                  min={1}
+                  data-testid={`input-stamp-qty-${idx}`}
+                />
+                {itemLines.length > 1 && (
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-9 w-9 shrink-0"
+                    onClick={() => setItemLines(itemLines.filter((_, i) => i !== idx))}
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </Button>
+                )}
+              </div>
+            ))}
+            <datalist id="stamp-product-suggestions">
+              {(products || []).map((p: any) => (
+                <option key={p.id} value={p.name} />
+              ))}
+            </datalist>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setItemLines([...itemLines, { productName: "", quantity: 1 }])}
+              data-testid="button-stamp-add-item"
+            >
+              <Plus className="w-3 h-3 mr-1" />
+              Add Item
+            </Button>
+          </div>
+          <Button onClick={handleStamp} disabled={stampMutation.isPending} className="w-full" data-testid="button-confirm-stamp">
+            <Stamp className="w-4 h-4 mr-1" />
+            {stampMutation.isPending ? "Creating..." : "Stamp This Week's Order"}
           </Button>
         </div>
       </DialogContent>

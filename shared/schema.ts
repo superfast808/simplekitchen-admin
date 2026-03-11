@@ -91,6 +91,8 @@ export const recurringOrders = pgTable("recurring_orders", {
   deliveryAddress: text("delivery_address"),
   fulfillmentType: text("fulfillment_type").notNull().default("delivery"),
   active: boolean("active").notNull().default(true),
+  isTuesday: boolean("is_tuesday").notNull().default(true),
+  notes: text("notes"),
 });
 
 export const recurringOrderItems = pgTable("recurring_order_items", {
