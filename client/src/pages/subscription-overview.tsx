@@ -53,9 +53,22 @@ export default function SubscriptionOverviewPage() {
     },
     onSuccess: async (res) => {
       const data = await res.json();
+      let desc = "";
+      if (data.sent > 0) {
+        desc = `${data.sent} email${data.sent !== 1 ? "s" : ""} sent successfully.`;
+      }
+      if (data.skipped > 0) {
+        desc += `${desc ? " " : ""}${data.skipped} already invited this week (skipped).`;
+      }
+      if (data.sent === 0 && data.skipped === 0 && data.message) {
+        desc = data.message;
+      }
+      if (data.errors?.length) {
+        desc += ` Errors: ${data.errors.join(", ")}`;
+      }
       toast({
-        title: "Emails sent",
-        description: `${data.sent} of ${data.total || data.sent} emails sent successfully${data.errors?.length ? `. Errors: ${data.errors.join(", ")}` : ""}`,
+        title: data.sent > 0 ? "Emails sent" : (data.skipped > 0 ? "Already sent" : "No emails sent"),
+        description: desc || "No subscription customers found this week.",
       });
       queryClient.invalidateQueries({ queryKey: ["/api/subscription-invites"] });
     },
