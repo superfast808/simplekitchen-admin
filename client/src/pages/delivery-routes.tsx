@@ -30,11 +30,13 @@ export default function DeliveryRoutesPage() {
   const mapInstanceRef = useRef<any>(null);
   const [geocodedAddresses, setGeocodedAddresses] = useState<DeliveryAddress[]>([]);
   const [isGeocoding, setIsGeocoding] = useState(false);
+  const [routeView, setRouteView] = useState<"website" | "tuesday">("website");
 
   const { from, to } = dateFilter;
 
+  const tuesdayParam = routeView === "tuesday" ? "true" : "false";
   const { data: addresses, isLoading } = useQuery<DeliveryAddress[]>({
-    queryKey: ["/api/delivery-addresses", `?from=${from.toISOString()}&to=${to.toISOString()}`],
+    queryKey: ["/api/delivery-addresses", `?from=${from.toISOString()}&to=${to.toISOString()}&tuesday=${tuesdayParam}`],
   });
 
   useEffect(() => {
@@ -183,10 +185,34 @@ export default function DeliveryRoutesPage() {
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight" data-testid="text-routes-title">Planned Delivery Route</h1>
+          <h1 className="text-2xl font-semibold tracking-tight" data-testid="text-routes-title">
+            {routeView === "tuesday" ? "Tuesday Delivery Route" : "Planned Delivery Route"}
+          </h1>
           <DateRangeLabel from={from} to={to} />
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex rounded-md border" data-testid="toggle-route-view">
+            <Button
+              size="sm"
+              variant={routeView === "website" ? "default" : "ghost"}
+              onClick={() => setRouteView("website")}
+              className="rounded-r-none"
+              data-testid="button-view-website"
+            >
+              <Home className="w-4 h-4 mr-1" />
+              Website
+            </Button>
+            <Button
+              size="sm"
+              variant={routeView === "tuesday" ? "default" : "ghost"}
+              onClick={() => setRouteView("tuesday")}
+              className="rounded-l-none"
+              data-testid="button-view-tuesday"
+            >
+              <Truck className="w-4 h-4 mr-1" />
+              Tuesday
+            </Button>
+          </div>
           <DateFilter {...dateFilter} testIdPrefix="route" />
         </div>
       </div>

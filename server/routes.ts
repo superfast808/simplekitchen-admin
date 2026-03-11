@@ -429,6 +429,7 @@ export async function registerRoutes(
       if (updates.deliveryAddress !== undefined) orderUpdate.deliveryAddress = updates.deliveryAddress;
       if (updates.fulfillmentType !== undefined) orderUpdate.fulfillmentType = updates.fulfillmentType;
       if (updates.status !== undefined) orderUpdate.status = updates.status;
+      if (updates.isTuesday !== undefined) orderUpdate.isTuesday = updates.isTuesday;
 
       const updated = await storage.updateOrder(id, orderUpdate);
 
@@ -788,9 +789,16 @@ export async function registerRoutes(
     try {
       const from = req.query.from ? new Date(req.query.from as string) : undefined;
       const to = req.query.to ? new Date(req.query.to as string) : undefined;
+      const tuesdayFilter = req.query.tuesday as string | undefined;
       const ordersList = await storage.getOrders(from, to);
+      let filtered = ordersList;
+      if (tuesdayFilter === "true") {
+        filtered = ordersList.filter(o => o.isTuesday);
+      } else if (tuesdayFilter === "false") {
+        filtered = ordersList.filter(o => !o.isTuesday);
+      }
       const ordersWithItems = await Promise.all(
-        ordersList.map(async (order) => {
+        filtered.map(async (order) => {
           const items = await storage.getOrderItems(order.id);
           return { ...order, items };
         })
@@ -1465,6 +1473,7 @@ export async function registerRoutes(
           orderDate: new Date(),
           status: "processing",
           isManual: true,
+          isTuesday: true,
         });
 
         for (const item of items) {

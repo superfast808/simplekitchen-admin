@@ -7,8 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from "@/components/ui/table";
-import { RefreshCw, Trash2, Plus, ShoppingCart, Download, Tag, Pencil } from "lucide-react";
+import { RefreshCw, Trash2, Plus, ShoppingCart, Download, Tag, Pencil, CalendarCheck } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -144,10 +145,15 @@ export default function OrdersPage() {
                   {orders.map((order) => (
                     <TableRow key={order.id} data-testid={`row-order-${order.id}`}>
                       <TableCell className="font-medium">
-                        <div>
+                        <div className="flex items-center gap-1 flex-wrap">
                           <span data-testid={`text-customer-${order.id}`}>{order.customerName}</span>
                           {order.isManual && (
-                            <Badge variant="outline" className="ml-2 text-xs">Manual</Badge>
+                            <Badge variant="outline" className="text-xs">Manual</Badge>
+                          )}
+                          {order.isTuesday && (
+                            <Badge variant="outline" className="text-xs border-amber-400 text-amber-600 dark:text-amber-400" data-testid={`badge-tuesday-${order.id}`}>
+                              <CalendarCheck className="w-3 h-3 mr-0.5" />Tue
+                            </Badge>
                           )}
                         </div>
                         <span className="text-xs text-muted-foreground">
@@ -255,6 +261,7 @@ function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
   const [customerName, setCustomerName] = useState("");
   const [address, setAddress] = useState("");
   const [fulfillmentType, setFulfillmentType] = useState<"delivery" | "collection">("delivery");
+  const [isTuesday, setIsTuesday] = useState(false);
   const [itemLines, setItemLines] = useState([{ productName: "", quantity: 1 }]);
 
   const { data: products } = useQuery<any[]>({ queryKey: ["/api/products"] });
@@ -268,6 +275,7 @@ function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
       setCustomerName("");
       setAddress("");
       setFulfillmentType("delivery");
+      setIsTuesday(false);
       setItemLines([{ productName: "", quantity: 1 }]);
     },
     onError: (error: Error) => {
@@ -285,6 +293,7 @@ function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
       customerName,
       deliveryAddress: fulfillmentType === "delivery" ? (address || null) : null,
       fulfillmentType,
+      isTuesday,
       items: validItems.map(i => ({
         productName: i.productName,
         quantity: i.quantity,
@@ -301,7 +310,7 @@ function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
           Manual Order
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Add Manual Order</DialogTitle>
         </DialogHeader>
@@ -338,6 +347,13 @@ function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
               />
             </div>
           )}
+          <div className="flex items-center justify-between">
+            <Label htmlFor="tuesday-toggle" className="flex items-center gap-2 cursor-pointer">
+              <CalendarCheck className="w-4 h-4 text-muted-foreground" />
+              Tuesday order
+            </Label>
+            <Switch id="tuesday-toggle" checked={isTuesday} onCheckedChange={setIsTuesday} data-testid="switch-tuesday" />
+          </div>
           <div className="space-y-2">
             <Label>Items</Label>
             {itemLines.map((line, idx) => (
@@ -399,6 +415,7 @@ function EditOrderDialog({ order, open, onOpenChange }: { order: OrderWithItems;
   const [fulfillmentType, setFulfillmentType] = useState<"delivery" | "collection">(
     (order.fulfillmentType as "delivery" | "collection") || "collection"
   );
+  const [isTuesday, setIsTuesday] = useState(order.isTuesday || false);
   const [itemLines, setItemLines] = useState(
     order.items.map(i => ({ productName: i.productName, quantity: i.quantity }))
   );
@@ -427,6 +444,7 @@ function EditOrderDialog({ order, open, onOpenChange }: { order: OrderWithItems;
       customerName,
       deliveryAddress: fulfillmentType === "delivery" ? (address || null) : null,
       fulfillmentType,
+      isTuesday,
       items: validItems.map(i => ({
         productName: i.productName,
         quantity: i.quantity,
@@ -437,7 +455,7 @@ function EditOrderDialog({ order, open, onOpenChange }: { order: OrderWithItems;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Edit Order</DialogTitle>
         </DialogHeader>
@@ -474,6 +492,13 @@ function EditOrderDialog({ order, open, onOpenChange }: { order: OrderWithItems;
               />
             </div>
           )}
+          <div className="flex items-center justify-between">
+            <Label htmlFor="edit-tuesday-toggle" className="flex items-center gap-2 cursor-pointer">
+              <CalendarCheck className="w-4 h-4 text-muted-foreground" />
+              Tuesday order
+            </Label>
+            <Switch id="edit-tuesday-toggle" checked={isTuesday} onCheckedChange={setIsTuesday} data-testid="switch-edit-tuesday" />
+          </div>
           <div className="space-y-2">
             <Label>Items</Label>
             {itemLines.map((line, idx) => (

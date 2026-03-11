@@ -37,6 +37,7 @@ export const orders = pgTable("orders", {
   status: text("status").notNull().default("processing"),
   fulfillmentType: text("fulfillment_type").default("collection"),
   isManual: boolean("is_manual").notNull().default(false),
+  isTuesday: boolean("is_tuesday").notNull().default(false),
 });
 
 export const orderItems = pgTable("order_items", {

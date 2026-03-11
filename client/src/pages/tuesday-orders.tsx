@@ -33,7 +33,7 @@ export default function TuesdayOrdersPage() {
 
   const { data: manualOrders } = useQuery<OrderWithItems[]>({
     queryKey: ["/api/orders", `?from=${from.toISOString()}&to=${to.toISOString()}`],
-    select: (data) => data.filter(o => o.isManual),
+    select: (data) => data.filter(o => o.isManual && o.isTuesday),
   });
 
   const deleteMutation = useMutation({
@@ -356,7 +356,7 @@ function EditManualOrderDialog({ order, open, onOpenChange }: { order: OrderWith
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Edit Manual Order</DialogTitle>
         </DialogHeader>
@@ -476,7 +476,7 @@ function RecurringOrderDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{mode === "create" ? "Add Recurring Customer" : "Edit Recurring Order"}</DialogTitle>
         </DialogHeader>
