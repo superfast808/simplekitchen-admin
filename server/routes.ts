@@ -411,6 +411,47 @@ export async function registerRoutes(
     }
   });
 
+  app.patch("/api/orders/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const existing = await storage.getOrder(id);
+      if (!existing) {
+        return res.status(404).json({ message: "Order not found" });
+      }
+      if (!existing.isManual) {
+        return res.status(400).json({ message: "Only manual orders can be edited" });
+      }
+
+      const { items, ...updates } = req.body;
+
+      const orderUpdate: any = {};
+      if (updates.customerName !== undefined) orderUpdate.customerName = updates.customerName;
+      if (updates.deliveryAddress !== undefined) orderUpdate.deliveryAddress = updates.deliveryAddress;
+      if (updates.fulfillmentType !== undefined) orderUpdate.fulfillmentType = updates.fulfillmentType;
+      if (updates.status !== undefined) orderUpdate.status = updates.status;
+
+      const updated = await storage.updateOrder(id, orderUpdate);
+
+      if (items && Array.isArray(items)) {
+        await storage.deleteOrderItemsByOrderId(id);
+        for (const item of items) {
+          await storage.createOrderItem({
+            orderId: id,
+            productId: item.productId || null,
+            productName: item.productName,
+            quantity: item.quantity,
+            price: item.price || "0",
+          });
+        }
+      }
+
+      const orderItems = await storage.getOrderItems(id);
+      res.json({ ...updated, items: orderItems });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   app.delete("/api/orders/:id", async (req, res) => {
     try {
       await storage.deleteOrder(parseInt(req.params.id));

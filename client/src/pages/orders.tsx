@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from "@/components/ui/table";
-import { RefreshCw, Trash2, Plus, ShoppingCart, Download, Tag } from "lucide-react";
+import { RefreshCw, Trash2, Plus, ShoppingCart, Download, Tag, Pencil } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -21,6 +22,7 @@ export default function OrdersPage() {
   const { toast } = useToast();
   const dateFilter = useDateFilter();
   const [showManualDialog, setShowManualDialog] = useState(false);
+  const [editingOrder, setEditingOrder] = useState<OrderWithItems | null>(null);
 
   const { from, to } = dateFilter;
 
@@ -183,14 +185,26 @@ export default function OrdersPage() {
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          onClick={() => deleteMutation.mutate(order.id)}
-                          data-testid={`button-delete-order-${order.id}`}
-                        >
-                          <Trash2 className="w-4 h-4 text-muted-foreground" />
-                        </Button>
+                        <div className="flex gap-1">
+                          {order.isManual && (
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              onClick={() => setEditingOrder(order)}
+                              data-testid={`button-edit-order-${order.id}`}
+                            >
+                              <Pencil className="w-4 h-4 text-muted-foreground" />
+                            </Button>
+                          )}
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => deleteMutation.mutate(order.id)}
+                            data-testid={`button-delete-order-${order.id}`}
+                          >
+                            <Trash2 className="w-4 h-4 text-muted-foreground" />
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -224,6 +238,14 @@ export default function OrdersPage() {
           )}
         </CardContent>
       </Card>
+
+      {editingOrder && (
+        <EditOrderDialog
+          order={editingOrder}
+          open={!!editingOrder}
+          onOpenChange={(v) => { if (!v) setEditingOrder(null); }}
+        />
+      )}
     </div>
   );
 }
@@ -232,6 +254,7 @@ function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
   const { toast } = useToast();
   const [customerName, setCustomerName] = useState("");
   const [address, setAddress] = useState("");
+  const [fulfillmentType, setFulfillmentType] = useState<"delivery" | "collection">("delivery");
   const [itemLines, setItemLines] = useState([{ productName: "", quantity: 1 }]);
 
   const { data: products } = useQuery<any[]>({ queryKey: ["/api/products"] });
@@ -244,6 +267,7 @@ function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
       onOpenChange(false);
       setCustomerName("");
       setAddress("");
+      setFulfillmentType("delivery");
       setItemLines([{ productName: "", quantity: 1 }]);
     },
     onError: (error: Error) => {
@@ -260,6 +284,7 @@ function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
     createMutation.mutate({
       customerName,
       deliveryAddress: address || null,
+      fulfillmentType,
       items: validItems.map(i => ({
         productName: i.productName,
         quantity: i.quantity,
@@ -291,14 +316,28 @@ function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
             />
           </div>
           <div>
-            <Label>Delivery Address</Label>
-            <Input
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              placeholder="Delivery address (optional)"
-              data-testid="input-manual-address"
-            />
+            <Label>Order Type</Label>
+            <Select value={fulfillmentType} onValueChange={(v) => setFulfillmentType(v as "delivery" | "collection")} data-testid="select-manual-fulfillment">
+              <SelectTrigger data-testid="select-manual-fulfillment-trigger">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="delivery">Delivery</SelectItem>
+                <SelectItem value="collection">Collection</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
+          {fulfillmentType === "delivery" && (
+            <div>
+              <Label>Delivery Address</Label>
+              <Input
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                placeholder="Delivery address"
+                data-testid="input-manual-address"
+              />
+            </div>
+          )}
           <div className="space-y-2">
             <Label>Items</Label>
             {itemLines.map((line, idx) => (
@@ -346,6 +385,142 @@ function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
           </div>
           <Button onClick={handleSubmit} disabled={createMutation.isPending} className="w-full" data-testid="button-submit-manual-order">
             {createMutation.isPending ? "Creating..." : "Create Order"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function EditOrderDialog({ order, open, onOpenChange }: { order: OrderWithItems; open: boolean; onOpenChange: (v: boolean) => void }) {
+  const { toast } = useToast();
+  const [customerName, setCustomerName] = useState(order.customerName);
+  const [address, setAddress] = useState(order.deliveryAddress || "");
+  const [fulfillmentType, setFulfillmentType] = useState<"delivery" | "collection">(
+    (order.fulfillmentType as "delivery" | "collection") || "collection"
+  );
+  const [itemLines, setItemLines] = useState(
+    order.items.map(i => ({ productName: i.productName, quantity: i.quantity }))
+  );
+
+  const { data: products } = useQuery<any[]>({ queryKey: ["/api/products"] });
+
+  const updateMutation = useMutation({
+    mutationFn: (data: any) => apiRequest("PATCH", `/api/orders/${order.id}`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      toast({ title: "Order updated" });
+      onOpenChange(false);
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to update order", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const handleSubmit = () => {
+    const validItems = itemLines.filter(i => i.productName.trim());
+    if (!customerName.trim() || validItems.length === 0) {
+      toast({ title: "Please fill in customer name and at least one item", variant: "destructive" });
+      return;
+    }
+    updateMutation.mutate({
+      customerName,
+      deliveryAddress: fulfillmentType === "delivery" ? (address || null) : null,
+      fulfillmentType,
+      items: validItems.map(i => ({
+        productName: i.productName,
+        quantity: i.quantity,
+        productId: products?.find((p: any) => p.name === i.productName)?.id || null,
+      })),
+    });
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Edit Order</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div>
+            <Label>Customer Name</Label>
+            <Input
+              value={customerName}
+              onChange={(e) => setCustomerName(e.target.value)}
+              placeholder="Customer name"
+              data-testid="input-edit-customer"
+            />
+          </div>
+          <div>
+            <Label>Order Type</Label>
+            <Select value={fulfillmentType} onValueChange={(v) => setFulfillmentType(v as "delivery" | "collection")} data-testid="select-edit-fulfillment">
+              <SelectTrigger data-testid="select-edit-fulfillment-trigger">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="delivery">Delivery</SelectItem>
+                <SelectItem value="collection">Collection</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {fulfillmentType === "delivery" && (
+            <div>
+              <Label>Delivery Address</Label>
+              <Input
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                placeholder="Delivery address"
+                data-testid="input-edit-address"
+              />
+            </div>
+          )}
+          <div className="space-y-2">
+            <Label>Items</Label>
+            {itemLines.map((line, idx) => (
+              <div key={idx} className="flex gap-2">
+                <Input
+                  value={line.productName}
+                  onChange={(e) => {
+                    const newLines = [...itemLines];
+                    newLines[idx].productName = e.target.value;
+                    setItemLines(newLines);
+                  }}
+                  placeholder="Product name"
+                  className="flex-1"
+                  list="edit-product-suggestions"
+                  data-testid={`input-edit-item-${idx}`}
+                />
+                <Input
+                  type="number"
+                  value={line.quantity}
+                  onChange={(e) => {
+                    const newLines = [...itemLines];
+                    newLines[idx].quantity = parseInt(e.target.value) || 1;
+                    setItemLines(newLines);
+                  }}
+                  className="w-20"
+                  min={1}
+                  data-testid={`input-edit-qty-${idx}`}
+                />
+              </div>
+            ))}
+            <datalist id="edit-product-suggestions">
+              {(products || []).map((p: any) => (
+                <option key={p.id} value={p.name} />
+              ))}
+            </datalist>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setItemLines([...itemLines, { productName: "", quantity: 1 }])}
+              data-testid="button-edit-add-item"
+            >
+              <Plus className="w-3 h-3 mr-1" />
+              Add Item
+            </Button>
+          </div>
+          <Button onClick={handleSubmit} disabled={updateMutation.isPending} className="w-full" data-testid="button-submit-edit-order">
+            {updateMutation.isPending ? "Saving..." : "Save Changes"}
           </Button>
         </div>
       </DialogContent>
