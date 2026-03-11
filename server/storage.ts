@@ -2,12 +2,15 @@ import { db } from "./db";
 import { eq, gte, lte, and, sql } from "drizzle-orm";
 import {
   products, ingredients, orders, orderItems, manualQuantities, settings, users,
+  subscriptionInvites, subscriptionSelections,
   type Product, type InsertProduct,
   type Ingredient, type InsertIngredient,
   type Order, type InsertOrder,
   type OrderItem, type InsertOrderItem,
   type ManualQuantity, type InsertManualQuantity,
   type Setting, type User, type InsertUser,
+  type SubscriptionInvite, type InsertSubscriptionInvite,
+  type SubscriptionSelection, type InsertSubscriptionSelection,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -51,6 +54,14 @@ export interface IStorage {
   createUser(user: InsertUser): Promise<User>;
   deleteUser(id: string): Promise<void>;
   countUsers(): Promise<number>;
+
+  createSubscriptionInvite(invite: InsertSubscriptionInvite): Promise<SubscriptionInvite>;
+  getSubscriptionInviteByToken(token: string): Promise<SubscriptionInvite | undefined>;
+  getSubscriptionInvites(from?: Date, to?: Date): Promise<SubscriptionInvite[]>;
+  updateSubscriptionInviteStatus(id: number, status: string): Promise<void>;
+  createSubscriptionSelection(selection: InsertSubscriptionSelection): Promise<SubscriptionSelection>;
+  getSubscriptionSelections(inviteId: number): Promise<SubscriptionSelection[]>;
+  deleteSubscriptionSelectionsByInviteId(inviteId: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -236,6 +247,42 @@ export class DatabaseStorage implements IStorage {
   async countUsers(): Promise<number> {
     const result = await db.select({ count: sql<number>`count(*)` }).from(users);
     return Number(result[0].count);
+  }
+
+  async createSubscriptionInvite(invite: InsertSubscriptionInvite): Promise<SubscriptionInvite> {
+    const [created] = await db.insert(subscriptionInvites).values(invite).returning();
+    return created;
+  }
+
+  async getSubscriptionInviteByToken(token: string): Promise<SubscriptionInvite | undefined> {
+    const [invite] = await db.select().from(subscriptionInvites).where(eq(subscriptionInvites.token, token));
+    return invite;
+  }
+
+  async getSubscriptionInvites(from?: Date, to?: Date): Promise<SubscriptionInvite[]> {
+    const conditions = [];
+    if (from) conditions.push(gte(subscriptionInvites.weekFrom, from));
+    if (to) conditions.push(lte(subscriptionInvites.weekTo, to));
+    return db.select().from(subscriptionInvites)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(subscriptionInvites.customerName);
+  }
+
+  async updateSubscriptionInviteStatus(id: number, status: string): Promise<void> {
+    await db.update(subscriptionInvites).set({ status }).where(eq(subscriptionInvites.id, id));
+  }
+
+  async createSubscriptionSelection(selection: InsertSubscriptionSelection): Promise<SubscriptionSelection> {
+    const [created] = await db.insert(subscriptionSelections).values(selection).returning();
+    return created;
+  }
+
+  async getSubscriptionSelections(inviteId: number): Promise<SubscriptionSelection[]> {
+    return db.select().from(subscriptionSelections).where(eq(subscriptionSelections.inviteId, inviteId));
+  }
+
+  async deleteSubscriptionSelectionsByInviteId(inviteId: number): Promise<void> {
+    await db.delete(subscriptionSelections).where(eq(subscriptionSelections.inviteId, inviteId));
   }
 }
 

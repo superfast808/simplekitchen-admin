@@ -7,6 +7,8 @@ import * as XLSX from "xlsx";
 import PDFDocument from "pdfkit";
 import multer from "multer";
 import bcrypt from "bcrypt";
+import nodemailer from "nodemailer";
+import crypto from "crypto";
 import { log } from "./index";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
@@ -1045,6 +1047,270 @@ export async function registerRoutes(
     try {
       await storage.setSetting("logo", "");
       res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  function getWeekRange(offset = 0): { from: Date; to: Date } {
+    const now = new Date();
+    const ukNow = new Date(now.toLocaleString("en-US", { timeZone: "Europe/London" }));
+    const dayOfWeek = ukNow.getDay();
+    let saturdayDate: Date;
+    if (dayOfWeek === 6) {
+      saturdayDate = new Date(ukNow);
+    } else {
+      const daysBack = dayOfWeek === 0 ? 1 : dayOfWeek + 1;
+      saturdayDate = new Date(ukNow);
+      saturdayDate.setDate(saturdayDate.getDate() - daysBack);
+    }
+    if (offset !== 0) {
+      saturdayDate.setDate(saturdayDate.getDate() + offset * 7);
+    }
+    const from = new Date(saturdayDate);
+    from.setHours(0, 0, 0, 0);
+    const to = new Date(saturdayDate);
+    to.setDate(to.getDate() + 4);
+    to.setHours(23, 59, 59, 999);
+    return { from, to };
+  }
+
+  const smtpTransporter = process.env.SMTP_HOST ? nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: parseInt(process.env.SMTP_PORT || "587"),
+    secure: parseInt(process.env.SMTP_PORT || "587") === 465,
+    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+  }) : null;
+
+  app.post("/api/subscription-invites/send", async (req, res) => {
+    try {
+      if (!smtpTransporter) {
+        return res.status(500).json({ message: "SMTP not configured" });
+      }
+      const { overrideEmail } = req.body;
+      const week = getWeekRange(0);
+
+      const ordersList = await storage.getOrders(week.from, week.to);
+      const ordersWithItems = await Promise.all(
+        ordersList.map(async (order) => {
+          const items = await storage.getOrderItems(order.id);
+          return { ...order, items };
+        })
+      );
+
+      const subscriptionPattern = /meal\s+subscription\s*-\s*(\d+)/i;
+      const subOrders = ordersWithItems.filter(o =>
+        o.items.some(i => subscriptionPattern.test(i.productName))
+      );
+
+      if (subOrders.length === 0) {
+        return res.json({ sent: 0, message: "No subscription orders found this week" });
+      }
+
+      const existingInvites = await storage.getSubscriptionInvites(week.from, week.to);
+      const alreadyInvitedOrderIds = new Set(existingInvites.map(i => i.orderId));
+
+      const protocol = req.headers["x-forwarded-proto"] || "https";
+      const host = req.headers.host;
+      const baseUrl = `${protocol}://${host}`;
+
+      let sent = 0;
+      let skipped = 0;
+      const errors: string[] = [];
+      for (const order of subOrders) {
+        if (alreadyInvitedOrderIds.has(order.id)) {
+          skipped++;
+          continue;
+        }
+
+        const subItem = order.items.find(i => subscriptionPattern.test(i.productName));
+        if (!subItem) continue;
+        const match = subItem.productName.match(subscriptionPattern);
+        const qty = match ? parseInt(match[1], 10) : 0;
+        if (qty === 0) continue;
+
+        const token = crypto.randomBytes(32).toString("hex");
+        await storage.createSubscriptionInvite({
+          orderId: order.id,
+          customerEmail: order.customerEmail || "",
+          customerName: order.customerName,
+          token,
+          subscriptionQuantity: qty,
+          status: "pending",
+          weekFrom: week.from,
+          weekTo: week.to,
+        });
+
+        const selectUrl = `${baseUrl}/subscribe/${token}`;
+        const toEmail = overrideEmail || order.customerEmail;
+        if (!toEmail) {
+          errors.push(`No email for ${order.customerName}`);
+          continue;
+        }
+
+        try {
+          await smtpTransporter.sendMail({
+            from: process.env.SMTP_FROM_EMAIL,
+            to: toEmail,
+            subject: "Choose Your Meals This Week - Simple Kitchen Prep",
+            html: `
+              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+                <h2 style="color: #333;">Hi ${order.customerName.split(" ")[0]},</h2>
+                <p>It's time to choose your <strong>${qty} meals</strong> for this week!</p>
+                <p>Click the button below to select your preferences:</p>
+                <div style="text-align: center; margin: 30px 0;">
+                  <a href="${selectUrl}" style="background-color: #16a34a; color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-size: 16px; font-weight: bold;">Choose My Meals</a>
+                </div>
+                <p style="color: #666; font-size: 14px;">If the button doesn't work, copy and paste this link into your browser:</p>
+                <p style="color: #666; font-size: 12px; word-break: break-all;">${selectUrl}</p>
+                <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;" />
+                <p style="color: #999; font-size: 12px;">Simple Kitchen Prep</p>
+              </div>
+            `,
+          });
+          sent++;
+        } catch (emailErr: any) {
+          errors.push(`Failed to email ${order.customerName}: ${emailErr.message}`);
+        }
+      }
+
+      res.json({ sent, total: subOrders.length, skipped, errors });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/subscription-invites", async (req, res) => {
+    try {
+      const from = req.query.from ? new Date(req.query.from as string) : undefined;
+      const to = req.query.to ? new Date(req.query.to as string) : undefined;
+      const invites = await storage.getSubscriptionInvites(from, to);
+      const result = await Promise.all(
+        invites.map(async (invite) => {
+          const selections = await storage.getSubscriptionSelections(invite.id);
+          return { ...invite, selections };
+        })
+      );
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/subscribe/:token", async (req, res) => {
+    try {
+      const invite = await storage.getSubscriptionInviteByToken(req.params.token);
+      if (!invite) {
+        return res.status(404).json({ message: "Invitation not found or expired" });
+      }
+
+      const ordersList = await storage.getOrders(invite.weekFrom, invite.weekTo);
+      const ordersWithItems = await Promise.all(
+        ordersList.map(async (order) => {
+          const items = await storage.getOrderItems(order.id);
+          return { ...order, items };
+        })
+      );
+
+      const mealPriceStr = "7.50";
+      const mealCounts: Record<string, number> = {};
+      const subscriptionPattern = /meal\s+subscription/i;
+      const addDeliveryPattern = /add\s+delivery/i;
+      for (const order of ordersWithItems) {
+        for (const item of order.items) {
+          if (subscriptionPattern.test(item.productName)) continue;
+          if (addDeliveryPattern.test(item.productName)) continue;
+          if (item.price === mealPriceStr || parseFloat(item.price || "0") === 7.50) {
+            mealCounts[item.productName] = (mealCounts[item.productName] || 0) + item.quantity;
+          }
+        }
+      }
+
+      const availableMeals = Object.entries(mealCounts)
+        .sort((a, b) => b[1] - a[1])
+        .map(([name, count]) => ({ name, popularity: count }));
+
+      const existingSelections = await storage.getSubscriptionSelections(invite.id);
+
+      res.json({
+        customerName: invite.customerName,
+        subscriptionQuantity: invite.subscriptionQuantity,
+        status: invite.status,
+        availableMeals,
+        selections: existingSelections,
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/subscribe/:token", async (req, res) => {
+    try {
+      const invite = await storage.getSubscriptionInviteByToken(req.params.token);
+      if (!invite) {
+        return res.status(404).json({ message: "Invitation not found" });
+      }
+
+      if (invite.status === "completed") {
+        return res.status(400).json({ message: "You have already submitted your meal choices" });
+      }
+
+      const { email, selections } = req.body;
+      if (!email || typeof email !== "string" || email.toLowerCase() !== invite.customerEmail.toLowerCase()) {
+        return res.status(403).json({ message: "Email does not match the subscription order" });
+      }
+
+      if (!Array.isArray(selections) || selections.length === 0) {
+        return res.status(400).json({ message: "Please select at least one meal" });
+      }
+
+      for (const sel of selections) {
+        if (!sel.productName || typeof sel.productName !== "string") {
+          return res.status(400).json({ message: "Invalid meal selection" });
+        }
+        const qty = parseInt(sel.quantity, 10);
+        if (isNaN(qty) || qty < 1) {
+          return res.status(400).json({ message: "Invalid quantity" });
+        }
+      }
+
+      const totalQty = selections.reduce((sum: number, s: any) => sum + parseInt(s.quantity, 10), 0);
+      if (totalQty > invite.subscriptionQuantity) {
+        return res.status(400).json({ message: `You can select up to ${invite.subscriptionQuantity} meals` });
+      }
+
+      await storage.deleteSubscriptionSelectionsByInviteId(invite.id);
+      for (const sel of selections) {
+        await storage.createSubscriptionSelection({
+          inviteId: invite.id,
+          productName: sel.productName,
+          quantity: parseInt(sel.quantity, 10),
+        });
+      }
+
+      const order = await storage.createOrder({
+        customerName: invite.customerName,
+        customerEmail: invite.customerEmail,
+        deliveryAddress: null,
+        orderDate: new Date(),
+        status: "processing",
+        fulfillmentType: "delivery",
+        isManual: true,
+      });
+
+      for (const sel of selections) {
+        await storage.createOrderItem({
+          orderId: order.id,
+          productId: null,
+          productName: sel.productName,
+          quantity: parseInt(sel.quantity, 10),
+          price: "7.50",
+        });
+      }
+
+      await storage.updateSubscriptionInviteStatus(invite.id, "completed");
+
+      res.json({ success: true, orderId: order.id });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }

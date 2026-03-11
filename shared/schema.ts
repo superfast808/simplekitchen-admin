@@ -62,6 +62,26 @@ export const settings = pgTable("settings", {
   value: text("value").notNull(),
 });
 
+export const subscriptionInvites = pgTable("subscription_invites", {
+  id: serial("id").primaryKey(),
+  orderId: integer("order_id"),
+  customerEmail: text("customer_email").notNull(),
+  customerName: text("customer_name").notNull(),
+  token: text("token").notNull().unique(),
+  subscriptionQuantity: integer("subscription_quantity").notNull(),
+  status: text("status").notNull().default("pending"),
+  weekFrom: timestamp("week_from").notNull(),
+  weekTo: timestamp("week_to").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const subscriptionSelections = pgTable("subscription_selections", {
+  id: serial("id").primaryKey(),
+  inviteId: integer("invite_id").notNull(),
+  productName: text("product_name").notNull(),
+  quantity: integer("quantity").notNull().default(1),
+});
+
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
   password: true,
@@ -72,6 +92,8 @@ export const insertIngredientSchema = createInsertSchema(ingredients).omit({ id:
 export const insertOrderSchema = createInsertSchema(orders).omit({ id: true });
 export const insertOrderItemSchema = createInsertSchema(orderItems).omit({ id: true });
 export const insertManualQuantitySchema = createInsertSchema(manualQuantities).omit({ id: true });
+export const insertSubscriptionInviteSchema = createInsertSchema(subscriptionInvites).omit({ id: true, createdAt: true });
+export const insertSubscriptionSelectionSchema = createInsertSchema(subscriptionSelections).omit({ id: true });
 
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
@@ -86,3 +108,7 @@ export type InsertOrderItem = z.infer<typeof insertOrderItemSchema>;
 export type ManualQuantity = typeof manualQuantities.$inferSelect;
 export type InsertManualQuantity = z.infer<typeof insertManualQuantitySchema>;
 export type Setting = typeof settings.$inferSelect;
+export type SubscriptionInvite = typeof subscriptionInvites.$inferSelect;
+export type InsertSubscriptionInvite = z.infer<typeof insertSubscriptionInviteSchema>;
+export type SubscriptionSelection = typeof subscriptionSelections.$inferSelect;
+export type InsertSubscriptionSelection = z.infer<typeof insertSubscriptionSelectionSchema>;

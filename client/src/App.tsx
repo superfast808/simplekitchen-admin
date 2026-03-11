@@ -1,4 +1,4 @@
-import { Switch, Route } from "wouter";
+import { Switch, Route, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -19,6 +19,8 @@ import DeliveryRoutesPage from "@/pages/delivery-routes";
 import SettingsPage from "@/pages/settings";
 import HelpPage from "@/pages/help";
 import WeeklyStatsPage from "@/pages/weekly-stats";
+import SubscriptionOverviewPage from "@/pages/subscription-overview";
+import SubscribePage from "@/pages/subscribe";
 import LoginPage from "@/pages/login";
 
 function PageRouter() {
@@ -31,6 +33,7 @@ function PageRouter() {
       <Route path="/manual-stock" component={ManualStockPage} />
       <Route path="/routes" component={DeliveryRoutesPage} />
       <Route path="/weekly-stats" component={WeeklyStatsPage} />
+      <Route path="/subscriptions" component={SubscriptionOverviewPage} />
       <Route path="/settings" component={SettingsPage} />
       <Route path="/help" component={HelpPage} />
       <Route component={NotFound} />
@@ -69,6 +72,10 @@ function AuthenticatedApp({ username, onLogout }: { username: string; onLogout: 
 }
 
 function AppContent() {
+  const [location] = useLocation();
+
+  const isPublicSubscribe = location.startsWith("/subscribe/");
+
   const { data: user, isLoading, refetch } = useQuery<{ id: string; username: string } | null>({
     queryKey: ["/api/auth/me"],
     queryFn: async () => {
@@ -79,7 +86,16 @@ function AppContent() {
     },
     retry: false,
     staleTime: Infinity,
+    enabled: !isPublicSubscribe,
   });
+
+  if (isPublicSubscribe) {
+    return (
+      <Route path="/subscribe/:token">
+        {(params) => <SubscribePage params={params} />}
+      </Route>
+    );
+  }
 
   const handleLogin = () => {
     refetch();

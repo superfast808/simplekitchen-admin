@@ -17,7 +17,8 @@ A partner portal for managing food orders from a WooCommerce store. It imports o
 5. **Manual Stock** - Input quantities for items sold in local shops or non-website orders
 6. **Delivery Routes** - Planned delivery route starting from Unit 33 depot (Glasgow G45 9EE), showing only delivery customers on map with nearest-neighbor optimization; customer breakdown shows delivery/collection counts
 7. **Weekly Stats** - Dashboard-style page with 8 stat cards: meals sold, revenue, avg order value, delivery stops, new/returning customers, top/worst sellers. Week navigation with chevrons, current week visible until Saturday noon then auto-shows previous week
-8. **Settings** - Configurable auto-sync interval, sync enable/disable, order window (default: Sat noon to Wed midnight), logo upload (branding), user management (add/delete users)
+8. **Subscriptions** - Send weekly meal preference emails to subscription customers; customers use a public link to select meals (up to their sub qty) from available £7.50 meals ordered that week; selections auto-create orders; admin overview shows who's chosen/waiting; override email for testing
+9. **Settings** - Configurable auto-sync interval, sync enable/disable, order window (default: Sat noon to Wed midnight), logo upload (branding), user management (add/delete users)
 
 ## Data Model
 - `products` - Products with optional WooCommerce ID, name, price, image
@@ -27,6 +28,8 @@ A partner portal for managing food orders from a WooCommerce store. It imports o
 - `manual_quantities` - Manual stock entries per product
 - `settings` - Key-value store for app configuration (sync interval, order window, logo, etc.)
 - `users` - Portal users with hashed passwords (UUID primary key)
+- `subscription_invites` - Weekly meal preference invitations sent to subscription customers (token-based, tracks status)
+- `subscription_selections` - Selected meals per invite (linked to invites, creates order on submit)
 
 ## Authentication
 - Session-based auth using `express-session` with `SESSION_SECRET` env var
@@ -42,6 +45,11 @@ A partner portal for managing food orders from a WooCommerce store. It imports o
 - `WC_STORE_URL` - WooCommerce store URL
 - `WC_CONSUMER_KEY` - WooCommerce API consumer key
 - `WC_CONSUMER_SECRET` - WooCommerce API consumer secret
+- `SMTP_HOST` - SMTP server hostname
+- `SMTP_PORT` - SMTP port (587 or 465)
+- `SMTP_USER` - SMTP username
+- `SMTP_PASS` - SMTP password
+- `SMTP_FROM_EMAIL` - From address for outgoing emails
 
 ## File Structure
 - `shared/schema.ts` - Drizzle schema + Zod validators + TypeScript types
