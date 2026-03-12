@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from "@/components/ui/table";
-import { RefreshCw, Trash2, Plus, ShoppingCart, Download, Tag, Pencil, CalendarCheck, Banknote, MessageSquare, UserCheck, ChevronDown, ChevronUp, Stamp, Search, X, UserPlus } from "lucide-react";
+import { RefreshCw, Trash2, Plus, ShoppingCart, Download, Tag, Pencil, CalendarCheck, Banknote, MessageSquare, UserCheck, ChevronDown, ChevronUp, Stamp, Search, X, UserPlus, ArrowUpFromLine } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -79,22 +79,39 @@ export default function OrdersPage() {
   });
 
   const makeConsistentMutation = useMutation({
-    mutationFn: (order: OrderWithItems) => apiRequest("POST", "/api/recurring-orders", {
-      customerName: order.customerName,
-      fulfillmentType: order.fulfillmentType || "delivery",
-      deliveryAddress: order.deliveryAddress || null,
-      isTuesday: order.isTuesday === true,
-      items: order.items
+    mutationFn: async (order: OrderWithItems) => {
+      const items = order.items
         .filter(i => i.productName.trim() && !i.productName.toLowerCase().includes("add delivery"))
-        .map(i => ({ productName: i.productName, quantity: i.quantity, productId: i.productId || null })),
-    }),
+        .map(i => ({ productName: i.productName, quantity: i.quantity, productId: i.productId || null }));
+      const existing = (allRecurringOrders || []).find(
+        r => r.customerName.toLowerCase().trim() === order.customerName.toLowerCase().trim()
+          && r.isTuesday === (order.isTuesday === true)
+      );
+      if (existing) {
+        return apiRequest("PATCH", `/api/recurring-orders/${existing.id}`, { items });
+      }
+      return apiRequest("POST", "/api/recurring-orders", {
+        customerName: order.customerName,
+        fulfillmentType: order.fulfillmentType || "delivery",
+        deliveryAddress: order.deliveryAddress || null,
+        isTuesday: order.isTuesday === true,
+        items,
+      });
+    },
     onSuccess: (_data, order) => {
       queryClient.invalidateQueries({ queryKey: ["/api/recurring-orders"] });
       const day = order.isTuesday ? "Tuesday" : "Saturday";
-      toast({ title: `${order.customerName} added as a consistent ${day} customer` });
+      const existing = (allRecurringOrders || []).find(
+        r => r.customerName.toLowerCase().trim() === order.customerName.toLowerCase().trim()
+          && r.isTuesday === (order.isTuesday === true)
+      );
+      toast({ title: existing
+        ? `${order.customerName}'s ${day} template updated with items from this order`
+        : `${order.customerName} added as a consistent ${day} customer`
+      });
     },
     onError: (error: Error) => {
-      toast({ title: "Failed to add consistent customer", description: error.message, variant: "destructive" });
+      toast({ title: "Failed to update consistent customer", description: error.message, variant: "destructive" });
     },
   });
 
@@ -493,7 +510,8 @@ export default function OrdersPage() {
                       <TableCell>
                         <div className="flex gap-1">
                           {(() => {
-                            const alreadyConsistent = (allRecurringOrders || []).some(
+                            const day = order.isTuesday ? "Tuesday" : "Saturday";
+                            const existing = (allRecurringOrders || []).find(
                               r => r.customerName.toLowerCase().trim() === order.customerName.toLowerCase().trim()
                                 && r.isTuesday === (order.isTuesday === true)
                             );
@@ -504,17 +522,19 @@ export default function OrdersPage() {
                                     <Button
                                       size="icon"
                                       variant="ghost"
-                                      onClick={() => { if (!alreadyConsistent) makeConsistentMutation.mutate(order); }}
-                                      disabled={alreadyConsistent || makeConsistentMutation.isPending}
+                                      onClick={() => makeConsistentMutation.mutate(order)}
+                                      disabled={makeConsistentMutation.isPending}
                                       data-testid={`button-make-consistent-${order.id}`}
                                     >
-                                      <UserPlus className={`w-4 h-4 ${alreadyConsistent ? "text-green-500" : "text-muted-foreground"}`} />
+                                      {existing
+                                        ? <ArrowUpFromLine className="w-4 h-4 text-blue-500" />
+                                        : <UserPlus className="w-4 h-4 text-muted-foreground" />}
                                     </Button>
                                   </TooltipTrigger>
                                   <TooltipContent side="left">
-                                    {alreadyConsistent
-                                      ? `Already a consistent ${order.isTuesday ? "Tuesday" : "Saturday"} customer`
-                                      : `Save as consistent ${order.isTuesday ? "Tuesday" : "Saturday"} customer`}
+                                    {existing
+                                      ? `Sync items from this order → ${day} template`
+                                      : `Save as consistent ${day} customer`}
                                   </TooltipContent>
                                 </Tooltip>
                               </TooltipProvider>
