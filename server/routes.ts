@@ -1237,7 +1237,8 @@ export async function registerRoutes(
         // Address
         if (addrText && cy < labelY + labelH - 10) {
           doc.font("Helvetica").fontSize(7);
-          const maxAddrH = labelY + labelH - cy - (itemsH > 0 ? itemsH + GAP3 + 4 : 4) - noteH;
+          const afterAddr = (itemsH > 0 ? GAP3 + itemsH : 0) + (noteH > 0 ? GAP4 + noteH : 0) + 4;
+          const maxAddrH = labelY + labelH - cy - afterAddr;
           if (maxAddrH > 7) {
             doc.text(addrText, cx, cy, { ...opts, height: maxAddrH, ellipsis: true });
             cy = doc.y + GAP3;
@@ -1245,17 +1246,21 @@ export async function registerRoutes(
         }
 
         // Items
-        if (summaryText && cy < labelY + labelH - 6 - noteH) {
+        if (summaryText && cy < labelY + labelH - 6) {
           doc.font("Helvetica").fontSize(6.5);
-          const maxItemH = labelY + labelH - cy - noteH - 2;
+          const maxItemH = labelY + labelH - cy - (noteH > 0 ? GAP4 + noteH : 0) - 2;
           doc.text(summaryText, cx, cy, { ...opts, height: maxItemH, ellipsis: true });
+          cy = doc.y;
         }
 
-        // Notes — small italic text pinned to label bottom
-        if (noteText) {
-          const noteY = labelY + labelH - noteH;
+        // Notes — small italic text flowing directly below items
+        if (noteText && cy < labelY + labelH - 3) {
+          cy += GAP4;
           doc.font("Helvetica-Oblique").fontSize(NOTE_FONT_SIZE);
-          doc.text(noteText, cx, noteY, { ...opts, lineBreak: false, ellipsis: true });
+          const maxNoteH = labelY + labelH - cy - 1;
+          if (maxNoteH > 4) {
+            doc.text(noteText, cx, cy, { ...opts, lineBreak: false, ellipsis: true, height: maxNoteH });
+          }
         }
 
         doc.restore();
