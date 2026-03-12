@@ -27,8 +27,8 @@ function getOrderWindow(offset: number): { from: Date; to: Date } {
   const from = new Date(saturdayDate);
   from.setHours(0, 0, 0, 0);
 
-  const wednesday = addDays(saturdayDate, 4);
-  const to = new Date(wednesday);
+  const friday = addDays(saturdayDate, 6);
+  const to = new Date(friday);
   to.setHours(23, 59, 59, 999);
 
   return { from, to };
@@ -94,7 +94,7 @@ export function DateFilter({
           onClick={() => { setMode("window"); setWindowOffset(0); }}
           data-testid={`button-${testIdPrefix}-mode-week`}
         >
-          Sat–Wed
+          Sat–Fri
         </Button>
         {showMonth && (
           <Button
