@@ -88,7 +88,11 @@ export default function OrdersPage() {
           && r.isTuesday === (order.isTuesday === true)
       );
       if (existing) {
-        return apiRequest("PATCH", `/api/recurring-orders/${existing.id}`, { items });
+        return apiRequest("PATCH", `/api/recurring-orders/${existing.id}`, {
+          items,
+          deliveryAddress: order.deliveryAddress || null,
+          fulfillmentType: order.fulfillmentType || "delivery",
+        });
       }
       return apiRequest("POST", "/api/recurring-orders", {
         customerName: order.customerName,

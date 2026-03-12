@@ -1863,6 +1863,30 @@ export async function registerRoutes(
       if (!orderData.customerName || typeof orderData.customerName !== "string") {
         return res.status(400).json({ message: "Customer name is required" });
       }
+      // Prevent duplicates: if same name+day already exists, update instead of create
+      const allExisting = await storage.getRecurringOrders();
+      const isTuesday = orderData.isTuesday !== false;
+      const duplicate = allExisting.find(
+        r => r.customerName.toLowerCase().trim() === orderData.customerName.toLowerCase().trim()
+          && r.isTuesday === isTuesday
+      );
+      if (duplicate) {
+        const updates: any = {};
+        if (orderData.deliveryAddress !== undefined) updates.deliveryAddress = orderData.deliveryAddress || null;
+        if (orderData.fulfillmentType !== undefined) updates.fulfillmentType = orderData.fulfillmentType;
+        if (orderData.notes !== undefined) updates.notes = orderData.notes || null;
+        if (Object.keys(updates).length > 0) await storage.updateRecurringOrder(duplicate.id, updates);
+        if (items && Array.isArray(items)) {
+          await storage.deleteRecurringOrderItemsByOrderId(duplicate.id);
+          for (const item of items) {
+            if (item.productName && item.productName.trim()) {
+              await storage.createRecurringOrderItem({ recurringOrderId: duplicate.id, productName: item.productName, quantity: item.quantity || 1 });
+            }
+          }
+        }
+        const orderItems = await storage.getRecurringOrderItems(duplicate.id);
+        return res.json({ ...duplicate, ...updates, items: orderItems });
+      }
       const ro = await storage.createRecurringOrder({
         customerName: orderData.customerName,
         deliveryAddress: orderData.deliveryAddress || null,
