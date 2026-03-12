@@ -1131,6 +1131,9 @@ export async function registerRoutes(
       );
       applyAddDeliveryUpgrades(ordersWithItems);
 
+      // Only print labels for orders that have a delivery address (matches delivery routes page)
+      const labelOrders = ordersWithItems.filter(o => o.deliveryAddress && o.deliveryAddress.trim());
+
       // Exact Avery L7163 measurements
       const MM = 2.83465; // 1 mm in PDF points
       const labelW  = 99.1  * MM;
@@ -1153,7 +1156,7 @@ export async function registerRoutes(
       });
 
       let labelIndex = 0;
-      for (const order of ordersWithItems) {
+      for (const order of labelOrders) {
         if (labelIndex % (cols * rows) === 0) {
           doc.addPage();
         }
