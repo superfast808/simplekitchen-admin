@@ -1359,6 +1359,18 @@ export async function registerRoutes(
         return res.status(404).json({ message: "Invitation not found or expired" });
       }
 
+      // Use products table as canonical source for meal vs extra classification
+      const allProducts = await storage.getProducts();
+      const mealProductNames = new Set(
+        allProducts.filter(p => Math.abs(parseFloat(p.price || "0") - 7.50) < 0.01).map(p => p.name)
+      );
+      const extraProductNames = new Set(
+        allProducts.filter(p => {
+          const pr = parseFloat(p.price || "0");
+          return pr > 0 && Math.abs(pr - 7.50) >= 0.01;
+        }).map(p => p.name)
+      );
+
       const ordersList = await storage.getOrders(invite.weekFrom, invite.weekTo);
       const ordersWithItems = await Promise.all(
         ordersList.map(async (order) => {
@@ -1375,22 +1387,18 @@ export async function registerRoutes(
         for (const item of order.items) {
           if (subscriptionPattern.test(item.productName)) continue;
           if (addDeliveryPattern.test(item.productName)) continue;
-          const price = parseFloat(item.price || "0");
-          if (price === 7.50) {
+          if (mealProductNames.has(item.productName)) {
             mealCounts[item.productName] = (mealCounts[item.productName] || 0) + item.quantity;
-          } else if (price > 0) {
+          } else if (extraProductNames.has(item.productName)) {
             extraCounts[item.productName] = (extraCounts[item.productName] || 0) + item.quantity;
           }
         }
       }
 
-      const mealNameSet = new Set(Object.keys(mealCounts));
       const availableMeals = Object.entries(mealCounts)
         .sort((a, b) => b[1] - a[1])
         .map(([name, count]) => ({ name, popularity: count }));
-      // Exclude anything already classified as a meal (prevents price-rounding overlap)
       const availableExtras = Object.entries(extraCounts)
-        .filter(([name]) => !mealNameSet.has(name))
         .sort((a, b) => b[1] - a[1])
         .map(([name, count]) => ({ name, popularity: count }));
 
@@ -1499,6 +1507,18 @@ export async function registerRoutes(
       const invite = await storage.getSubscriptionInviteById(parseInt(req.params.id));
       if (!invite) return res.status(404).json({ message: "Invite not found" });
 
+      // Use products table as canonical source for meal vs extra classification
+      const allProducts = await storage.getProducts();
+      const mealProductNames = new Set(
+        allProducts.filter(p => Math.abs(parseFloat(p.price || "0") - 7.50) < 0.01).map(p => p.name)
+      );
+      const extraProductNames = new Set(
+        allProducts.filter(p => {
+          const pr = parseFloat(p.price || "0");
+          return pr > 0 && Math.abs(pr - 7.50) >= 0.01;
+        }).map(p => p.name)
+      );
+
       const ordersList = await storage.getOrders(invite.weekFrom, invite.weekTo);
       const ordersWithItems = await Promise.all(
         ordersList.map(async (order) => {
@@ -1515,22 +1535,18 @@ export async function registerRoutes(
         for (const item of order.items) {
           if (subPat.test(item.productName)) continue;
           if (delPat.test(item.productName)) continue;
-          const price = parseFloat(item.price || "0");
-          if (price === 7.50) {
+          if (mealProductNames.has(item.productName)) {
             mealCounts[item.productName] = (mealCounts[item.productName] || 0) + item.quantity;
-          } else if (price > 0) {
+          } else if (extraProductNames.has(item.productName)) {
             extraCounts[item.productName] = (extraCounts[item.productName] || 0) + item.quantity;
           }
         }
       }
 
-      const mealNameSet = new Set(Object.keys(mealCounts));
       const availableMeals = Object.entries(mealCounts)
         .sort((a, b) => b[1] - a[1])
         .map(([name, count]) => ({ name, popularity: count }));
-      // Exclude anything already classified as a meal (prevents price-rounding overlap)
       const availableExtras = Object.entries(extraCounts)
-        .filter(([name]) => !mealNameSet.has(name))
         .sort((a, b) => b[1] - a[1])
         .map(([name, count]) => ({ name, popularity: count }));
 
