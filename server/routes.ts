@@ -1693,6 +1693,12 @@ export async function registerRoutes(
       }
 
       if (invite.selectionsOrderId) {
+        // Ensure the order date and delivery details are correct (fix any legacy wrong-date orders)
+        await storage.updateOrder(invite.selectionsOrderId, {
+          orderDate: invite.weekFrom,
+          deliveryAddress: invite.deliveryAddress || null,
+          fulfillmentType: (invite.fulfillmentType as "delivery" | "collection") || "delivery",
+        });
         await storage.deleteOrderItemsByOrderId(invite.selectionsOrderId);
         for (const sel of selections) {
           if (!sel.productName?.trim()) continue;
