@@ -947,10 +947,13 @@ export async function registerRoutes(
       );
       applyAddDeliveryUpgrades(ordersWithItems);
       const subRe = /meal\s+subscription\s*-\s*\d+/i;
+      const isAddDeliveryOnly = (items: { productName: string }[]) =>
+        items.length > 0 && items.every(i => i.productName.toLowerCase().includes("add delivery"));
       const addresses = ordersWithItems
         .filter(o =>
           (o.deliveryAddress || o.fulfillmentType === "collection") &&
-          !o.items.some(i => subRe.test(i.productName))
+          !o.items.some(i => subRe.test(i.productName)) &&
+          !isAddDeliveryOnly(o.items)
         )
         .map(o => {
           const fulfillment = (o.fulfillmentType === "delivery" || (!o.fulfillmentType && o.deliveryAddress))
@@ -1136,10 +1139,14 @@ export async function registerRoutes(
       applyAddDeliveryUpgrades(ordersWithItems);
 
       const subscriptionItemRe = /meal\s+subscription\s*-\s*\d+/i;
-      // Only print labels for orders that have a delivery address AND are not subscription parent orders
+      const isAddDeliveryOnlyLabel = (items: { productName: string }[]) =>
+        items.length > 0 && items.every(i => i.productName.toLowerCase().includes("add delivery"));
+      // Only print labels for orders that have a delivery address, are not subscription parent orders,
+      // and are not standalone "Add Delivery" charge orders
       const labelOrders = ordersWithItems.filter(o =>
         o.deliveryAddress && o.deliveryAddress.trim() &&
-        !o.items.some(i => subscriptionItemRe.test(i.productName))
+        !o.items.some(i => subscriptionItemRe.test(i.productName)) &&
+        !isAddDeliveryOnlyLabel(o.items)
       );
 
       // Exact Avery L7163 measurements

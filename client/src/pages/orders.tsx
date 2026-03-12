@@ -134,6 +134,7 @@ export default function OrdersPage() {
     if (dayFilter === "tuesday" && !o.isTuesday) return false;
     if (!sourceFilter.filterOrder(o)) return false;
     if (hideSubscriptions && o.items?.some(i => SUBSCRIPTION_RE.test(i.productName))) return false;
+    if (o.items?.length > 0 && o.items.every(i => i.productName.toLowerCase().includes("add delivery"))) return false;
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       const nameMatch = o.customerName?.toLowerCase().includes(q);
