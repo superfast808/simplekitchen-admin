@@ -115,11 +115,12 @@ export default function OrdersPage() {
     window.open(`/api/orders/export?${params.toString()}`, "_blank");
   };
 
-  const handleLabels = () => {
+  const handleLabels = (tuesday?: boolean) => {
     const params = new URLSearchParams({
       from: from.toISOString(),
       to: to.toISOString(),
     });
+    if (tuesday !== undefined) params.set("tuesday", String(tuesday));
     window.open(`/api/orders/labels?${params.toString()}`, "_blank");
   };
 
@@ -142,9 +143,13 @@ export default function OrdersPage() {
                 <Download className="w-4 h-4 mr-1" />
                 Export XLSX
               </Button>
-              <Button size="sm" variant="outline" onClick={handleLabels} data-testid="button-print-labels">
+              <Button size="sm" variant="outline" onClick={() => handleLabels(false)} data-testid="button-print-labels-saturday">
                 <Tag className="w-4 h-4 mr-1" />
-                Labels
+                Sat Labels
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => handleLabels(true)} data-testid="button-print-labels-tuesday">
+                <Tag className="w-4 h-4 mr-1" />
+                Tue Labels
               </Button>
             </>
           )}

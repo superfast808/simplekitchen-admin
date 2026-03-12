@@ -1101,9 +1101,16 @@ export async function registerRoutes(
     try {
       const from = req.query.from ? new Date(req.query.from as string) : undefined;
       const to = req.query.to ? new Date(req.query.to as string) : undefined;
+      const tuesdayParam = req.query.tuesday as string | undefined;
       const ordersList = await storage.getOrders(from, to);
+      let filteredOrders = ordersList;
+      if (tuesdayParam === "true") {
+        filteredOrders = ordersList.filter(o => o.isTuesday);
+      } else if (tuesdayParam === "false") {
+        filteredOrders = ordersList.filter(o => !o.isTuesday);
+      }
       const ordersWithItems = await Promise.all(
-        ordersList.map(async (order) => {
+        filteredOrders.map(async (order) => {
           const items = await storage.getOrderItems(order.id);
           return { ...order, items };
         })
