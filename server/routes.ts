@@ -1045,17 +1045,18 @@ export async function registerRoutes(
       );
       applyAddDeliveryUpgrades(ordersWithItems);
 
-      const PT = 2.83465;
-      const pageW = 210 * PT;
-      const pageH = 297 * PT;
-      const labelW = 99.1 * PT;
-      const labelH = 38.1 * PT;
-      const cols = 2;
-      const rows = 7;
-      const marginLeft = (pageW - cols * labelW) / 2;
-      const marginTop = (pageH - rows * labelH) / 2;
-      const padX = 5 * PT;
-      const padY = 3 * PT;
+      // Exact Avery L7163 measurements
+      const MM = 2.83465; // 1 mm in PDF points
+      const labelW  = 99.1  * MM;
+      const labelH  = 38.1  * MM;
+      const cols    = 2;
+      const rows    = 7;
+      const marginL = 4.65  * MM;   // left margin
+      const marginT = 15.15 * MM;   // top margin
+      const hGap    = 2.5   * MM;   // horizontal gap between columns
+      const vGap    = 0;            // vertical gap between rows
+      const padX    = 3.5   * MM;   // inner left/right padding
+      const innerW  = labelW - padX * 2;
 
       const doc = new PDFDocument({ size: "A4", margin: 0, autoFirstPage: false });
       const chunks: Buffer[] = [];
@@ -1073,56 +1074,87 @@ export async function registerRoutes(
         const posInPage = labelIndex % (cols * rows);
         const col = posInPage % cols;
         const row = Math.floor(posInPage / cols);
-        const labelX = marginLeft + col * labelW;
-        const labelY = marginTop + row * labelH;
-        const x = labelX + padX;
-        const y = labelY + padY;
-        const contentW = labelW - padX * 2;
-        const bottomEdge = labelY + labelH - padY;
+        const labelX = marginL + col * (labelW + hGap);
+        const labelY = marginT + row * (labelH + vGap);
 
+        // Clip to label boundary — hard stop for any overflow
         doc.save();
         doc.rect(labelX, labelY, labelW, labelH).clip();
 
         const isDelivery = order.fulfillmentType === "delivery";
-        const tag = isDelivery ? "DELIVERY" : "COLLECTION";
+        const tag = `[ ${isDelivery ? "DELIVERY" : "COLLECTION"} ]`;
+
+        // Build item summary text
+        const itemSummary: Record<string, number> = {};
+        for (const item of order.items) {
+          if (item.productName.toLowerCase().includes("add delivery")) continue;
+          itemSummary[item.productName] = (itemSummary[item.productName] || 0) + item.quantity;
+        }
+        const summaryText = Object.entries(itemSummary).map(([n, q]) => `${q} x ${n}`).join(", ");
+
+        // Pre-measure each section to enable vertical centering
+        const GAP1 = 1.5;  // gap after name
+        const GAP2 = 1.5;  // gap after tag
+        const GAP3 = 2;    // gap after address
 
         doc.font("Helvetica-Bold").fontSize(9);
-        const nameH = doc.heightOfString(order.customerName, { width: contentW });
-        doc.text(order.customerName, x, y, { width: contentW, height: Math.min(nameH, 22) });
-        let currentY = Math.min(doc.y, y + 22) + 0.5;
+        const nameH = doc.heightOfString(order.customerName, { width: innerW });
 
-        if (currentY < bottomEdge - 8) {
-          doc.font("Helvetica-Bold").fontSize(6);
-          doc.text(`[ ${tag} ]`, x, currentY, { width: contentW });
-          currentY = doc.y + 1;
+        doc.font("Helvetica-Bold").fontSize(7);
+        const tagH = doc.heightOfString(tag, { width: innerW });
+
+        doc.font("Helvetica").fontSize(7);
+        const addrText = order.deliveryAddress || "";
+        const addrH = addrText ? doc.heightOfString(addrText, { width: innerW }) : 0;
+
+        doc.font("Helvetica").fontSize(6.5);
+        const itemsH = summaryText ? doc.heightOfString(summaryText, { width: innerW }) : 0;
+
+        const totalContentH =
+          nameH + GAP1 +
+          tagH  + GAP2 +
+          (addrH  > 0 ? addrH  + GAP3 : 0) +
+          (itemsH > 0 ? itemsH         : 0);
+
+        // Vertically center the block; never start above top padding
+        const minPadY = 2 * MM;
+        const startY = Math.max(
+          labelY + minPadY,
+          labelY + (labelH - totalContentH) / 2
+        );
+
+        const cx = labelX + padX; // content x (left edge of content area)
+        const opts = { width: innerW, align: "center" as const };
+
+        let cy = startY;
+
+        // Name
+        doc.font("Helvetica-Bold").fontSize(9);
+        doc.text(order.customerName, cx, cy, { ...opts, height: Math.min(nameH, labelH * 0.35) });
+        cy = Math.min(doc.y, labelY + labelH * 0.4) + GAP1;
+
+        // Tag
+        if (cy < labelY + labelH - 8) {
+          doc.font("Helvetica-Bold").fontSize(7);
+          doc.text(tag, cx, cy, opts);
+          cy = doc.y + GAP2;
         }
 
-        if (order.deliveryAddress && currentY < bottomEdge - 8) {
-          doc.font("Helvetica").fontSize(6.5);
-          const addrH = doc.heightOfString(order.deliveryAddress, { width: contentW });
-          const maxAddrH = Math.min(addrH, bottomEdge - currentY - 12);
+        // Address
+        if (addrText && cy < labelY + labelH - 10) {
+          doc.font("Helvetica").fontSize(7);
+          const maxAddrH = labelY + labelH - cy - (itemsH > 0 ? itemsH + GAP3 + 4 : 4);
           if (maxAddrH > 7) {
-            doc.text(order.deliveryAddress, x, currentY, { width: contentW, height: maxAddrH });
-            currentY = doc.y + 1.5;
+            doc.text(addrText, cx, cy, { ...opts, height: maxAddrH, ellipsis: true });
+            cy = doc.y + GAP3;
           }
         }
 
-        const itemSummary: Record<string, number> = {};
-        for (const item of order.items) {
-          const name = item.productName;
-          if (name.toLowerCase().includes("add delivery")) continue;
-          itemSummary[name] = (itemSummary[name] || 0) + item.quantity;
-        }
-        const summaryParts = Object.entries(itemSummary).map(([name, qty]) => `${qty} x ${name}`);
-        if (summaryParts.length > 0 && currentY < bottomEdge - 6) {
-          doc.font("Helvetica").fontSize(6);
-          const maxSummaryH = bottomEdge - currentY;
-          doc.text(summaryParts.join(", "), x, currentY, {
-            width: contentW,
-            height: maxSummaryH,
-            lineBreak: true,
-            ellipsis: true,
-          });
+        // Items
+        if (summaryText && cy < labelY + labelH - 6) {
+          doc.font("Helvetica").fontSize(6.5);
+          const maxItemH = labelY + labelH - cy - 2;
+          doc.text(summaryText, cx, cy, { ...opts, height: maxItemH, ellipsis: true });
         }
 
         doc.restore();
