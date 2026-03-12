@@ -1179,19 +1179,12 @@ export async function registerRoutes(
         const summaryText = Object.entries(itemSummary).map(([n, q]) => `${q} x ${n}`).join(", ");
         const noteText = (order as any).notes ? String((order as any).notes).trim() : "";
 
-        // Pre-measure notes footer (pinned to bottom)
+        // Pre-measure each section
         const NOTE_FONT_SIZE = 5.5;
-        const NOTE_PAD_B = 2;  // gap from label bottom
-        doc.font("Helvetica-Oblique").fontSize(NOTE_FONT_SIZE);
-        const noteH = noteText ? doc.heightOfString(noteText, { width: innerW, lineBreak: false }) + NOTE_PAD_B + 1 : 0;
-
-        // Available height for main content (above note footer)
-        const mainAreaH = labelH - noteH;
-
-        // Pre-measure each section to enable vertical centering
         const GAP1 = 1.5;  // gap after name
         const GAP2 = 1.5;  // gap after tag
         const GAP3 = 2;    // gap after address
+        const GAP4 = 2;    // gap between items and note
 
         doc.font("Helvetica-Bold").fontSize(9);
         const nameH = doc.heightOfString(order.customerName, { width: innerW });
@@ -1206,17 +1199,22 @@ export async function registerRoutes(
         doc.font("Helvetica").fontSize(6.5);
         const itemsH = summaryText ? doc.heightOfString(summaryText, { width: innerW }) : 0;
 
+        doc.font("Helvetica-Oblique").fontSize(NOTE_FONT_SIZE);
+        const noteH = noteText ? doc.heightOfString(noteText, { width: innerW, lineBreak: false }) : 0;
+
+        // Total content height — note flows right after items
         const totalContentH =
           nameH + GAP1 +
           tagH  + GAP2 +
           (addrH  > 0 ? addrH  + GAP3 : 0) +
-          (itemsH > 0 ? itemsH         : 0);
+          (itemsH > 0 ? itemsH         : 0) +
+          (noteH  > 0 ? GAP4 + noteH   : 0);
 
-        // Vertically center the block within the main area; never start above top padding
+        // Vertically center the whole block; never start above top padding
         const minPadY = 2 * MM;
         const startY = Math.max(
           labelY + minPadY,
-          labelY + (mainAreaH - totalContentH) / 2
+          labelY + (labelH - totalContentH) / 2
         );
 
         const cx = labelX + padX; // content x (left edge of content area)
