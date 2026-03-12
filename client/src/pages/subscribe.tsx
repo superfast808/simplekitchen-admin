@@ -74,17 +74,21 @@ export default function SubscribePage({ params }: { params: { token: string } })
     },
   });
 
-  // Pre-fill extras from existing selections when data loads
+  // Pre-fill selections/extras from existing data using mealSet (positive match)
   useEffect(() => {
     if (!data) return;
-    const extraSet = new Set((data.availableExtras || []).map(e => e.name));
-    if (data.selections?.length) {
-      const ext: Record<string, number> = {};
-      for (const sel of data.selections) {
-        if (extraSet.has(sel.productName)) ext[sel.productName] = sel.quantity;
+    const mealSet = new Set((data.availableMeals || []).map(m => m.name));
+    const mealSels: Record<string, number> = {};
+    const extSels: Record<string, number> = {};
+    for (const sel of data.selections || []) {
+      if (mealSet.has(sel.productName)) {
+        mealSels[sel.productName] = sel.quantity;
+      } else {
+        extSels[sel.productName] = sel.quantity;
       }
-      if (Object.keys(ext).length) setExtras(ext);
     }
+    if (Object.keys(mealSels).length) setSelections(mealSels);
+    if (Object.keys(extSels).length) setExtras(extSels);
   }, [data]);
 
   const totalSelected = Object.values(selections).reduce((sum, q) => sum + q, 0);

@@ -1384,10 +1384,13 @@ export async function registerRoutes(
         }
       }
 
+      const mealNameSet = new Set(Object.keys(mealCounts));
       const availableMeals = Object.entries(mealCounts)
         .sort((a, b) => b[1] - a[1])
         .map(([name, count]) => ({ name, popularity: count }));
+      // Exclude anything already classified as a meal (prevents price-rounding overlap)
       const availableExtras = Object.entries(extraCounts)
+        .filter(([name]) => !mealNameSet.has(name))
         .sort((a, b) => b[1] - a[1])
         .map(([name, count]) => ({ name, popularity: count }));
 
@@ -1521,10 +1524,13 @@ export async function registerRoutes(
         }
       }
 
+      const mealNameSet = new Set(Object.keys(mealCounts));
       const availableMeals = Object.entries(mealCounts)
         .sort((a, b) => b[1] - a[1])
         .map(([name, count]) => ({ name, popularity: count }));
+      // Exclude anything already classified as a meal (prevents price-rounding overlap)
       const availableExtras = Object.entries(extraCounts)
+        .filter(([name]) => !mealNameSet.has(name))
         .sort((a, b) => b[1] - a[1])
         .map(([name, count]) => ({ name, popularity: count }));
 
