@@ -33,6 +33,8 @@ export default function OrdersPage() {
   const [showManualDialog, setShowManualDialog] = useState(false);
   const [editingOrder, setEditingOrder] = useState<OrderWithItems | null>(null);
   const [showConsistent, setShowConsistent] = useState(true);
+  const [hideSubscriptions, setHideSubscriptions] = useState(false);
+  const SUBSCRIPTION_RE = /meal\s+subscription\s*-\s*\d+/i;
   const [stampingCustomer, setStampingCustomer] = useState<RecurringOrderWithItems | null>(null);
   const [editingConsistentCustomer, setEditingConsistentCustomer] = useState<RecurringOrderWithItems | null>(null);
   const [showAddConsistentDialog, setShowAddConsistentDialog] = useState(false);
@@ -131,6 +133,7 @@ export default function OrdersPage() {
     if (dayFilter === "saturday" && o.isTuesday) return false;
     if (dayFilter === "tuesday" && !o.isTuesday) return false;
     if (!sourceFilter.filterOrder(o)) return false;
+    if (hideSubscriptions && o.items?.some(i => SUBSCRIPTION_RE.test(i.productName))) return false;
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       const nameMatch = o.customerName?.toLowerCase().includes(q);
@@ -264,6 +267,14 @@ export default function OrdersPage() {
             </button>
           )}
         </div>
+        <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer select-none" data-testid="label-hide-subscriptions">
+          <Checkbox
+            checked={hideSubscriptions}
+            onCheckedChange={(v) => setHideSubscriptions(!!v)}
+            data-testid="checkbox-hide-subscriptions"
+          />
+          Hide subscriptions
+        </label>
       </div>
 
       {(customerGroups.length > 0 || allRecurringOrders) && (
