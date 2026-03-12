@@ -22,6 +22,7 @@ type DeliveryAddress = {
   lat: number | null;
   lng: number | null;
   fulfillment: "delivery" | "collection";
+  isManual: boolean;
 };
 
 export default function DeliveryRoutesPage() {
@@ -222,30 +223,39 @@ export default function DeliveryRoutesPage() {
           <h3 className="text-sm font-medium mb-3">Customer Breakdown</h3>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
             <div className="flex items-center gap-3 p-3 rounded-md bg-muted/50" data-testid="tile-delivery-count">
-              <div className="flex items-center justify-center w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/30">
+              <div className="flex items-center justify-center w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/30 flex-shrink-0">
                 <Truck className="w-5 h-5 text-blue-600 dark:text-blue-400" />
               </div>
               <div>
-                <p className="text-2xl font-bold" data-testid="text-delivery-count">{deliveryCustomers.length}</p>
-                <p className="text-xs text-muted-foreground">Delivery</p>
+                <p className="text-2xl font-bold leading-none" data-testid="text-delivery-count">{deliveryCustomers.length}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Delivery</p>
+                <p className="text-[10px] text-muted-foreground/70 mt-1">
+                  {deliveryCustomers.filter(c => !c.isManual).length} website · {deliveryCustomers.filter(c => c.isManual).length} custom
+                </p>
               </div>
             </div>
             <div className="flex items-center gap-3 p-3 rounded-md bg-muted/50" data-testid="tile-collection-count">
-              <div className="flex items-center justify-center w-10 h-10 rounded-full bg-amber-100 dark:bg-amber-900/30">
+              <div className="flex items-center justify-center w-10 h-10 rounded-full bg-amber-100 dark:bg-amber-900/30 flex-shrink-0">
                 <Store className="w-5 h-5 text-amber-600 dark:text-amber-400" />
               </div>
               <div>
-                <p className="text-2xl font-bold" data-testid="text-collection-count">{collectionCustomers.length}</p>
-                <p className="text-xs text-muted-foreground">Collection</p>
+                <p className="text-2xl font-bold leading-none" data-testid="text-collection-count">{collectionCustomers.length}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Collection</p>
+                <p className="text-[10px] text-muted-foreground/70 mt-1">
+                  {collectionCustomers.filter(c => !c.isManual).length} website · {collectionCustomers.filter(c => c.isManual).length} custom
+                </p>
               </div>
             </div>
             <div className="flex items-center gap-3 p-3 rounded-md bg-muted/50" data-testid="tile-total-count">
-              <div className="flex items-center justify-center w-10 h-10 rounded-full bg-green-100 dark:bg-green-900/30">
+              <div className="flex items-center justify-center w-10 h-10 rounded-full bg-green-100 dark:bg-green-900/30 flex-shrink-0">
                 <MapPin className="w-5 h-5 text-green-600 dark:text-green-400" />
               </div>
               <div>
-                <p className="text-2xl font-bold" data-testid="text-total-customers">{geocodedAddresses.length}</p>
-                <p className="text-xs text-muted-foreground">Total</p>
+                <p className="text-2xl font-bold leading-none" data-testid="text-total-customers">{geocodedAddresses.length}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Total</p>
+                <p className="text-[10px] text-muted-foreground/70 mt-1">
+                  {geocodedAddresses.filter(c => !c.isManual).length} website · {geocodedAddresses.filter(c => c.isManual).length} custom
+                </p>
               </div>
             </div>
           </div>
