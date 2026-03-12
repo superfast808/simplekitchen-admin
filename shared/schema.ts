@@ -78,6 +78,8 @@ export const subscriptionInvites = pgTable("subscription_invites", {
   weekFrom: timestamp("week_from").notNull(),
   weekTo: timestamp("week_to").notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
+  deliveryAddress: text("delivery_address"),
+  fulfillmentType: text("fulfillment_type").notNull().default("delivery"),
 });
 
 export const subscriptionSelections = pgTable("subscription_selections", {

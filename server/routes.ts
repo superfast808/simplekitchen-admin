@@ -1335,6 +1335,8 @@ export async function registerRoutes(
           status: "pending",
           weekFrom: week.from,
           weekTo: week.to,
+          deliveryAddress: order.deliveryAddress || null,
+          fulfillmentType: order.fulfillmentType || "delivery",
         });
 
         const selectUrl = `${baseUrl}/subscribe/${token}`;
@@ -1518,10 +1520,10 @@ export async function registerRoutes(
       const order = await storage.createOrder({
         customerName: invite.customerName,
         customerEmail: invite.customerEmail,
-        deliveryAddress: null,
-        orderDate: new Date(),
+        deliveryAddress: invite.deliveryAddress || null,
+        orderDate: invite.weekFrom,
         status: "processing",
-        fulfillmentType: "delivery",
+        fulfillmentType: (invite.fulfillmentType as "delivery" | "collection") || "delivery",
         isManual: true,
       });
 
@@ -1690,10 +1692,10 @@ export async function registerRoutes(
         const order = await storage.createOrder({
           customerName: invite.customerName,
           customerEmail: invite.customerEmail,
-          deliveryAddress: null,
-          orderDate: new Date(),
+          deliveryAddress: invite.deliveryAddress || null,
+          orderDate: invite.weekFrom,
           status: "processing",
-          fulfillmentType: "delivery",
+          fulfillmentType: (invite.fulfillmentType as "delivery" | "collection") || "delivery",
           isManual: true,
         });
         for (const sel of selections) {
