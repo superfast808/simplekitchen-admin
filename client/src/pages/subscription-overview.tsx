@@ -7,8 +7,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Send, CheckCircle2, Clock, Mail, Users, Eye, Pencil, Minus, Plus, UtensilsCrossed } from "lucide-react";
+import { Send, CheckCircle2, Clock, Mail, Pencil, Minus, Plus, UtensilsCrossed, ChevronDown, ChevronUp } from "lucide-react";
 import { format } from "date-fns";
 
 type Selection = {
@@ -42,7 +44,7 @@ type MealData = {
 export default function SubscriptionOverviewPage() {
   const { toast } = useToast();
   const [overrideEmail, setOverrideEmail] = useState("");
-  const [showOverview, setShowOverview] = useState(false);
+  const [showSendPanel, setShowSendPanel] = useState(false);
   const [editingInvite, setEditingInvite] = useState<Invite | null>(null);
 
   const { data: invites = [], isLoading } = useQuery<Invite[]>({
@@ -86,174 +88,150 @@ export default function SubscriptionOverviewPage() {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold" data-testid="text-subscriptions-title">Subscriptions</h1>
-          <p className="text-sm text-muted-foreground">Manage weekly meal subscription preferences</p>
+          <p className="text-sm text-muted-foreground">Manage weekly meal preferences for subscription customers</p>
         </div>
-      </div>
-
-      <Card data-testid="card-send-invites">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-lg">
-            <Send className="w-5 h-5 text-emerald-500" />
-            Send Preference Emails
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="override-email">Override Email (optional — for testing)</Label>
-            <Input
-              id="override-email"
-              type="email"
-              value={overrideEmail}
-              onChange={e => setOverrideEmail(e.target.value)}
-              placeholder="Leave blank to email actual customers"
-              data-testid="input-override-email"
-            />
-            <p className="text-xs text-muted-foreground">
-              If set, all emails will be sent to this address instead of individual customers.
-            </p>
-          </div>
-          <Button
-            onClick={() => sendMutation.mutate()}
-            disabled={sendMutation.isPending}
-            data-testid="button-send-invites"
-          >
-            <Mail className="w-4 h-4 mr-2" />
-            {sendMutation.isPending ? "Sending..." : "Send This Week's Emails"}
-          </Button>
-        </CardContent>
-      </Card>
-
-      <div className="flex items-center gap-4">
-        <Button
-          variant={showOverview ? "default" : "outline"}
-          onClick={() => setShowOverview(!showOverview)}
-          data-testid="button-toggle-overview"
-        >
-          <Eye className="w-4 h-4 mr-2" />
-          {showOverview ? "Hide Overview" : "Show Overview"}
-        </Button>
-        {invites.length > 0 && (
-          <div className="flex items-center gap-3 text-sm">
-            <Badge variant="outline" className="gap-1">
-              <Users className="w-3 h-3" /> {invites.length} total
-            </Badge>
-            <Badge className="gap-1 bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300">
-              <CheckCircle2 className="w-3 h-3" /> {completed.length} chosen
-            </Badge>
-            <Badge variant="secondary" className="gap-1">
-              <Clock className="w-3 h-3" /> {pending.length} waiting
-            </Badge>
-          </div>
-        )}
-      </div>
-
-      {showOverview && (
-        <div className="space-y-4">
-          {isLoading ? (
-            <Card>
-              <CardContent className="p-6">
-                <div className="h-8 w-48 bg-muted animate-pulse rounded" />
-              </CardContent>
-            </Card>
-          ) : invites.length === 0 ? (
-            <Card>
-              <CardContent className="p-6 text-center text-muted-foreground">
-                No subscription invites sent yet this week. Use the button above to send them.
-              </CardContent>
-            </Card>
-          ) : (
+        <div className="flex items-center gap-3">
+          {invites.length > 0 && (
             <>
-              {completed.length > 0 && (
-                <Card className="border-l-4 border-l-emerald-500" data-testid="card-completed-invites">
-                  <CardHeader>
-                    <CardTitle className="text-base flex items-center gap-2">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                      Chosen ({completed.length})
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-3">
-                      {completed.map(invite => (
-                        <div key={invite.id} className="flex items-start justify-between p-3 rounded-lg bg-emerald-50 dark:bg-emerald-950/20" data-testid={`invite-completed-${invite.id}`}>
-                          <div className="flex-1 min-w-0">
-                            <p className="font-medium">{invite.customerName}</p>
-                            <p className="text-xs text-muted-foreground">{invite.customerEmail}</p>
-                            <div className="flex flex-wrap gap-1 mt-2">
-                              {invite.selections.map((sel, idx) => (
-                                <Badge key={idx} variant="secondary" className="text-xs">
-                                  {sel.productName} ×{sel.quantity}
-                                </Badge>
-                              ))}
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2 ml-3 shrink-0">
-                            <Badge className="bg-emerald-500 text-white">
-                              {invite.selections.reduce((s, sel) => s + sel.quantity, 0)}/{invite.subscriptionQuantity}
-                            </Badge>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-7 text-xs"
-                              onClick={() => setEditingInvite(invite)}
-                              data-testid={`button-edit-invite-${invite.id}`}
-                            >
-                              <Pencil className="w-3 h-3 mr-1" />
-                              Edit
-                            </Button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {pending.length > 0 && (
-                <Card className="border-l-4 border-l-amber-500" data-testid="card-pending-invites">
-                  <CardHeader>
-                    <CardTitle className="text-base flex items-center gap-2">
-                      <Clock className="w-4 h-4 text-amber-500" />
-                      Waiting ({pending.length})
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-2">
-                      {pending.map(invite => (
-                        <div key={invite.id} className="flex items-center justify-between p-3 rounded-lg bg-amber-50 dark:bg-amber-950/20" data-testid={`invite-pending-${invite.id}`}>
-                          <div>
-                            <p className="font-medium">{invite.customerName}</p>
-                            <p className="text-xs text-muted-foreground">{invite.customerEmail}</p>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <div className="text-right">
-                              <Badge variant="outline" className="text-amber-600 border-amber-300">
-                                {invite.subscriptionQuantity} meals
-                              </Badge>
-                              <p className="text-xs text-muted-foreground mt-1">
-                                Sent {format(new Date(invite.createdAt), "EEE d MMM, HH:mm")}
-                              </p>
-                            </div>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-7 text-xs"
-                              onClick={() => setEditingInvite(invite)}
-                              data-testid={`button-edit-invite-${invite.id}`}
-                            >
-                              <Pencil className="w-3 h-3 mr-1" />
-                              Fill In
-                            </Button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
+              <Badge className="gap-1 bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300">
+                <CheckCircle2 className="w-3 h-3" /> {completed.length} chosen
+              </Badge>
+              <Badge variant="secondary" className="gap-1">
+                <Clock className="w-3 h-3" /> {pending.length} waiting
+              </Badge>
             </>
           )}
+          <Button
+            onClick={() => setShowSendPanel(v => !v)}
+            variant="outline"
+            size="sm"
+            data-testid="button-toggle-send-panel"
+          >
+            <Mail className="w-4 h-4 mr-2" />
+            Send Emails
+            {showSendPanel ? <ChevronUp className="w-3 h-3 ml-1" /> : <ChevronDown className="w-3 h-3 ml-1" />}
+          </Button>
         </div>
+      </div>
+
+      {showSendPanel && (
+        <Card data-testid="card-send-invites">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Send className="w-4 h-4 text-emerald-500" />
+              Send This Week's Preference Emails
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="override-email">Override Email (optional — for testing)</Label>
+              <Input
+                id="override-email"
+                type="email"
+                value={overrideEmail}
+                onChange={e => setOverrideEmail(e.target.value)}
+                placeholder="Leave blank to email actual customers"
+                data-testid="input-override-email"
+              />
+              <p className="text-xs text-muted-foreground">
+                If set, all emails will be sent to this address instead of individual customers.
+              </p>
+            </div>
+            <Button
+              onClick={() => sendMutation.mutate()}
+              disabled={sendMutation.isPending}
+              data-testid="button-send-invites"
+            >
+              <Mail className="w-4 h-4 mr-2" />
+              {sendMutation.isPending ? "Sending..." : "Send Emails"}
+            </Button>
+          </CardContent>
+        </Card>
       )}
+
+      <Card>
+        <CardContent className="p-0">
+          {isLoading ? (
+            <div className="p-6 space-y-3">
+              {[1, 2, 3].map(i => <Skeleton key={i} className="h-12 w-full" />)}
+            </div>
+          ) : invites.length === 0 ? (
+            <div className="p-12 text-center text-muted-foreground space-y-2">
+              <UtensilsCrossed className="w-10 h-10 mx-auto opacity-30" />
+              <p className="font-medium">No subscription invites this week</p>
+              <p className="text-sm">Click "Send Emails" above to send preference emails to subscription customers.</p>
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Customer</TableHead>
+                  <TableHead>Email</TableHead>
+                  <TableHead className="text-center">Meals</TableHead>
+                  <TableHead>Selections</TableHead>
+                  <TableHead className="text-center">Status</TableHead>
+                  <TableHead className="w-[90px]"></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {invites.map(invite => {
+                  const isComplete = invite.status === "completed";
+                  const totalSelected = invite.selections.reduce((s, sel) => s + sel.quantity, 0);
+                  return (
+                    <TableRow key={invite.id} data-testid={`invite-row-${invite.id}`}>
+                      <TableCell className="font-medium">{invite.customerName}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground">{invite.customerEmail}</TableCell>
+                      <TableCell className="text-center">
+                        <Badge variant="outline" className="text-xs">
+                          {isComplete ? `${totalSelected}/` : ""}{invite.subscriptionQuantity}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        {isComplete ? (
+                          <div className="flex flex-wrap gap-1">
+                            {invite.selections.map((sel, idx) => (
+                              <Badge key={idx} variant="secondary" className="text-xs">
+                                {sel.productName} ×{sel.quantity}
+                              </Badge>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-muted-foreground italic">
+                            Sent {format(new Date(invite.createdAt), "EEE d MMM, HH:mm")}
+                          </span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        {isComplete ? (
+                          <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300 gap-1">
+                            <CheckCircle2 className="w-3 h-3" /> Chosen
+                          </Badge>
+                        ) : (
+                          <Badge variant="secondary" className="gap-1">
+                            <Clock className="w-3 h-3" /> Waiting
+                          </Badge>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Button
+                          size="sm"
+                          variant={isComplete ? "outline" : "default"}
+                          className="h-7 text-xs w-full"
+                          onClick={() => setEditingInvite(invite)}
+                          data-testid={`button-edit-invite-${invite.id}`}
+                        >
+                          <Pencil className="w-3 h-3 mr-1" />
+                          {isComplete ? "Edit" : "Fill in"}
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
 
       {editingInvite && (
         <AdminSelectionDialog
