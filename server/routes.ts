@@ -619,11 +619,19 @@ export async function registerRoutes(
       const includeManualStock = !sourceFilter || sourceFilter.manual;
       const manualQtys = includeManualStock ? await storage.getManualQuantities(from, to) : [];
       const allIngredients = await storage.getAllIngredients();
+      const allProducts = await storage.getProducts();
+
+      // Build name→id lookup for items where productId is null
+      const productByName: Record<string, number> = {};
+      for (const p of allProducts) {
+        productByName[p.name.toLowerCase()] = p.id;
+      }
 
       const productQuantities: Record<number, number> = {};
       for (const item of items) {
-        if (item.productId) {
-          productQuantities[item.productId] = (productQuantities[item.productId] || 0) + item.quantity;
+        const pid = item.productId ?? productByName[item.productName?.toLowerCase()] ?? null;
+        if (pid) {
+          productQuantities[pid] = (productQuantities[pid] || 0) + item.quantity;
         }
       }
       for (const mq of manualQtys) {
@@ -663,10 +671,17 @@ export async function registerRoutes(
       const allIngredients = await storage.getAllIngredients();
       const allProducts = await storage.getProducts();
 
+      // Build name→id lookup for items where productId is null
+      const productByName: Record<string, number> = {};
+      for (const p of allProducts) {
+        productByName[p.name.toLowerCase()] = p.id;
+      }
+
       const productQuantities: Record<number, number> = {};
       for (const item of items) {
-        if (item.productId) {
-          productQuantities[item.productId] = (productQuantities[item.productId] || 0) + item.quantity;
+        const pid = item.productId ?? productByName[item.productName?.toLowerCase()] ?? null;
+        if (pid) {
+          productQuantities[pid] = (productQuantities[pid] || 0) + item.quantity;
         }
       }
       for (const mq of manualQtys) {
