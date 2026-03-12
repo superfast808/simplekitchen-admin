@@ -1862,7 +1862,9 @@ export async function registerRoutes(
       if (updates.isTuesday !== undefined) orderUpdate.isTuesday = updates.isTuesday;
       if (updates.notes !== undefined) orderUpdate.notes = updates.notes;
 
-      const updated = await storage.updateRecurringOrder(id, orderUpdate);
+      const updated = Object.keys(orderUpdate).length > 0
+        ? await storage.updateRecurringOrder(id, orderUpdate)
+        : existing;
 
       if (items && Array.isArray(items)) {
         await storage.deleteRecurringOrderItemsByOrderId(id);
