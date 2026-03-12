@@ -129,6 +129,18 @@ export default function OrdersPage() {
     },
   });
 
+  const deduplicateMutation = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/recurring-orders/deduplicate"),
+    onSuccess: async (res) => {
+      const data = await res.json();
+      queryClient.invalidateQueries({ queryKey: ["/api/recurring-orders"] });
+      toast({ title: data.removed > 0 ? `Removed ${data.removed} duplicate${data.removed > 1 ? "s" : ""}` : "No duplicates found" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Cleanup failed", description: error.message, variant: "destructive" });
+    },
+  });
+
   const orders = allOrders?.filter(o => {
     if (dayFilter === "saturday" && o.isTuesday) return false;
     if (dayFilter === "tuesday" && !o.isTuesday) return false;
@@ -292,9 +304,19 @@ export default function OrdersPage() {
                 <Badge variant="secondary" className="text-xs">{customerGroups.length}</Badge>
                 {showConsistent ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
               </button>
-              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setShowAddConsistentDialog(true)} data-testid="button-add-consistent">
-                <Plus className="w-3 h-3 mr-1" />Add Customer
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm" variant="outline" className="h-7 text-xs text-amber-600 border-amber-300"
+                  onClick={() => deduplicateMutation.mutate()}
+                  disabled={deduplicateMutation.isPending}
+                  data-testid="button-deduplicate-consistent"
+                >
+                  {deduplicateMutation.isPending ? "Cleaning…" : "Remove duplicates"}
+                </Button>
+                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setShowAddConsistentDialog(true)} data-testid="button-add-consistent">
+                  <Plus className="w-3 h-3 mr-1" />Add Customer
+                </Button>
+              </div>
             </div>
             {showConsistent && (
               <div className="border-t overflow-x-auto">

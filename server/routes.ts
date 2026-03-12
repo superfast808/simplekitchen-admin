@@ -2016,6 +2016,37 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/recurring-orders/deduplicate", async (req, res) => {
+    try {
+      const all = await storage.getRecurringOrders();
+      const groups = new Map<string, typeof all>();
+      for (const ro of all) {
+        const key = `${ro.customerName.toLowerCase().trim()}|${ro.isTuesday}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key)!.push(ro);
+      }
+      let removed = 0;
+      for (const [, group] of groups) {
+        if (group.length <= 1) continue;
+        // Score each entry: prefer having an address + items
+        const scored = await Promise.all(group.map(async ro => {
+          const items = await storage.getRecurringOrderItems(ro.id);
+          const score = (ro.deliveryAddress ? 2 : 0) + (items.length > 0 ? 1 : 0);
+          return { ro, score };
+        }));
+        scored.sort((a, b) => b.score - a.score || a.ro.id - b.ro.id);
+        // Keep the best one, delete the rest
+        for (const { ro } of scored.slice(1)) {
+          await storage.deleteRecurringOrder(ro.id);
+          removed++;
+        }
+      }
+      res.json({ removed });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   app.post("/api/recurring-orders/generate", async (req, res) => {
     try {
       const recurringOrdersList = await storage.getRecurringOrders();
