@@ -384,7 +384,7 @@ export default function OrdersPage() {
                 </TableHeader>
                 <TableBody>
                   {orders.map((order) => {
-                    const orderSpend = order.items.reduce((sum, i) => sum + i.quantity * parseFloat(i.price || "0"), 0);
+                    const orderSpend = order.items.reduce((sum, i) => sum + parseFloat(i.price || "0"), 0);
                     const itemSummary = order.items
                       .filter(i => !i.productName.toLowerCase().includes("add delivery"))
                       .map(i => `${i.quantity}×${i.productName}`)
@@ -519,7 +519,7 @@ export default function OrdersPage() {
                     <TableCell></TableCell>
                     <TableCell></TableCell>
                     <TableCell className="text-right font-bold text-sm" data-testid="text-total-spend">
-                      £{(orders || []).reduce((sum, o) => sum + o.items.reduce((s, i) => s + i.quantity * parseFloat(i.price || "0"), 0), 0).toFixed(2)}
+                      £{(orders || []).reduce((sum, o) => sum + o.items.reduce((s, i) => s + parseFloat(i.price || "0"), 0), 0).toFixed(2)}
                     </TableCell>
                     <TableCell></TableCell>
                     <TableCell className="text-sm font-medium text-green-700 dark:text-green-400" data-testid="text-total-cash">
