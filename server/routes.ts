@@ -155,6 +155,8 @@ async function performSync() {
 
       const fulfillmentType = detectFulfillmentType(wo);
 
+      const wooNote = wo.customer_note ? wo.customer_note.trim() : null;
+
       const orderData: Record<string, any> = {
         wooId: wo.id,
         customerName,
@@ -170,6 +172,12 @@ async function performSync() {
         if (!existing.deliveryLat || !existing.deliveryLng) {
           orderData.deliveryLat = null;
           orderData.deliveryLng = null;
+        }
+        // Sync WooCommerce customer note; preserve any manually-added note if WooCommerce has none
+        if (wooNote) {
+          orderData.notes = wooNote;
+        } else if (!existing.notes) {
+          orderData.notes = null;
         }
         await storage.updateOrder(existing.id, orderData);
         await storage.deleteOrderItemsByOrderId(existing.id);
@@ -187,6 +195,7 @@ async function performSync() {
       } else {
         orderData.deliveryLat = null;
         orderData.deliveryLng = null;
+        orderData.notes = wooNote;
         const order = await storage.createOrder(orderData);
         for (const item of wo.line_items || []) {
           const product = await storage.getProductByWooId(item.product_id);
@@ -1132,6 +1141,16 @@ export async function registerRoutes(
           itemSummary[item.productName] = (itemSummary[item.productName] || 0) + item.quantity;
         }
         const summaryText = Object.entries(itemSummary).map(([n, q]) => `${q} x ${n}`).join(", ");
+        const noteText = (order as any).notes ? String((order as any).notes).trim() : "";
+
+        // Pre-measure notes footer (pinned to bottom)
+        const NOTE_FONT_SIZE = 5.5;
+        const NOTE_PAD_B = 2;  // gap from label bottom
+        doc.font("Helvetica-Oblique").fontSize(NOTE_FONT_SIZE);
+        const noteH = noteText ? doc.heightOfString(noteText, { width: innerW, lineBreak: false }) + NOTE_PAD_B + 1 : 0;
+
+        // Available height for main content (above note footer)
+        const mainAreaH = labelH - noteH;
 
         // Pre-measure each section to enable vertical centering
         const GAP1 = 1.5;  // gap after name
@@ -1157,11 +1176,11 @@ export async function registerRoutes(
           (addrH  > 0 ? addrH  + GAP3 : 0) +
           (itemsH > 0 ? itemsH         : 0);
 
-        // Vertically center the block; never start above top padding
+        // Vertically center the block within the main area; never start above top padding
         const minPadY = 2 * MM;
         const startY = Math.max(
           labelY + minPadY,
-          labelY + (labelH - totalContentH) / 2
+          labelY + (mainAreaH - totalContentH) / 2
         );
 
         const cx = labelX + padX; // content x (left edge of content area)
@@ -1184,7 +1203,7 @@ export async function registerRoutes(
         // Address
         if (addrText && cy < labelY + labelH - 10) {
           doc.font("Helvetica").fontSize(7);
-          const maxAddrH = labelY + labelH - cy - (itemsH > 0 ? itemsH + GAP3 + 4 : 4);
+          const maxAddrH = labelY + labelH - cy - (itemsH > 0 ? itemsH + GAP3 + 4 : 4) - noteH;
           if (maxAddrH > 7) {
             doc.text(addrText, cx, cy, { ...opts, height: maxAddrH, ellipsis: true });
             cy = doc.y + GAP3;
@@ -1192,10 +1211,17 @@ export async function registerRoutes(
         }
 
         // Items
-        if (summaryText && cy < labelY + labelH - 6) {
+        if (summaryText && cy < labelY + labelH - 6 - noteH) {
           doc.font("Helvetica").fontSize(6.5);
-          const maxItemH = labelY + labelH - cy - 2;
+          const maxItemH = labelY + labelH - cy - noteH - 2;
           doc.text(summaryText, cx, cy, { ...opts, height: maxItemH, ellipsis: true });
+        }
+
+        // Notes — small italic text pinned to label bottom
+        if (noteText) {
+          const noteY = labelY + labelH - noteH;
+          doc.font("Helvetica-Oblique").fontSize(NOTE_FONT_SIZE);
+          doc.text(noteText, cx, noteY, { ...opts, lineBreak: false, ellipsis: true });
         }
 
         doc.restore();
