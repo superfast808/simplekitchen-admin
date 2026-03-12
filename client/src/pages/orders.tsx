@@ -43,7 +43,12 @@ export default function OrdersPage() {
 
   const { data: allConsistentCustomers } = useQuery<RecurringOrderWithItems[]>({
     queryKey: ["/api/recurring-orders"],
-    select: (data) => data.filter((c: any) => c.isTuesday === false && c.active !== false),
+    select: (data) => {
+      const showTuesday = dayFilter === "tuesday";
+      return data.filter((c: any) =>
+        (showTuesday ? c.isTuesday !== false : c.isTuesday === false) && c.active !== false
+      );
+    },
   });
 
   const deleteConsistentMutation = useMutation({
@@ -204,6 +209,9 @@ export default function OrdersPage() {
               <div className="flex items-center gap-2">
                 <UserCheck className="w-4 h-4 text-muted-foreground" />
                 <span className="font-medium text-sm">Consistent Customers</span>
+                <Badge variant="outline" className={`text-xs ${dayFilter === "tuesday" ? "border-amber-400 text-amber-600 dark:text-amber-400" : ""}`}>
+                  {dayFilter === "tuesday" ? "Tuesday" : "Saturday"}
+                </Badge>
                 <Badge variant="secondary" className="text-xs">{allConsistentCustomers.length}</Badge>
               </div>
               {showConsistent ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
@@ -986,6 +994,7 @@ function EditConsistentDialog({ customer, open, onOpenChange }: {
   );
   const [notes, setNotes] = useState((customer as any).notes || "");
   const [active, setActive] = useState(customer.active !== false);
+  const [isTuesday, setIsTuesday] = useState(customer.isTuesday === true);
   const [itemLines, setItemLines] = useState(
     customer.items.length > 0
       ? customer.items.map(i => ({ productName: i.productName, quantity: i.quantity }))
@@ -1017,6 +1026,7 @@ function EditConsistentDialog({ customer, open, onOpenChange }: {
       deliveryAddress: fulfillmentType === "delivery" ? (address || null) : null,
       fulfillmentType,
       active,
+      isTuesday,
       notes: notes || null,
       items: validItems.map(i => ({
         productName: i.productName,
@@ -1085,6 +1095,21 @@ function EditConsistentDialog({ customer, open, onOpenChange }: {
               checked={active}
               onCheckedChange={setActive}
               data-testid="switch-edit-consistent-active"
+            />
+          </div>
+          <div className="flex items-center justify-between rounded-lg border p-3">
+            <div>
+              <p className="text-sm font-medium flex items-center gap-1.5">
+                <CalendarCheck className="w-4 h-4 text-amber-500" />
+                Tuesday order
+              </p>
+              <p className="text-xs text-muted-foreground">Off = Saturday, On = Tuesday</p>
+            </div>
+            <Switch
+              id="edit-consistent-tuesday"
+              checked={isTuesday}
+              onCheckedChange={setIsTuesday}
+              data-testid="switch-edit-consistent-tuesday"
             />
           </div>
           <div className="space-y-2">
