@@ -16,6 +16,8 @@ type InviteData = {
   customerName: string;
   subscriptionQuantity: number;
   status: string;
+  weekNumber?: number;
+  categoryName?: string;
   availableMeals: AvailableMeal[];
   availableExtras: AvailableMeal[];
   selections: Array<{ productName: string; quantity: number }>;
@@ -281,7 +283,7 @@ export default function SubscribePage({ params }: { params: { token: string } })
             Choose Your Meals
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Select {maxMeals} meals for this week
+            Select {maxMeals} meals for this week{data.categoryName ? ` (${data.categoryName})` : ""}
           </p>
         </div>
 

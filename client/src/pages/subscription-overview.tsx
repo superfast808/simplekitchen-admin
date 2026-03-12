@@ -37,6 +37,8 @@ type Invite = {
 type MealData = {
   customerName: string;
   subscriptionQuantity: number;
+  weekNumber?: number;
+  categoryName?: string;
   availableMeals: Array<{ name: string; popularity: number }>;
   availableExtras: Array<{ name: string; popularity: number }>;
   selections: Array<{ productName: string; quantity: number }>;
@@ -347,6 +349,9 @@ function AdminSelectionDialog({ invite, open, onOpenChange }: {
           <DialogTitle className="flex items-center gap-2">
             <UtensilsCrossed className="w-4 h-4" />
             {invite.customerName}'s Meals
+            {mealData?.categoryName && (
+              <span className="text-sm font-normal text-muted-foreground ml-1">— {mealData.categoryName}</span>
+            )}
           </DialogTitle>
         </DialogHeader>
 

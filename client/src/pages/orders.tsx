@@ -459,7 +459,8 @@ function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
   const [saveAsConsistent, setSaveAsConsistent] = useState(true);
   const [itemLines, setItemLines] = useState([{ productName: "", quantity: 1 }]);
 
-  const { data: products } = useQuery<any[]>({ queryKey: ["/api/products"] });
+  const { data: products } = useQuery<any[]>({ queryKey: ["/api/products/current-week"] });
+  const { data: currentWeek } = useQuery<{ weekNumber: number; categoryName: string }>({ queryKey: ["/api/current-week"] });
 
   const createMutation = useMutation({
     mutationFn: (data: any) => apiRequest("POST", "/api/orders", data),
@@ -612,6 +613,9 @@ function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
                 />
               </div>
             ))}
+            {currentWeek && (
+              <p className="text-xs text-muted-foreground">Showing {currentWeek.categoryName} products in suggestions</p>
+            )}
             <datalist id="product-suggestions">
               {(products || []).map(p => (
                 <option key={p.id} value={p.name} />

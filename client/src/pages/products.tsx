@@ -174,6 +174,7 @@ export default function ProductsPage() {
                     <h3 className="font-medium text-sm truncate" data-testid={`text-product-name-${product.id}`}>{product.name}</h3>
                     <p className="text-sm text-muted-foreground mt-0.5">
                       {product.price ? `£${parseFloat(product.price).toFixed(2)}` : "No price"}
+                      {product.category ? <span className="ml-2 text-xs text-muted-foreground">· {product.category}</span> : null}
                     </p>
                     {product.wooId && (
                       <Badge variant="outline" className="mt-1.5 text-xs">WC #{product.wooId}</Badge>

@@ -52,6 +52,20 @@ function buildAddressVariants(raw: string): string[] {
   return variants;
 }
 
+// Returns the current week number (1-6) based on week1ReferenceDate setting.
+// The week advances every Saturday at noon (every 7 days from the reference date).
+async function getCurrentWeekInfo(): Promise<{ weekNumber: number; categoryName: string }> {
+  const refDateStr = await storage.getSetting("week1ReferenceDate");
+  if (!refDateStr) return { weekNumber: 1, categoryName: "Week 1" };
+  const refDate = new Date(refDateStr);
+  const now = new Date();
+  const diffMs = now.getTime() - refDate.getTime();
+  if (diffMs < 0) return { weekNumber: 1, categoryName: "Week 1" };
+  const diffWeeks = Math.floor(diffMs / (7 * 24 * 60 * 60 * 1000));
+  const weekNumber = (diffWeeks % 6) + 1;
+  return { weekNumber, categoryName: `Week ${weekNumber}` };
+}
+
 function applyAddDeliveryUpgrades(ordersWithItems: Array<{ customerEmail: string | null; customerName: string; fulfillmentType: string | null; items: Array<{ productName: string }> }>): void {
   const deliveryEmails = new Set<string>();
   const deliveryNames = new Set<string>();
@@ -92,6 +106,7 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   order_window_open_hour: "12",
   order_window_close_day: "3",
   order_window_close_hour: "24",
+  week1ReferenceDate: "",
 };
 
 const ALLOWED_SETTINGS_KEYS = new Set(Object.keys(DEFAULT_SETTINGS));
@@ -336,6 +351,31 @@ export async function registerRoutes(
     try {
       const products = await storage.getProducts();
       res.json(products);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/current-week", async (_req, res) => {
+    try {
+      const { weekNumber, categoryName } = await getCurrentWeekInfo();
+      const allProducts = await storage.getProducts();
+      const weekProducts = allProducts.filter(p => p.category === categoryName);
+      const meals = weekProducts.filter(p => Math.abs(parseFloat(p.price || "0") - 7.50) < 0.01).sort((a, b) => a.name.localeCompare(b.name));
+      const extras = weekProducts.filter(p => { const pr = parseFloat(p.price || "0"); return pr > 0 && Math.abs(pr - 7.50) >= 0.01; }).sort((a, b) => a.name.localeCompare(b.name));
+      const week1ReferenceDate = await storage.getSetting("week1ReferenceDate");
+      res.json({ weekNumber, categoryName, meals, extras, week1ReferenceDate: week1ReferenceDate || null });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/products/current-week", async (_req, res) => {
+    try {
+      const { categoryName } = await getCurrentWeekInfo();
+      const allProducts = await storage.getProducts();
+      const weekProducts = allProducts.filter(p => p.category === categoryName);
+      res.json(weekProducts.length > 0 ? weekProducts : allProducts);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
@@ -831,6 +871,7 @@ export async function registerRoutes(
           name: decodeHtmlEntities(wp.name),
           price: String(wp.price || "0"),
           imageUrl: wp.images?.[0]?.src || null,
+          category: wp.categories?.[0]?.name || null,
         };
 
         if (existing) {
@@ -1359,49 +1400,57 @@ export async function registerRoutes(
         return res.status(404).json({ message: "Invitation not found or expired" });
       }
 
-      // Use products table as canonical source for meal vs extra classification
+      const { weekNumber, categoryName } = await getCurrentWeekInfo();
       const allProducts = await storage.getProducts();
-      const mealProductNames = new Set(
-        allProducts.filter(p => Math.abs(parseFloat(p.price || "0") - 7.50) < 0.01).map(p => p.name)
-      );
-      const extraProductNames = new Set(
-        allProducts.filter(p => {
-          const pr = parseFloat(p.price || "0");
-          return pr > 0 && Math.abs(pr - 7.50) >= 0.01;
-        }).map(p => p.name)
-      );
+      const weekProducts = allProducts.filter(p => p.category === categoryName);
 
-      const ordersList = await storage.getOrders(invite.weekFrom, invite.weekTo);
-      const ordersWithItems = await Promise.all(
-        ordersList.map(async (order) => {
-          const items = await storage.getOrderItems(order.id);
-          return { ...order, items };
-        })
-      );
+      let availableMeals: Array<{ name: string; popularity: number }>;
+      let availableExtras: Array<{ name: string; popularity: number }>;
 
-      const subscriptionPattern = /meal\s+subscription/i;
-      const addDeliveryPattern = /add\s+delivery/i;
-      const mealCounts: Record<string, number> = {};
-      const extraCounts: Record<string, number> = {};
-      for (const order of ordersWithItems) {
-        for (const item of order.items) {
-          if (subscriptionPattern.test(item.productName)) continue;
-          if (addDeliveryPattern.test(item.productName)) continue;
-          // Only put into extras if explicitly a non-7.50 product; everything else defaults to meal
-          if (extraProductNames.has(item.productName)) {
-            extraCounts[item.productName] = (extraCounts[item.productName] || 0) + item.quantity;
-          } else {
-            mealCounts[item.productName] = (mealCounts[item.productName] || 0) + item.quantity;
+      if (weekProducts.length > 0) {
+        availableMeals = weekProducts
+          .filter(p => Math.abs(parseFloat(p.price || "0") - 7.50) < 0.01)
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .map(p => ({ name: p.name, popularity: 0 }));
+        availableExtras = weekProducts
+          .filter(p => { const pr = parseFloat(p.price || "0"); return pr > 0 && Math.abs(pr - 7.50) >= 0.01; })
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .map(p => ({ name: p.name, popularity: 0 }));
+      } else {
+        const mealProductNames = new Set(
+          allProducts.filter(p => Math.abs(parseFloat(p.price || "0") - 7.50) < 0.01).map(p => p.name)
+        );
+        const extraProductNames = new Set(
+          allProducts.filter(p => {
+            const pr = parseFloat(p.price || "0");
+            return pr > 0 && Math.abs(pr - 7.50) >= 0.01;
+          }).map(p => p.name)
+        );
+        const ordersList = await storage.getOrders(invite.weekFrom, invite.weekTo);
+        const ordersWithItems = await Promise.all(
+          ordersList.map(async (order) => {
+            const items = await storage.getOrderItems(order.id);
+            return { ...order, items };
+          })
+        );
+        const subscriptionPattern = /meal\s+subscription/i;
+        const addDeliveryPattern = /add\s+delivery/i;
+        const mealCounts: Record<string, number> = {};
+        const extraCounts: Record<string, number> = {};
+        for (const order of ordersWithItems) {
+          for (const item of order.items) {
+            if (subscriptionPattern.test(item.productName)) continue;
+            if (addDeliveryPattern.test(item.productName)) continue;
+            if (extraProductNames.has(item.productName)) {
+              extraCounts[item.productName] = (extraCounts[item.productName] || 0) + item.quantity;
+            } else {
+              mealCounts[item.productName] = (mealCounts[item.productName] || 0) + item.quantity;
+            }
           }
         }
+        availableMeals = Object.entries(mealCounts).sort((a, b) => b[1] - a[1]).map(([name, count]) => ({ name, popularity: count }));
+        availableExtras = Object.entries(extraCounts).sort((a, b) => b[1] - a[1]).map(([name, count]) => ({ name, popularity: count }));
       }
-
-      const availableMeals = Object.entries(mealCounts)
-        .sort((a, b) => b[1] - a[1])
-        .map(([name, count]) => ({ name, popularity: count }));
-      const availableExtras = Object.entries(extraCounts)
-        .sort((a, b) => b[1] - a[1])
-        .map(([name, count]) => ({ name, popularity: count }));
 
       const existingSelections = await storage.getSubscriptionSelections(invite.id);
 
@@ -1409,6 +1458,8 @@ export async function registerRoutes(
         customerName: invite.customerName,
         subscriptionQuantity: invite.subscriptionQuantity,
         status: invite.status,
+        weekNumber,
+        categoryName,
         availableMeals,
         availableExtras,
         selections: existingSelections,
@@ -1508,54 +1559,64 @@ export async function registerRoutes(
       const invite = await storage.getSubscriptionInviteById(parseInt(req.params.id));
       if (!invite) return res.status(404).json({ message: "Invite not found" });
 
-      // Use products table as canonical source for meal vs extra classification
+      const { weekNumber, categoryName } = await getCurrentWeekInfo();
       const allProducts = await storage.getProducts();
-      const mealProductNames = new Set(
-        allProducts.filter(p => Math.abs(parseFloat(p.price || "0") - 7.50) < 0.01).map(p => p.name)
-      );
-      const extraProductNames = new Set(
-        allProducts.filter(p => {
-          const pr = parseFloat(p.price || "0");
-          return pr > 0 && Math.abs(pr - 7.50) >= 0.01;
-        }).map(p => p.name)
-      );
+      const weekProducts = allProducts.filter(p => p.category === categoryName);
 
-      const ordersList = await storage.getOrders(invite.weekFrom, invite.weekTo);
-      const ordersWithItems = await Promise.all(
-        ordersList.map(async (order) => {
-          const items = await storage.getOrderItems(order.id);
-          return { ...order, items };
-        })
-      );
+      let availableMeals: Array<{ name: string; popularity: number }>;
+      let availableExtras: Array<{ name: string; popularity: number }>;
 
-      const subPat = /meal\s+subscription/i;
-      const delPat = /add\s+delivery/i;
-      const mealCounts: Record<string, number> = {};
-      const extraCounts: Record<string, number> = {};
-      for (const order of ordersWithItems) {
-        for (const item of order.items) {
-          if (subPat.test(item.productName)) continue;
-          if (delPat.test(item.productName)) continue;
-          // Only put into extras if explicitly a non-7.50 product; everything else defaults to meal
-          if (extraProductNames.has(item.productName)) {
-            extraCounts[item.productName] = (extraCounts[item.productName] || 0) + item.quantity;
-          } else {
-            mealCounts[item.productName] = (mealCounts[item.productName] || 0) + item.quantity;
+      if (weekProducts.length > 0) {
+        availableMeals = weekProducts
+          .filter(p => Math.abs(parseFloat(p.price || "0") - 7.50) < 0.01)
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .map(p => ({ name: p.name, popularity: 0 }));
+        availableExtras = weekProducts
+          .filter(p => { const pr = parseFloat(p.price || "0"); return pr > 0 && Math.abs(pr - 7.50) >= 0.01; })
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .map(p => ({ name: p.name, popularity: 0 }));
+      } else {
+        const mealProductNames = new Set(
+          allProducts.filter(p => Math.abs(parseFloat(p.price || "0") - 7.50) < 0.01).map(p => p.name)
+        );
+        const extraProductNames = new Set(
+          allProducts.filter(p => {
+            const pr = parseFloat(p.price || "0");
+            return pr > 0 && Math.abs(pr - 7.50) >= 0.01;
+          }).map(p => p.name)
+        );
+        const ordersList = await storage.getOrders(invite.weekFrom, invite.weekTo);
+        const ordersWithItems = await Promise.all(
+          ordersList.map(async (order) => {
+            const items = await storage.getOrderItems(order.id);
+            return { ...order, items };
+          })
+        );
+        const subPat = /meal\s+subscription/i;
+        const delPat = /add\s+delivery/i;
+        const mealCounts: Record<string, number> = {};
+        const extraCounts: Record<string, number> = {};
+        for (const order of ordersWithItems) {
+          for (const item of order.items) {
+            if (subPat.test(item.productName)) continue;
+            if (delPat.test(item.productName)) continue;
+            if (extraProductNames.has(item.productName)) {
+              extraCounts[item.productName] = (extraCounts[item.productName] || 0) + item.quantity;
+            } else {
+              mealCounts[item.productName] = (mealCounts[item.productName] || 0) + item.quantity;
+            }
           }
         }
+        availableMeals = Object.entries(mealCounts).sort((a, b) => b[1] - a[1]).map(([name, count]) => ({ name, popularity: count }));
+        availableExtras = Object.entries(extraCounts).sort((a, b) => b[1] - a[1]).map(([name, count]) => ({ name, popularity: count }));
       }
-
-      const availableMeals = Object.entries(mealCounts)
-        .sort((a, b) => b[1] - a[1])
-        .map(([name, count]) => ({ name, popularity: count }));
-      const availableExtras = Object.entries(extraCounts)
-        .sort((a, b) => b[1] - a[1])
-        .map(([name, count]) => ({ name, popularity: count }));
 
       const existingSelections = await storage.getSubscriptionSelections(invite.id);
       res.json({
         customerName: invite.customerName,
         subscriptionQuantity: invite.subscriptionQuantity,
+        weekNumber,
+        categoryName,
         availableMeals,
         availableExtras,
         selections: existingSelections,

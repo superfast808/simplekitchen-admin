@@ -15,6 +15,7 @@ export const products = pgTable("products", {
   name: text("name").notNull(),
   price: decimal("price", { precision: 10, scale: 2 }).default("0"),
   imageUrl: text("image_url"),
+  category: text("category"),
 });
 
 export const ingredients = pgTable("ingredients", {

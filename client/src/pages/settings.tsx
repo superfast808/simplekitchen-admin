@@ -9,7 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Save, RefreshCw, Upload, Trash2, Image, UserPlus, X } from "lucide-react";
+import { Save, RefreshCw, Upload, Trash2, Image, UserPlus, X, CalendarDays } from "lucide-react";
 
 const DAYS = [
   { value: "0", label: "Sunday" },
@@ -139,6 +139,11 @@ export default function SettingsPage() {
   const [openHour, setOpenHour] = useState("12");
   const [closeDay, setCloseDay] = useState("3");
   const [closeHour, setCloseHour] = useState("24");
+  const [week1ReferenceDate, setWeek1ReferenceDate] = useState("");
+
+  const { data: currentWeek } = useQuery<{ weekNumber: number; categoryName: string; week1ReferenceDate: string | null }>({
+    queryKey: ["/api/current-week"],
+  });
 
   useEffect(() => {
     if (settings) {
@@ -148,6 +153,11 @@ export default function SettingsPage() {
       setOpenHour(settings.order_window_open_hour || "12");
       setCloseDay(settings.order_window_close_day || "3");
       setCloseHour(settings.order_window_close_hour || "24");
+      if (settings.week1ReferenceDate) {
+        const d = new Date(settings.week1ReferenceDate);
+        const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+        setWeek1ReferenceDate(local);
+      }
     }
   }, [settings]);
 
@@ -177,14 +187,18 @@ export default function SettingsPage() {
   });
 
   const handleSave = () => {
-    saveMutation.mutate({
+    const data: Record<string, string> = {
       sync_enabled: String(syncEnabled),
       sync_interval_minutes: syncInterval,
       order_window_open_day: openDay,
       order_window_open_hour: openHour,
       order_window_close_day: closeDay,
       order_window_close_hour: closeHour,
-    });
+    };
+    if (week1ReferenceDate) {
+      data.week1ReferenceDate = new Date(week1ReferenceDate).toISOString();
+    }
+    saveMutation.mutate(data);
   };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -420,6 +434,44 @@ export default function SettingsPage() {
           <p className="text-sm text-muted-foreground">
             Current: {DAYS.find(d => d.value === openDay)?.label} at {HOURS.find(h => h.value === openHour)?.label} to {DAYS.find(d => d.value === closeDay)?.label} at {HOURS.find(h => h.value === closeHour)?.label}
           </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <CalendarDays className="w-4 h-4" />
+            Week Rotation
+          </CardTitle>
+          <CardDescription>
+            Products are categorised by week (Week 1–6) in WooCommerce. Set when Week 1 last started so the portal knows which week's meals to show.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {currentWeek && (
+            <div className="flex items-center gap-3 p-3 rounded-md bg-muted">
+              <div>
+                <p className="text-sm font-medium">Current week</p>
+                <p className="text-2xl font-bold">Week {currentWeek.weekNumber}</p>
+                {!currentWeek.week1ReferenceDate && (
+                  <p className="text-xs text-muted-foreground mt-0.5">Set a reference date below to enable automatic rotation</p>
+                )}
+              </div>
+            </div>
+          )}
+          <div className="space-y-2">
+            <Label htmlFor="week1-ref-date">Week 1 started on (date &amp; time)</Label>
+            <Input
+              id="week1-ref-date"
+              type="datetime-local"
+              value={week1ReferenceDate}
+              onChange={(e) => setWeek1ReferenceDate(e.target.value)}
+              data-testid="input-week1-reference-date"
+            />
+            <p className="text-xs text-muted-foreground">
+              The Saturday noon when Week 1 last started. The week number advances every 7 days from this date, cycling 1→2→3→4→5→6→1.
+            </p>
+          </div>
         </CardContent>
       </Card>
 
