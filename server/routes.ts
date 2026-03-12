@@ -947,7 +947,7 @@ export async function registerRoutes(
       );
       applyAddDeliveryUpgrades(ordersWithItems);
       const addresses = ordersWithItems
-        .filter(o => o.deliveryAddress)
+        .filter(o => o.deliveryAddress || o.fulfillmentType === "collection")
         .map(o => {
           const fulfillment = (o.fulfillmentType === "delivery" || (!o.fulfillmentType && o.deliveryAddress))
             ? "delivery"
