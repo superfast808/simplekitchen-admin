@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { eq, gte, lte, and, sql } from "drizzle-orm";
+import { eq, gte, lte, and, sql, desc, isNotNull } from "drizzle-orm";
 import {
   products, ingredients, orders, orderItems, manualQuantities, settings, users,
   subscriptionInvites, subscriptionSelections, recurringOrders, recurringOrderItems,
@@ -150,6 +150,22 @@ export class DatabaseStorage implements IStorage {
   async getOrderByWooId(wooId: number): Promise<Order | undefined> {
     const [order] = await db.select().from(orders).where(eq(orders.wooId, wooId));
     return order;
+  }
+
+  async getCustomerDeliveryAddress(email: string, name: string): Promise<{ deliveryAddress: string | null; fulfillmentType: string | null } | undefined> {
+    const byEmail = email
+      ? await db.select().from(orders)
+          .where(and(eq(orders.customerEmail, email), isNotNull(orders.deliveryAddress)))
+          .orderBy(desc(orders.orderDate))
+          .limit(1)
+      : [];
+    if (byEmail.length > 0) return { deliveryAddress: byEmail[0].deliveryAddress, fulfillmentType: byEmail[0].fulfillmentType };
+    const byName = await db.select().from(orders)
+      .where(and(eq(orders.customerName, name), isNotNull(orders.deliveryAddress)))
+      .orderBy(desc(orders.orderDate))
+      .limit(1);
+    if (byName.length > 0) return { deliveryAddress: byName[0].deliveryAddress, fulfillmentType: byName[0].fulfillmentType };
+    return undefined;
   }
 
   async createOrder(order: InsertOrder): Promise<Order> {

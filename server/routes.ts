@@ -1394,6 +1394,18 @@ export async function registerRoutes(
         if (qty === 0) continue;
 
         const token = crypto.randomBytes(32).toString("hex");
+        let inviteAddress = order.deliveryAddress || null;
+        let inviteFulfillment = order.fulfillmentType || "delivery";
+        if (!inviteAddress) {
+          const pastAddr = await storage.getCustomerDeliveryAddress(
+            order.customerEmail || "",
+            order.customerName
+          );
+          if (pastAddr?.deliveryAddress) {
+            inviteAddress = pastAddr.deliveryAddress;
+            inviteFulfillment = pastAddr.fulfillmentType || "delivery";
+          }
+        }
         await storage.createSubscriptionInvite({
           orderId: order.id,
           customerEmail: order.customerEmail || "",
@@ -1403,8 +1415,8 @@ export async function registerRoutes(
           status: "pending",
           weekFrom: week.from,
           weekTo: week.to,
-          deliveryAddress: order.deliveryAddress || null,
-          fulfillmentType: order.fulfillmentType || "delivery",
+          deliveryAddress: inviteAddress,
+          fulfillmentType: inviteFulfillment,
         });
 
         const selectUrl = `${baseUrl}/subscribe/${token}`;
@@ -1585,13 +1597,27 @@ export async function registerRoutes(
         });
       }
 
+      // Resolve address: use invite address, or fall back to customer's order history
+      let resolvedAddress = invite.deliveryAddress || null;
+      let resolvedFulfillment = invite.fulfillmentType || "delivery";
+      if (!resolvedAddress) {
+        const pastAddr = await storage.getCustomerDeliveryAddress(
+          invite.customerEmail || "",
+          invite.customerName
+        );
+        if (pastAddr?.deliveryAddress) {
+          resolvedAddress = pastAddr.deliveryAddress;
+          resolvedFulfillment = pastAddr.fulfillmentType || "delivery";
+        }
+      }
+
       const order = await storage.createOrder({
         customerName: invite.customerName,
         customerEmail: invite.customerEmail,
-        deliveryAddress: invite.deliveryAddress || null,
+        deliveryAddress: resolvedAddress,
         orderDate: invite.weekFrom,
         status: "processing",
-        fulfillmentType: (invite.fulfillmentType as "delivery" | "collection") || "delivery",
+        fulfillmentType: resolvedFulfillment as "delivery" | "collection",
         isManual: true,
       });
 
@@ -1734,12 +1760,26 @@ export async function registerRoutes(
         });
       }
 
+      // Backfill address from order history if the invite was created without one
+      let resolvedAddress = invite.deliveryAddress || null;
+      let resolvedFulfillment = invite.fulfillmentType || "delivery";
+      if (!resolvedAddress) {
+        const pastAddr = await storage.getCustomerDeliveryAddress(
+          invite.customerEmail || "",
+          invite.customerName
+        );
+        if (pastAddr?.deliveryAddress) {
+          resolvedAddress = pastAddr.deliveryAddress;
+          resolvedFulfillment = pastAddr.fulfillmentType || "delivery";
+        }
+      }
+
       if (invite.selectionsOrderId) {
         // Ensure the order date and delivery details are correct (fix any legacy wrong-date orders)
         await storage.updateOrder(invite.selectionsOrderId, {
           orderDate: invite.weekFrom,
-          deliveryAddress: invite.deliveryAddress || null,
-          fulfillmentType: (invite.fulfillmentType as "delivery" | "collection") || "delivery",
+          deliveryAddress: resolvedAddress,
+          fulfillmentType: resolvedFulfillment as "delivery" | "collection",
         });
         await storage.deleteOrderItemsByOrderId(invite.selectionsOrderId);
         for (const sel of selections) {
