@@ -250,6 +250,7 @@ function AdminSelectionDialog({ invite, open, onOpenChange }: {
   onOpenChange: (v: boolean) => void;
 }) {
   const { toast } = useToast();
+  const [localMax, setLocalMax] = useState(invite.subscriptionQuantity);
   const [selections, setSelections] = useState<Record<string, number>>(() => {
     const initial: Record<string, number> = {};
     for (const sel of invite.selections) {
@@ -270,7 +271,7 @@ function AdminSelectionDialog({ invite, open, onOpenChange }: {
 
   const saveMutation = useMutation({
     mutationFn: (sels: Array<{ productName: string; quantity: number }>) =>
-      apiRequest("PATCH", `/api/subscription-invites/${invite.id}/selections`, { selections: sels }),
+      apiRequest("PATCH", `/api/subscription-invites/${invite.id}/selections`, { selections: sels, subscriptionQuantity: localMax }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/subscription-invites"] });
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
@@ -282,9 +283,8 @@ function AdminSelectionDialog({ invite, open, onOpenChange }: {
     },
   });
 
-  const maxMeals = invite.subscriptionQuantity;
   const totalSelected = Object.values(selections).reduce((sum, q) => sum + q, 0);
-  const remaining = maxMeals - totalSelected;
+  const remaining = localMax - totalSelected;
 
   const addMeal = (name: string) => {
     if (remaining <= 0) return;
@@ -325,12 +325,41 @@ function AdminSelectionDialog({ invite, open, onOpenChange }: {
           </DialogTitle>
         </DialogHeader>
 
-        <div className="flex items-center justify-center mb-2">
+        <div className="flex items-center justify-between rounded-lg border p-3 bg-muted/30">
+          <div>
+            <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Total meals</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Adjust if extra added off-record</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              size="icon"
+              variant="outline"
+              className="h-8 w-8 rounded-full"
+              onClick={() => setLocalMax(m => Math.max(1, m - 1))}
+              disabled={localMax <= totalSelected}
+              data-testid="button-decrease-max"
+            >
+              <Minus className="w-3 h-3" />
+            </Button>
+            <span className="w-8 text-center font-bold text-lg" data-testid="text-local-max">{localMax}</span>
+            <Button
+              size="icon"
+              variant="outline"
+              className="h-8 w-8 rounded-full"
+              onClick={() => setLocalMax(m => m + 1)}
+              data-testid="button-increase-max"
+            >
+              <Plus className="w-3 h-3" />
+            </Button>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-center">
           <Badge
             className={`text-sm px-3 py-1 ${remaining === 0 ? "bg-emerald-500 text-white" : "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300"}`}
             data-testid="badge-admin-remaining"
           >
-            {remaining === 0 ? `All ${maxMeals} chosen` : `${remaining} of ${maxMeals} remaining`}
+            {remaining === 0 ? `All ${localMax} chosen` : `${remaining} of ${localMax} remaining`}
           </Badge>
         </div>
 

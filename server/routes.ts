@@ -1488,14 +1488,22 @@ export async function registerRoutes(
       const invite = await storage.getSubscriptionInviteById(id);
       if (!invite) return res.status(404).json({ message: "Invite not found" });
 
-      const { selections } = req.body;
+      const { selections, subscriptionQuantity } = req.body;
       if (!Array.isArray(selections) || selections.length === 0) {
         return res.status(400).json({ message: "Please select at least one meal" });
       }
 
+      const effectiveMax = subscriptionQuantity && Number.isInteger(subscriptionQuantity) && subscriptionQuantity > 0
+        ? subscriptionQuantity
+        : invite.subscriptionQuantity;
+
+      if (effectiveMax !== invite.subscriptionQuantity) {
+        await storage.updateSubscriptionInviteQuantity(id, effectiveMax);
+      }
+
       const totalQty = selections.reduce((sum: number, s: any) => sum + (parseInt(s.quantity, 10) || 0), 0);
-      if (totalQty > invite.subscriptionQuantity) {
-        return res.status(400).json({ message: `Maximum ${invite.subscriptionQuantity} meals allowed` });
+      if (totalQty > effectiveMax) {
+        return res.status(400).json({ message: `Maximum ${effectiveMax} meals allowed` });
       }
 
       await storage.deleteSubscriptionSelectionsByInviteId(id);
