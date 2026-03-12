@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from "@/components/ui/table";
-import { RefreshCw, Trash2, Plus, ShoppingCart, Download, Tag, Pencil, CalendarCheck, Banknote, MessageSquare, UserCheck, ChevronDown, ChevronUp, Stamp } from "lucide-react";
+import { RefreshCw, Trash2, Plus, ShoppingCart, Download, Tag, Pencil, CalendarCheck, Banknote, MessageSquare, UserCheck, ChevronDown, ChevronUp, Stamp, Search, X } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -28,6 +28,7 @@ export default function OrdersPage() {
   const dateFilter = useDateFilter();
   const sourceFilter = useOrderSourceFilter();
   const [dayFilter, setDayFilter] = useState<"all" | "saturday" | "tuesday">("all");
+  const [searchQuery, setSearchQuery] = useState("");
   const [showManualDialog, setShowManualDialog] = useState(false);
   const [editingOrder, setEditingOrder] = useState<OrderWithItems | null>(null);
   const [showConsistent, setShowConsistent] = useState(true);
@@ -56,7 +57,16 @@ export default function OrdersPage() {
   const orders = allOrders?.filter(o => {
     if (dayFilter === "saturday" && o.isTuesday) return false;
     if (dayFilter === "tuesday" && !o.isTuesday) return false;
-    return sourceFilter.filterOrder(o);
+    if (!sourceFilter.filterOrder(o)) return false;
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      const nameMatch = o.customerName?.toLowerCase().includes(q);
+      const addrMatch = o.deliveryAddress?.toLowerCase().includes(q);
+      const noteMatch = (o as any).notes?.toLowerCase().includes(q);
+      const itemMatch = o.items?.some(i => i.productName.toLowerCase().includes(q));
+      if (!nameMatch && !addrMatch && !noteMatch && !itemMatch) return false;
+    }
+    return true;
   });
 
   const syncMutation = useMutation({
@@ -142,19 +152,40 @@ export default function OrdersPage() {
         </div>
       </div>
 
-      <div className="flex items-center gap-2 flex-wrap" data-testid="day-filter-tabs">
-        {(["all", "saturday", "tuesday"] as const).map(d => (
-          <Button
-            key={d}
-            size="sm"
-            variant={dayFilter === d ? "default" : "outline"}
-            onClick={() => setDayFilter(d)}
-            data-testid={`button-day-${d}`}
-            className="capitalize"
-          >
-            {d === "all" ? "All Days" : d === "saturday" ? "Saturday / Website" : "Tuesday"}
-          </Button>
-        ))}
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap" data-testid="day-filter-tabs">
+          {(["all", "saturday", "tuesday"] as const).map(d => (
+            <Button
+              key={d}
+              size="sm"
+              variant={dayFilter === d ? "default" : "outline"}
+              onClick={() => setDayFilter(d)}
+              data-testid={`button-day-${d}`}
+              className="capitalize"
+            >
+              {d === "all" ? "All Days" : d === "saturday" ? "Saturday / Website" : "Tuesday"}
+            </Button>
+          ))}
+        </div>
+        <div className="relative flex-1 min-w-[200px] max-w-xs">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+          <Input
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder="Search orders…"
+            className="pl-8 h-8 text-sm"
+            data-testid="input-search-orders"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground"
+              data-testid="button-clear-search"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
       </div>
 
       {(allConsistentCustomers && allConsistentCustomers.length > 0) && (
