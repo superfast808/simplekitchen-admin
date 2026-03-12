@@ -10,7 +10,7 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Plus, Pencil, Trash2, Play, CalendarCheck, ShoppingCart } from "lucide-react";
+import { Plus, Pencil, Trash2, Play, CalendarCheck, ShoppingCart, CalendarDays } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useDateFilter, DateRangeLabel } from "@/components/date-filter";
 import { format } from "date-fns";
