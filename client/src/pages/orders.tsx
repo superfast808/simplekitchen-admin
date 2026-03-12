@@ -1,13 +1,14 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { format } from "date-fns";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from "@/components/ui/table";
 import { RefreshCw, Trash2, Plus, ShoppingCart, Download, Tag, Pencil, CalendarCheck, Banknote, MessageSquare, UserCheck, ChevronDown, ChevronUp, Stamp, Search, X } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -34,6 +35,7 @@ export default function OrdersPage() {
   const [showConsistent, setShowConsistent] = useState(true);
   const [stampingCustomer, setStampingCustomer] = useState<RecurringOrderWithItems | null>(null);
   const [editingConsistentCustomer, setEditingConsistentCustomer] = useState<RecurringOrderWithItems | null>(null);
+  const [showAddConsistentDialog, setShowAddConsistentDialog] = useState(false);
 
   const { from, to } = dateFilter;
 
@@ -41,13 +43,38 @@ export default function OrdersPage() {
     queryKey: ["/api/orders", `?from=${from.toISOString()}&to=${to.toISOString()}`],
   });
 
-  const { data: allConsistentCustomers } = useQuery<RecurringOrderWithItems[]>({
+  const { data: allRecurringOrders } = useQuery<RecurringOrderWithItems[]>({
     queryKey: ["/api/recurring-orders"],
-    select: (data) => {
-      const showTuesday = dayFilter === "tuesday";
-      return data.filter((c: any) =>
-        (showTuesday ? c.isTuesday !== false : c.isTuesday === false) && c.active !== false
-      );
+    select: (data) => data.filter((c: any) => c.active !== false),
+  });
+
+  type CustomerGroup = {
+    customerName: string;
+    saturday?: RecurringOrderWithItems;
+    tuesday?: RecurringOrderWithItems;
+  };
+
+  const customerGroups = useMemo<CustomerGroup[]>(() => {
+    if (!allRecurringOrders) return [];
+    const map = new Map<string, CustomerGroup>();
+    for (const c of allRecurringOrders) {
+      const key = c.customerName.toLowerCase().trim();
+      const group = map.get(key) || { customerName: c.customerName };
+      if (c.isTuesday) group.tuesday = c;
+      else group.saturday = c;
+      map.set(key, group);
+    }
+    return Array.from(map.values()).sort((a, b) => a.customerName.localeCompare(b.customerName));
+  }, [allRecurringOrders]);
+
+  const addDayMutation = useMutation({
+    mutationFn: (data: any) => apiRequest("POST", "/api/recurring-orders", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/recurring-orders"] });
+      toast({ title: "Day added" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to add day", description: error.message, variant: "destructive" });
     },
   });
 
@@ -198,77 +225,120 @@ export default function OrdersPage() {
         </div>
       </div>
 
-      {(allConsistentCustomers && allConsistentCustomers.length > 0) && (
+      {(customerGroups.length > 0 || allRecurringOrders) && (
         <Card data-testid="card-consistent-customers">
           <CardContent className="p-0">
-            <button
-              className="w-full flex items-center justify-between px-4 py-3 text-left"
-              onClick={() => setShowConsistent(v => !v)}
-              data-testid="button-toggle-consistent"
-            >
-              <div className="flex items-center gap-2">
+            <div className="flex items-center justify-between px-4 py-3">
+              <button
+                className="flex items-center gap-2 text-left"
+                onClick={() => setShowConsistent(v => !v)}
+                data-testid="button-toggle-consistent"
+              >
                 <UserCheck className="w-4 h-4 text-muted-foreground" />
                 <span className="font-medium text-sm">Consistent Customers</span>
-                <Badge variant="outline" className={`text-xs ${dayFilter === "tuesday" ? "border-amber-400 text-amber-600 dark:text-amber-400" : ""}`}>
-                  {dayFilter === "tuesday" ? "Tuesday" : "Saturday"}
-                </Badge>
-                <Badge variant="secondary" className="text-xs">{allConsistentCustomers.length}</Badge>
-              </div>
-              {showConsistent ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
-            </button>
+                <Badge variant="secondary" className="text-xs">{customerGroups.length}</Badge>
+                {showConsistent ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+              </button>
+              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setShowAddConsistentDialog(true)} data-testid="button-add-consistent">
+                <Plus className="w-3 h-3 mr-1" />Add Customer
+              </Button>
+            </div>
             {showConsistent && (
-              <div className="border-t">
+              <div className="border-t overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Customer</TableHead>
-                      <TableHead>Type</TableHead>
-                      <TableHead>Default Items</TableHead>
-                      <TableHead className="w-[130px]"></TableHead>
+                      <TableHead className="min-w-[160px]">Customer</TableHead>
+                      <TableHead className="w-[180px]">Ordering Days</TableHead>
+                      <TableHead>Saturday Items</TableHead>
+                      <TableHead>Tuesday Items</TableHead>
+                      <TableHead className="min-w-[300px]">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {allConsistentCustomers.map(c => (
-                      <TableRow key={c.id} data-testid={`row-consistent-${c.id}`}>
-                        <TableCell className="font-medium">{c.customerName}</TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className="text-xs capitalize">{c.fulfillmentType}</Badge>
+                    {customerGroups.map(group => (
+                      <TableRow key={group.customerName} data-testid={`row-consistent-${group.customerName}`}>
+                        <TableCell className="font-medium align-top pt-3">{group.customerName}</TableCell>
+                        <TableCell className="align-top pt-3">
+                          <div className="flex flex-col gap-2">
+                            <label className="flex items-center gap-2 cursor-pointer select-none">
+                              <Checkbox
+                                checked={!!group.saturday}
+                                onCheckedChange={(checked) => {
+                                  if (checked) {
+                                    addDayMutation.mutate({
+                                      customerName: group.customerName,
+                                      isTuesday: false,
+                                      fulfillmentType: group.tuesday?.fulfillmentType || "delivery",
+                                      deliveryAddress: group.tuesday?.deliveryAddress || null,
+                                      items: [],
+                                    });
+                                  } else if (group.saturday) {
+                                    deleteConsistentMutation.mutate(group.saturday.id);
+                                  }
+                                }}
+                                data-testid={`checkbox-sat-${group.customerName}`}
+                              />
+                              <span className="text-sm">Saturday</span>
+                            </label>
+                            <label className="flex items-center gap-2 cursor-pointer select-none">
+                              <Checkbox
+                                checked={!!group.tuesday}
+                                onCheckedChange={(checked) => {
+                                  if (checked) {
+                                    addDayMutation.mutate({
+                                      customerName: group.customerName,
+                                      isTuesday: true,
+                                      fulfillmentType: group.saturday?.fulfillmentType || "delivery",
+                                      deliveryAddress: group.saturday?.deliveryAddress || null,
+                                      items: [],
+                                    });
+                                  } else if (group.tuesday) {
+                                    deleteConsistentMutation.mutate(group.tuesday.id);
+                                  }
+                                }}
+                                data-testid={`checkbox-tue-${group.customerName}`}
+                              />
+                              <span className="text-sm text-amber-600 dark:text-amber-400">Tuesday</span>
+                            </label>
+                          </div>
                         </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
-                          {c.items.length === 0
-                            ? <span className="italic">No items set</span>
-                            : c.items.map(i => `${i.quantity}×${i.productName}`).join(", ")}
+                        <TableCell className="text-sm text-muted-foreground align-top pt-3">
+                          {group.saturday
+                            ? (group.saturday.items.length === 0
+                                ? <span className="italic">No items — amend to add</span>
+                                : group.saturday.items.map(i => `${i.quantity}×${i.productName}`).join(", "))
+                            : <span className="text-muted-foreground/40 italic">—</span>}
                         </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-1">
-                            <Button
-                              size="sm"
-                              variant="default"
-                              className="h-7 text-xs"
-                              onClick={() => setStampingCustomer(c)}
-                              data-testid={`button-stamp-${c.id}`}
-                            >
-                              <Stamp className="w-3 h-3 mr-1" />
-                              This week
-                            </Button>
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              className="h-7 w-7"
-                              onClick={() => setEditingConsistentCustomer(c)}
-                              data-testid={`button-edit-consistent-${c.id}`}
-                            >
-                              <Pencil className="w-3 h-3" />
-                            </Button>
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              className="h-7 w-7"
-                              onClick={() => deleteConsistentMutation.mutate(c.id)}
-                              data-testid={`button-remove-consistent-${c.id}`}
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </Button>
+                        <TableCell className="text-sm text-muted-foreground align-top pt-3">
+                          {group.tuesday
+                            ? (group.tuesday.items.length === 0
+                                ? <span className="italic">No items — amend to add</span>
+                                : group.tuesday.items.map(i => `${i.quantity}×${i.productName}`).join(", "))
+                            : <span className="text-muted-foreground/40 italic">—</span>}
+                        </TableCell>
+                        <TableCell className="align-top pt-2">
+                          <div className="flex flex-wrap gap-1.5">
+                            {group.saturday && (
+                              <>
+                                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setEditingConsistentCustomer(group.saturday!)} data-testid={`button-amend-sat-${group.customerName}`}>
+                                  <Pencil className="w-3 h-3 mr-1" />Amend Saturday
+                                </Button>
+                                <Button size="sm" variant="default" className="h-7 text-xs" onClick={() => setStampingCustomer(group.saturday!)} data-testid={`button-stamp-sat-${group.customerName}`}>
+                                  <Stamp className="w-3 h-3 mr-1" />Stamp Sat
+                                </Button>
+                              </>
+                            )}
+                            {group.tuesday && (
+                              <>
+                                <Button size="sm" variant="outline" className="h-7 text-xs border-amber-400 text-amber-600 dark:text-amber-400" onClick={() => setEditingConsistentCustomer(group.tuesday!)} data-testid={`button-amend-tue-${group.customerName}`}>
+                                  <Pencil className="w-3 h-3 mr-1" />Amend Tuesday
+                                </Button>
+                                <Button size="sm" className="h-7 text-xs bg-amber-500 hover:bg-amber-600" onClick={() => setStampingCustomer(group.tuesday!)} data-testid={`button-stamp-tue-${group.customerName}`}>
+                                  <Stamp className="w-3 h-3 mr-1" />Stamp Tue
+                                </Button>
+                              </>
+                            )}
                           </div>
                         </TableCell>
                       </TableRow>
@@ -488,6 +558,10 @@ export default function OrdersPage() {
           onOpenChange={(v) => { if (!v) setEditingConsistentCustomer(null); }}
         />
       )}
+      <AddConsistentDialog
+        open={showAddConsistentDialog}
+        onOpenChange={setShowAddConsistentDialog}
+      />
     </div>
   );
 }
@@ -994,7 +1068,6 @@ function EditConsistentDialog({ customer, open, onOpenChange }: {
   );
   const [notes, setNotes] = useState((customer as any).notes || "");
   const [active, setActive] = useState(customer.active !== false);
-  const [isTuesday, setIsTuesday] = useState(customer.isTuesday === true);
   const [itemLines, setItemLines] = useState(
     customer.items.length > 0
       ? customer.items.map(i => ({ productName: i.productName, quantity: i.quantity }))
@@ -1026,7 +1099,6 @@ function EditConsistentDialog({ customer, open, onOpenChange }: {
       deliveryAddress: fulfillmentType === "delivery" ? (address || null) : null,
       fulfillmentType,
       active,
-      isTuesday,
       notes: notes || null,
       items: validItems.map(i => ({
         productName: i.productName,
@@ -1040,7 +1112,12 @@ function EditConsistentDialog({ customer, open, onOpenChange }: {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Edit Consistent Customer</DialogTitle>
+          <DialogTitle className="flex items-center gap-2">
+            Edit — {customer.customerName}
+            {customer.isTuesday
+              ? <Badge className="bg-amber-500 text-white text-xs">Tuesday</Badge>
+              : <Badge variant="outline" className="text-xs">Saturday</Badge>}
+          </DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
           <div className="space-y-1">
@@ -1095,21 +1172,6 @@ function EditConsistentDialog({ customer, open, onOpenChange }: {
               checked={active}
               onCheckedChange={setActive}
               data-testid="switch-edit-consistent-active"
-            />
-          </div>
-          <div className="flex items-center justify-between rounded-lg border p-3">
-            <div>
-              <p className="text-sm font-medium flex items-center gap-1.5">
-                <CalendarCheck className="w-4 h-4 text-amber-500" />
-                Tuesday order
-              </p>
-              <p className="text-xs text-muted-foreground">Off = Saturday, On = Tuesday</p>
-            </div>
-            <Switch
-              id="edit-consistent-tuesday"
-              checked={isTuesday}
-              onCheckedChange={setIsTuesday}
-              data-testid="switch-edit-consistent-tuesday"
             />
           </div>
           <div className="space-y-2">
@@ -1174,6 +1236,154 @@ function EditConsistentDialog({ customer, open, onOpenChange }: {
             data-testid="button-save-consistent"
           >
             {updateMutation.isPending ? "Saving..." : "Save Changes"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function AddConsistentDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+  const { toast } = useToast();
+  const [customerName, setCustomerName] = useState("");
+  const [fulfillmentType, setFulfillmentType] = useState<"delivery" | "collection">("delivery");
+  const [address, setAddress] = useState("");
+  const [notes, setNotes] = useState("");
+  const [satChecked, setSatChecked] = useState(true);
+  const [tueChecked, setTueChecked] = useState(false);
+  const [itemLines, setItemLines] = useState([{ productName: "", quantity: 1 }]);
+  const { data: products } = useQuery<any[]>({ queryKey: ["/api/products"] });
+
+  const mutation = useMutation({
+    mutationFn: async (days: boolean[]) => {
+      for (const isTuesday of days) {
+        await apiRequest("POST", "/api/recurring-orders", {
+          customerName,
+          fulfillmentType,
+          deliveryAddress: fulfillmentType === "delivery" ? (address || null) : null,
+          notes: notes || null,
+          isTuesday,
+          items: itemLines.filter(i => i.productName.trim()).map(i => ({
+            productName: i.productName,
+            quantity: i.quantity,
+            productId: products?.find((p: any) => p.name === i.productName)?.id || null,
+          })),
+        });
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/recurring-orders"] });
+      toast({ title: "Customer added" });
+      onOpenChange(false);
+      setCustomerName(""); setAddress(""); setNotes("");
+      setSatChecked(true); setTueChecked(false);
+      setItemLines([{ productName: "", quantity: 1 }]);
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to add customer", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const handleSubmit = () => {
+    if (!customerName.trim()) {
+      toast({ title: "Customer name is required", variant: "destructive" });
+      return;
+    }
+    if (!satChecked && !tueChecked) {
+      toast({ title: "Select at least one ordering day", variant: "destructive" });
+      return;
+    }
+    const days: boolean[] = [];
+    if (satChecked) days.push(false);
+    if (tueChecked) days.push(true);
+    mutation.mutate(days);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Add Consistent Customer</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-1">
+            <Label>Customer Name</Label>
+            <Input value={customerName} onChange={e => setCustomerName(e.target.value)} placeholder="Customer name" data-testid="input-add-consistent-name" />
+          </div>
+          <div className="space-y-2">
+            <Label>Ordering Days</Label>
+            <div className="flex gap-6">
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <Checkbox checked={satChecked} onCheckedChange={(v) => setSatChecked(!!v)} data-testid="checkbox-add-saturday" />
+                <span className="text-sm">Saturday</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <Checkbox checked={tueChecked} onCheckedChange={(v) => setTueChecked(!!v)} data-testid="checkbox-add-tuesday" />
+                <span className="text-sm text-amber-600 dark:text-amber-400">Tuesday</span>
+              </label>
+            </div>
+            {satChecked && tueChecked && (
+              <p className="text-xs text-muted-foreground">Items below will be used as the starting template for both days — amend each day separately afterwards.</p>
+            )}
+          </div>
+          <div className="space-y-1">
+            <Label>Fulfillment</Label>
+            <Select value={fulfillmentType} onValueChange={(v: "delivery" | "collection") => setFulfillmentType(v)}>
+              <SelectTrigger data-testid="select-add-consistent-fulfillment">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="delivery">Delivery</SelectItem>
+                <SelectItem value="collection">Collection</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {fulfillmentType === "delivery" && (
+            <div className="space-y-1">
+              <Label>Delivery Address</Label>
+              <Textarea value={address} onChange={e => setAddress(e.target.value)} placeholder="Street, City, Postcode" rows={2} data-testid="input-add-consistent-address" />
+            </div>
+          )}
+          <div className="space-y-1">
+            <Label>Notes</Label>
+            <Input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Any regular notes..." data-testid="input-add-consistent-notes" />
+          </div>
+          <div className="space-y-2">
+            <Label>Default Items</Label>
+            {itemLines.map((line, idx) => (
+              <div key={idx} className="flex gap-2">
+                <Input
+                  value={line.productName}
+                  onChange={e => { const n = [...itemLines]; n[idx].productName = e.target.value; setItemLines(n); }}
+                  placeholder="Product name"
+                  className="flex-1"
+                  list="add-consistent-products"
+                  data-testid={`input-add-consistent-item-${idx}`}
+                />
+                <Input
+                  type="number"
+                  value={line.quantity}
+                  onChange={e => { const n = [...itemLines]; n[idx].quantity = parseInt(e.target.value) || 1; setItemLines(n); }}
+                  className="w-20"
+                  min={1}
+                  data-testid={`input-add-consistent-qty-${idx}`}
+                />
+                {itemLines.length > 1 && (
+                  <Button size="icon" variant="ghost" className="h-9 w-9 shrink-0" onClick={() => setItemLines(itemLines.filter((_, i) => i !== idx))}>
+                    <Trash2 className="w-3 h-3" />
+                  </Button>
+                )}
+              </div>
+            ))}
+            <datalist id="add-consistent-products">
+              {(products || []).map((p: any) => <option key={p.id} value={p.name} />)}
+            </datalist>
+            <Button size="sm" variant="outline" onClick={() => setItemLines([...itemLines, { productName: "", quantity: 1 }])} data-testid="button-add-consistent-item">
+              <Plus className="w-3 h-3 mr-1" />Add Item
+            </Button>
+          </div>
+          <Button onClick={handleSubmit} disabled={mutation.isPending} className="w-full" data-testid="button-submit-add-consistent">
+            {mutation.isPending ? "Adding..." : "Add Customer"}
           </Button>
         </div>
       </DialogContent>
