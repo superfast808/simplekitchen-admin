@@ -74,17 +74,18 @@ export default function SubscribePage({ params }: { params: { token: string } })
     },
   });
 
-  // Pre-fill selections/extras from existing data using mealSet (positive match)
+  // Pre-fill selections: only classify as extra if it's a confirmed non-7.50 product
+  // Everything else (including unrecognised products) defaults to meal
   useEffect(() => {
     if (!data) return;
-    const mealSet = new Set((data.availableMeals || []).map(m => m.name));
+    const extraSet = new Set((data.availableExtras || []).map(e => e.name));
     const mealSels: Record<string, number> = {};
     const extSels: Record<string, number> = {};
     for (const sel of data.selections || []) {
-      if (mealSet.has(sel.productName)) {
-        mealSels[sel.productName] = sel.quantity;
-      } else {
+      if (extraSet.has(sel.productName)) {
         extSels[sel.productName] = sel.quantity;
+      } else {
+        mealSels[sel.productName] = sel.quantity;
       }
     }
     if (Object.keys(mealSels).length) setSelections(mealSels);

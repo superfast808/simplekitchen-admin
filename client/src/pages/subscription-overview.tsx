@@ -265,18 +265,19 @@ function AdminSelectionDialog({ invite, open, onOpenChange }: {
     staleTime: 30000,
   });
 
-  // Once we know which products are meals, split invite.selections accordingly
-  // Use mealSet (positive match) so meal items are never misclassified as extras
+  // Split existing selections: only put in extras if explicitly a confirmed extra product
+  // (availableExtras only contains non-7.50 products from the products table)
+  // Everything else defaults to meal — including new products not yet in the catalogue
   useEffect(() => {
     if (!mealData) return;
-    const mealSet = new Set((mealData.availableMeals || []).map(m => m.name));
+    const extraSet = new Set((mealData.availableExtras || []).map(e => e.name));
     const mealSels: Record<string, number> = {};
     const extraSels: Record<string, number> = {};
     for (const sel of invite.selections) {
-      if (mealSet.has(sel.productName)) {
-        mealSels[sel.productName] = sel.quantity;
-      } else {
+      if (extraSet.has(sel.productName)) {
         extraSels[sel.productName] = sel.quantity;
+      } else {
+        mealSels[sel.productName] = sel.quantity;
       }
     }
     setSelections(mealSels);

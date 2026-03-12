@@ -1387,10 +1387,11 @@ export async function registerRoutes(
         for (const item of order.items) {
           if (subscriptionPattern.test(item.productName)) continue;
           if (addDeliveryPattern.test(item.productName)) continue;
-          if (mealProductNames.has(item.productName)) {
-            mealCounts[item.productName] = (mealCounts[item.productName] || 0) + item.quantity;
-          } else if (extraProductNames.has(item.productName)) {
+          // Only put into extras if explicitly a non-7.50 product; everything else defaults to meal
+          if (extraProductNames.has(item.productName)) {
             extraCounts[item.productName] = (extraCounts[item.productName] || 0) + item.quantity;
+          } else {
+            mealCounts[item.productName] = (mealCounts[item.productName] || 0) + item.quantity;
           }
         }
       }
@@ -1535,10 +1536,11 @@ export async function registerRoutes(
         for (const item of order.items) {
           if (subPat.test(item.productName)) continue;
           if (delPat.test(item.productName)) continue;
-          if (mealProductNames.has(item.productName)) {
-            mealCounts[item.productName] = (mealCounts[item.productName] || 0) + item.quantity;
-          } else if (extraProductNames.has(item.productName)) {
+          // Only put into extras if explicitly a non-7.50 product; everything else defaults to meal
+          if (extraProductNames.has(item.productName)) {
             extraCounts[item.productName] = (extraCounts[item.productName] || 0) + item.quantity;
+          } else {
+            mealCounts[item.productName] = (mealCounts[item.productName] || 0) + item.quantity;
           }
         }
       }
