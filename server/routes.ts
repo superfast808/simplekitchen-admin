@@ -99,6 +99,18 @@ function detectFulfillmentType(wooOrder: any): string {
   return "collection";
 }
 
+const DEFAULT_EMAIL_SUBJECT = "Choose Your Meals This Week - Simple Kitchen Prep";
+const DEFAULT_EMAIL_BODY = `<h2 style="color: #333;">Hi {{firstName}},</h2>
+<p>It's time to choose your <strong>{{qty}} meals</strong> for this week!</p>
+<p>Click the button below to select your preferences:</p>
+<div style="text-align: center; margin: 30px 0;">
+  <a href="{{url}}" style="background-color: #16a34a; color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-size: 16px; font-weight: bold;">Choose My Meals</a>
+</div>
+<p style="color: #666; font-size: 14px;">If the button doesn't work, copy and paste this link into your browser:</p>
+<p style="color: #666; font-size: 12px; word-break: break-all;">{{url}}</p>
+<hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;" />
+<p style="color: #999; font-size: 12px;">Simple Kitchen Prep</p>`;
+
 const DEFAULT_SETTINGS: Record<string, string> = {
   sync_interval_minutes: "60",
   sync_enabled: "true",
@@ -107,6 +119,8 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   order_window_close_day: "3",
   order_window_close_hour: "24",
   week1ReferenceDate: "",
+  subscription_email_subject: DEFAULT_EMAIL_SUBJECT,
+  subscription_email_body: DEFAULT_EMAIL_BODY,
 };
 
 const ALLOWED_SETTINGS_KEYS = new Set(Object.keys(DEFAULT_SETTINGS));
@@ -1395,24 +1409,24 @@ export async function registerRoutes(
         }
 
         try {
+          const settingsMap = await getSettingsMap();
+          const emailSubject = settingsMap.subscription_email_subject || DEFAULT_EMAIL_SUBJECT;
+          const emailBodyTemplate = settingsMap.subscription_email_body || DEFAULT_EMAIL_BODY;
+          const firstName = order.customerName.split(" ")[0];
+          const emailBody = emailBodyTemplate
+            .replace(/\{\{firstName\}\}/g, firstName)
+            .replace(/\{\{fullName\}\}/g, order.customerName)
+            .replace(/\{\{qty\}\}/g, String(qty))
+            .replace(/\{\{url\}\}/g, selectUrl);
+          const emailHtml = `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">${emailBody}</div>`;
           await smtpTransporter.sendMail({
             from: process.env.SMTP_FROM_EMAIL,
             to: toEmail,
-            subject: "Choose Your Meals This Week - Simple Kitchen Prep",
-            html: `
-              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-                <h2 style="color: #333;">Hi ${order.customerName.split(" ")[0]},</h2>
-                <p>It's time to choose your <strong>${qty} meals</strong> for this week!</p>
-                <p>Click the button below to select your preferences:</p>
-                <div style="text-align: center; margin: 30px 0;">
-                  <a href="${selectUrl}" style="background-color: #16a34a; color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-size: 16px; font-weight: bold;">Choose My Meals</a>
-                </div>
-                <p style="color: #666; font-size: 14px;">If the button doesn't work, copy and paste this link into your browser:</p>
-                <p style="color: #666; font-size: 12px; word-break: break-all;">${selectUrl}</p>
-                <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;" />
-                <p style="color: #999; font-size: 12px;">Simple Kitchen Prep</p>
-              </div>
-            `,
+            subject: emailSubject
+              .replace(/\{\{firstName\}\}/g, firstName)
+              .replace(/\{\{fullName\}\}/g, order.customerName)
+              .replace(/\{\{qty\}\}/g, String(qty)),
+            html: emailHtml,
           });
           sent++;
         } catch (emailErr: any) {

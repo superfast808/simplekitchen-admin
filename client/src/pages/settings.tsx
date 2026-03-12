@@ -8,8 +8,9 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
-import { Save, RefreshCw, Upload, Trash2, Image, UserPlus, X, CalendarDays } from "lucide-react";
+import { Save, RefreshCw, Upload, Trash2, Image, UserPlus, X, CalendarDays, Mail } from "lucide-react";
 
 const DAYS = [
   { value: "0", label: "Sunday" },
@@ -140,6 +141,8 @@ export default function SettingsPage() {
   const [closeDay, setCloseDay] = useState("3");
   const [closeHour, setCloseHour] = useState("24");
   const [week1ReferenceDate, setWeek1ReferenceDate] = useState("");
+  const [emailSubject, setEmailSubject] = useState("Choose Your Meals This Week - Simple Kitchen Prep");
+  const [emailBody, setEmailBody] = useState("");
 
   const { data: currentWeek } = useQuery<{ weekNumber: number; categoryName: string; week1ReferenceDate: string | null }>({
     queryKey: ["/api/current-week"],
@@ -158,6 +161,8 @@ export default function SettingsPage() {
         const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
         setWeek1ReferenceDate(local);
       }
+      if (settings.subscription_email_subject) setEmailSubject(settings.subscription_email_subject);
+      if (settings.subscription_email_body) setEmailBody(settings.subscription_email_body);
     }
   }, [settings]);
 
@@ -194,6 +199,8 @@ export default function SettingsPage() {
       order_window_open_hour: openHour,
       order_window_close_day: closeDay,
       order_window_close_hour: closeHour,
+      subscription_email_subject: emailSubject,
+      subscription_email_body: emailBody,
     };
     if (week1ReferenceDate) {
       data.week1ReferenceDate = new Date(week1ReferenceDate).toISOString();
@@ -470,6 +477,45 @@ export default function SettingsPage() {
             />
             <p className="text-xs text-muted-foreground">
               The Saturday noon when Week 1 last started. The week number advances every 7 days from this date, cycling 1→2→3→4→5→6→1.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Mail className="w-4 h-4" />
+            Subscription Email Template
+          </CardTitle>
+          <CardDescription>
+            Customise the email sent when subscription meal selection links are issued. Available variables: <code className="text-xs bg-muted px-1 py-0.5 rounded">{"{{firstName}}"}</code> <code className="text-xs bg-muted px-1 py-0.5 rounded">{"{{fullName}}"}</code> <code className="text-xs bg-muted px-1 py-0.5 rounded">{"{{qty}}"}</code> <code className="text-xs bg-muted px-1 py-0.5 rounded">{"{{url}}"}</code>
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="email-subject">Subject line</Label>
+            <Input
+              id="email-subject"
+              value={emailSubject}
+              onChange={(e) => setEmailSubject(e.target.value)}
+              placeholder="Email subject"
+              data-testid="input-email-subject"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="email-body">Email body (HTML)</Label>
+            <Textarea
+              id="email-body"
+              value={emailBody}
+              onChange={(e) => setEmailBody(e.target.value)}
+              rows={12}
+              className="font-mono text-xs"
+              placeholder="Enter HTML email body here…"
+              data-testid="textarea-email-body"
+            />
+            <p className="text-xs text-muted-foreground">
+              This HTML is wrapped in a centred 600px container before sending. Use <code className="bg-muted px-0.5 rounded">{"{{url}}"}</code> wherever you want the selection link to appear (in href attributes or as visible text).
             </p>
           </div>
         </CardContent>

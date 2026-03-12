@@ -10,15 +10,16 @@ A partner portal for managing food orders from a WooCommerce store. It imports o
 - **External APIs**: WooCommerce REST API v3, OpenStreetMap Nominatim (geocoding), Leaflet (maps)
 
 ## Key Features
-1. **Orders View** - Weekly view of all orders (WooCommerce + manual), with product columns, bold TOTAL row at bottom, XLSX export, and printable address labels PDF (L7173/J8173 format, 99.1×57mm, 10 per A4 page)
-2. **Products** - Import products from WooCommerce (with category sync), manage ingredient lists per product
-3. **Product Totals** - Date-filterable summary of products ordered (online + manual/shop quantities)
-4. **Ingredient Summary** - Calculates total ingredient quantities needed based on orders
-5. **Manual Stock** - Input quantities for items sold in local shops or non-website orders
-6. **Delivery Routes** - Planned delivery route starting from Unit 33 depot (Glasgow G45 9EE), showing only delivery customers on map with nearest-neighbor optimization; customer breakdown shows delivery/collection counts
-7. **Weekly Stats** - Dashboard-style page with 8 stat cards: meals sold, revenue, avg order value, delivery stops, new/returning customers, top/worst sellers. Week navigation with chevrons, current week visible until Saturday noon then auto-shows previous week
-8. **Subscriptions** - Send weekly meal preference emails to subscription customers; customers use a public link to select meals (up to their sub qty) from WooCommerce "Week N" categorised products; add-ons (non-£7.50 "Week N" products) shown separately; selections auto-create orders; admin overview shows who's chosen/waiting; override email for testing
-9. **Settings** - Configurable auto-sync interval, sync enable/disable, order window (default: Sat noon to Wed midnight), logo upload (branding), user management (add/delete users), **week rotation** (set Week 1 reference date; week number 1-6 auto-advances every Saturday noon)
+1. **Orders View** - Weekly view of all orders (WooCommerce + manual), filterable by Saturday/Tuesday/All with quick-filter tabs; per-row item summary (qty×product) in customer cell; spend column (£ total per order); notes and cash amount columns; search bar; Sat/Tue split address label PDFs (Avery L7163, 99.1×38.1mm, 14 per A4 page)
+2. **Tuesday Orders** - Same layout as Orders page but filtered to Tuesday orders only
+3. **Products** - Import products from WooCommerce (with category sync), manage ingredient lists per product
+4. **Product Totals** - Date-filterable summary of products ordered (online + manual/shop quantities)
+5. **Ingredient Summary** - Calculates total ingredient quantities needed based on orders
+6. **Manual Stock** - Input quantities for items sold in local shops or non-website orders
+7. **Delivery Routes** - Planned delivery route starting from G45 9EE depot; shows delivery customers (including manual orders with address, even when fulfillmentType is null); nearest-neighbor optimization; delivery/collection breakdown
+8. **Weekly Stats** - Dashboard-style page with 8 stat cards: meals sold, revenue, avg order value, delivery stops, new/returning customers, top/worst sellers. Week navigation with chevrons
+9. **Subscriptions** - Send weekly meal preference emails to subscription customers; customers use a public link to select meals; selections auto-create orders; admin overview shows who's chosen/waiting; override email for testing
+10. **Settings** - Configurable auto-sync interval, sync enable/disable, order window, logo upload, user management, week rotation, **editable subscription email template** (subject + HTML body with {{firstName}}/{{fullName}}/{{qty}}/{{url}} placeholders)
 
 ## Data Model
 - `products` - Products with optional WooCommerce ID, name, price, image, category (synced from WooCommerce categories, e.g. "Week 1")
