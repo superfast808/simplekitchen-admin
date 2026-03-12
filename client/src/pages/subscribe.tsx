@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,7 @@ type InviteData = {
   subscriptionQuantity: number;
   status: string;
   availableMeals: AvailableMeal[];
+  availableExtras: AvailableMeal[];
   selections: Array<{ productName: string; quantity: number }>;
 };
 
@@ -56,6 +57,7 @@ export default function SubscribePage({ params }: { params: { token: string } })
   const [emailVerified, setEmailVerified] = useState(false);
   const [emailError, setEmailError] = useState("");
   const [selections, setSelections] = useState<Record<string, number>>({});
+  const [extras, setExtras] = useState<Record<string, number>>({});
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
@@ -72,7 +74,21 @@ export default function SubscribePage({ params }: { params: { token: string } })
     },
   });
 
+  // Pre-fill extras from existing selections when data loads
+  useEffect(() => {
+    if (!data) return;
+    const extraSet = new Set((data.availableExtras || []).map(e => e.name));
+    if (data.selections?.length) {
+      const ext: Record<string, number> = {};
+      for (const sel of data.selections) {
+        if (extraSet.has(sel.productName)) ext[sel.productName] = sel.quantity;
+      }
+      if (Object.keys(ext).length) setExtras(ext);
+    }
+  }, [data]);
+
   const totalSelected = Object.values(selections).reduce((sum, q) => sum + q, 0);
+  const totalExtras = Object.values(extras).reduce((sum, q) => sum + q, 0);
   const maxMeals = data?.subscriptionQuantity || 0;
   const remaining = maxMeals - totalSelected;
 
@@ -93,10 +109,19 @@ export default function SubscribePage({ params }: { params: { token: string } })
   const removeMeal = (name: string) => {
     setSelections(prev => {
       const current = prev[name] || 0;
-      if (current <= 1) {
-        const { [name]: _, ...rest } = prev;
-        return rest;
-      }
+      if (current <= 1) { const { [name]: _, ...rest } = prev; return rest; }
+      return { ...prev, [name]: current - 1 };
+    });
+  };
+
+  const addExtra = (name: string) => {
+    setExtras(prev => ({ ...prev, [name]: (prev[name] || 0) + 1 }));
+  };
+
+  const removeExtra = (name: string) => {
+    setExtras(prev => {
+      const current = prev[name] || 0;
+      if (current <= 1) { const { [name]: _, ...rest } = prev; return rest; }
       return { ...prev, [name]: current - 1 };
     });
   };
@@ -108,11 +133,14 @@ export default function SubscribePage({ params }: { params: { token: string } })
       const sels = Object.entries(selections)
         .filter(([_, q]) => q > 0)
         .map(([productName, quantity]) => ({ productName, quantity }));
+      const extSels = Object.entries(extras)
+        .filter(([_, q]) => q > 0)
+        .map(([productName, quantity]) => ({ productName, quantity }));
 
       const res = await fetch(`/api/subscribe/${token}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, selections: sels }),
+        body: JSON.stringify({ email, selections: sels, extras: extSels }),
       });
 
       if (!res.ok) {
@@ -331,6 +359,58 @@ export default function SubscribePage({ params }: { params: { token: string } })
           </Card>
         )}
 
+        {/* Extras / Add-ons section */}
+        {(data.availableExtras || []).length > 0 && (
+          <div className="mt-6 space-y-2">
+            <div className="flex items-center gap-2">
+              <div className="flex-1 border-t" />
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide shrink-0">Add-ons (optional)</p>
+              <div className="flex-1 border-t" />
+            </div>
+            {(data.availableExtras || []).map((extra) => {
+              const qty = extras[extra.name] || 0;
+              const isSelected = qty > 0;
+              return (
+                <Card
+                  key={extra.name}
+                  className={`transition-all ${isSelected ? "border-blue-400 bg-blue-50/50 dark:bg-blue-950/20 shadow-sm" : ""}`}
+                  data-testid={`card-extra-${extra.name.replace(/\s+/g, "-").toLowerCase()}`}
+                >
+                  <CardContent className="p-4 flex items-center justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-sm truncate">{extra.name}</p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {isSelected ? (
+                        <div className="flex items-center gap-1">
+                          <Button size="icon" variant="outline" className="h-8 w-8 rounded-full"
+                            onClick={() => removeExtra(extra.name)}
+                            data-testid={`button-remove-extra-${extra.name.replace(/\s+/g, "-").toLowerCase()}`}>
+                            <Minus className="w-3 h-3" />
+                          </Button>
+                          <span className="w-6 text-center font-bold text-sm" data-testid={`text-extra-qty-${extra.name.replace(/\s+/g, "-").toLowerCase()}`}>{qty}</span>
+                          <Button size="icon" variant="outline" className="h-8 w-8 rounded-full"
+                            onClick={() => addExtra(extra.name)}
+                            data-testid={`button-add-extra-${extra.name.replace(/\s+/g, "-").toLowerCase()}`}>
+                            <Plus className="w-3 h-3" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <Button size="sm" variant="outline" onClick={() => addExtra(extra.name)}
+                          className="text-blue-600 border-blue-300"
+                          data-testid={`button-select-extra-${extra.name.replace(/\s+/g, "-").toLowerCase()}`}>
+                          <Plus className="w-3 h-3 mr-1" />
+                          Add
+                        </Button>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        )}
+
         {submitError && (
           <p className="text-sm text-red-500 text-center mt-3" data-testid="text-submit-error">{submitError}</p>
         )}
@@ -341,9 +421,10 @@ export default function SubscribePage({ params }: { params: { token: string } })
           <div className="max-w-lg mx-auto">
             <div className="flex items-center gap-2 mb-2 text-xs text-muted-foreground overflow-x-auto">
               {Object.entries(selections).filter(([_, q]) => q > 0).map(([name, qty]) => (
-                <Badge key={name} variant="secondary" className="shrink-0 text-xs">
-                  {name} ×{qty}
-                </Badge>
+                <Badge key={name} variant="secondary" className="shrink-0 text-xs">{name} ×{qty}</Badge>
+              ))}
+              {Object.entries(extras).filter(([_, q]) => q > 0).map(([name, qty]) => (
+                <Badge key={name} className="shrink-0 text-xs bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">{name} ×{qty}</Badge>
               ))}
             </div>
             <Button
@@ -353,7 +434,7 @@ export default function SubscribePage({ params }: { params: { token: string } })
               disabled={submitting || totalSelected === 0}
               data-testid="button-submit-selections"
             >
-              {submitting ? "Submitting..." : `Confirm ${totalSelected} Meal${totalSelected !== 1 ? "s" : ""}`}
+              {submitting ? "Submitting..." : `Confirm ${totalSelected} Meal${totalSelected !== 1 ? "s" : ""}${totalExtras > 0 ? ` + ${totalExtras} add-on${totalExtras !== 1 ? "s" : ""}` : ""}`}
             </Button>
           </div>
         </div>

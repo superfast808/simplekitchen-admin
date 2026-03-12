@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -38,6 +38,7 @@ type MealData = {
   customerName: string;
   subscriptionQuantity: number;
   availableMeals: Array<{ name: string; popularity: number }>;
+  availableExtras: Array<{ name: string; popularity: number }>;
   selections: Array<{ productName: string; quantity: number }>;
 };
 
@@ -251,13 +252,8 @@ function AdminSelectionDialog({ invite, open, onOpenChange }: {
 }) {
   const { toast } = useToast();
   const [localMax, setLocalMax] = useState(invite.subscriptionQuantity);
-  const [selections, setSelections] = useState<Record<string, number>>(() => {
-    const initial: Record<string, number> = {};
-    for (const sel of invite.selections) {
-      initial[sel.productName] = sel.quantity;
-    }
-    return initial;
-  });
+  const [selections, setSelections] = useState<Record<string, number>>({});
+  const [extras, setExtras] = useState<Record<string, number>>({});
 
   const { data: mealData, isLoading } = useQuery<MealData>({
     queryKey: ["/api/subscription-invites", invite.id, "meals"],
@@ -269,13 +265,30 @@ function AdminSelectionDialog({ invite, open, onOpenChange }: {
     staleTime: 30000,
   });
 
+  // Once we know which products are extras vs meals, split invite.selections accordingly
+  useEffect(() => {
+    if (!mealData) return;
+    const extraSet = new Set((mealData.availableExtras || []).map(e => e.name));
+    const mealSels: Record<string, number> = {};
+    const extraSels: Record<string, number> = {};
+    for (const sel of invite.selections) {
+      if (extraSet.has(sel.productName)) {
+        extraSels[sel.productName] = sel.quantity;
+      } else {
+        mealSels[sel.productName] = sel.quantity;
+      }
+    }
+    setSelections(mealSels);
+    setExtras(extraSels);
+  }, [mealData]);
+
   const saveMutation = useMutation({
-    mutationFn: (sels: Array<{ productName: string; quantity: number }>) =>
-      apiRequest("PATCH", `/api/subscription-invites/${invite.id}/selections`, { selections: sels, subscriptionQuantity: localMax }),
+    mutationFn: ({ sels, extSels }: { sels: Array<{ productName: string; quantity: number }>; extSels: Array<{ productName: string; quantity: number }> }) =>
+      apiRequest("PATCH", `/api/subscription-invites/${invite.id}/selections`, { selections: sels, extras: extSels, subscriptionQuantity: localMax }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/subscription-invites"] });
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
-      toast({ title: `Meals saved for ${invite.customerName}` });
+      toast({ title: `Saved selections for ${invite.customerName}` });
       onOpenChange(false);
     },
     onError: (err: Error) => {
@@ -294,26 +307,36 @@ function AdminSelectionDialog({ invite, open, onOpenChange }: {
   const removeMeal = (name: string) => {
     setSelections(prev => {
       const current = prev[name] || 0;
-      if (current <= 1) {
-        const { [name]: _, ...rest } = prev;
-        return rest;
-      }
+      if (current <= 1) { const { [name]: _, ...rest } = prev; return rest; }
+      return { ...prev, [name]: current - 1 };
+    });
+  };
+
+  const addExtra = (name: string) => {
+    setExtras(prev => ({ ...prev, [name]: (prev[name] || 0) + 1 }));
+  };
+
+  const removeExtra = (name: string) => {
+    setExtras(prev => {
+      const current = prev[name] || 0;
+      if (current <= 1) { const { [name]: _, ...rest } = prev; return rest; }
       return { ...prev, [name]: current - 1 };
     });
   };
 
   const handleSave = () => {
-    const sels = Object.entries(selections)
-      .filter(([_, q]) => q > 0)
-      .map(([productName, quantity]) => ({ productName, quantity }));
+    const sels = Object.entries(selections).filter(([_, q]) => q > 0).map(([productName, quantity]) => ({ productName, quantity }));
+    const extSels = Object.entries(extras).filter(([_, q]) => q > 0).map(([productName, quantity]) => ({ productName, quantity }));
     if (sels.length === 0) {
       toast({ title: "Select at least one meal", variant: "destructive" });
       return;
     }
-    saveMutation.mutate(sels);
+    saveMutation.mutate({ sels, extSels });
   };
 
   const availableMeals = mealData?.availableMeals || [];
+  const availableExtras = mealData?.availableExtras || [];
+  const totalExtras = Object.values(extras).reduce((sum, q) => sum + q, 0);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -433,22 +456,71 @@ function AdminSelectionDialog({ invite, open, onOpenChange }: {
           </div>
         )}
 
-        {totalSelected > 0 && (
+        {/* Extras (oats, soups, etc.) */}
+        {availableExtras.length > 0 && (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 pt-1">
+              <div className="flex-1 border-t" />
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide shrink-0">Add-ons (optional)</p>
+              <div className="flex-1 border-t" />
+            </div>
+            {availableExtras.map((extra) => {
+              const qty = extras[extra.name] || 0;
+              const isSelected = qty > 0;
+              return (
+                <div
+                  key={extra.name}
+                  className={`flex items-center justify-between p-3 rounded-lg border transition-all ${isSelected ? "border-blue-400 bg-blue-50/50 dark:bg-blue-950/20" : "border-border"}`}
+                  data-testid={`extra-row-${extra.name.replace(/\s+/g, "-").toLowerCase()}`}
+                >
+                  <p className="font-medium text-sm flex-1 min-w-0 truncate pr-2">{extra.name}</p>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {isSelected ? (
+                      <>
+                        <Button size="icon" variant="outline" className="h-7 w-7 rounded-full"
+                          onClick={() => removeExtra(extra.name)}
+                          data-testid={`button-admin-remove-extra-${extra.name.replace(/\s+/g, "-").toLowerCase()}`}>
+                          <Minus className="w-3 h-3" />
+                        </Button>
+                        <span className="w-6 text-center font-bold text-sm" data-testid={`text-admin-extra-qty-${extra.name.replace(/\s+/g, "-").toLowerCase()}`}>{qty}</span>
+                        <Button size="icon" variant="outline" className="h-7 w-7 rounded-full"
+                          onClick={() => addExtra(extra.name)}
+                          data-testid={`button-admin-add-extra-${extra.name.replace(/\s+/g, "-").toLowerCase()}`}>
+                          <Plus className="w-3 h-3" />
+                        </Button>
+                      </>
+                    ) : (
+                      <Button size="sm" variant="outline" onClick={() => addExtra(extra.name)}
+                        className="h-7 text-xs text-blue-600 border-blue-300"
+                        data-testid={`button-admin-select-extra-${extra.name.replace(/\s+/g, "-").toLowerCase()}`}>
+                        <Plus className="w-3 h-3 mr-1" />
+                        Add
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {(totalSelected > 0 || totalExtras > 0) && (
           <div className="border-t pt-3 mt-2">
             <div className="flex flex-wrap gap-1 mb-3">
               {Object.entries(selections).filter(([_, q]) => q > 0).map(([name, qty]) => (
-                <Badge key={name} variant="secondary" className="text-xs">
-                  {name} ×{qty}
-                </Badge>
+                <Badge key={name} variant="secondary" className="text-xs">{name} ×{qty}</Badge>
+              ))}
+              {Object.entries(extras).filter(([_, q]) => q > 0).map(([name, qty]) => (
+                <Badge key={name} className="text-xs bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">{name} ×{qty}</Badge>
               ))}
             </div>
             <Button
               className="w-full bg-emerald-600 hover:bg-emerald-700 text-white"
               onClick={handleSave}
-              disabled={saveMutation.isPending}
+              disabled={saveMutation.isPending || totalSelected === 0}
               data-testid="button-save-admin-selections"
             >
-              {saveMutation.isPending ? "Saving..." : `Save ${totalSelected} Meal${totalSelected !== 1 ? "s" : ""} for ${invite.customerName}`}
+              {saveMutation.isPending ? "Saving..." : `Save for ${invite.customerName}${totalExtras > 0 ? ` + ${totalExtras} add-on${totalExtras !== 1 ? "s" : ""}` : ""}`}
             </Button>
           </div>
         )}

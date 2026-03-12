@@ -1367,21 +1367,27 @@ export async function registerRoutes(
         })
       );
 
-      const mealPriceStr = "7.50";
-      const mealCounts: Record<string, number> = {};
       const subscriptionPattern = /meal\s+subscription/i;
       const addDeliveryPattern = /add\s+delivery/i;
+      const mealCounts: Record<string, number> = {};
+      const extraCounts: Record<string, number> = {};
       for (const order of ordersWithItems) {
         for (const item of order.items) {
           if (subscriptionPattern.test(item.productName)) continue;
           if (addDeliveryPattern.test(item.productName)) continue;
-          if (item.price === mealPriceStr || parseFloat(item.price || "0") === 7.50) {
+          const price = parseFloat(item.price || "0");
+          if (price === 7.50) {
             mealCounts[item.productName] = (mealCounts[item.productName] || 0) + item.quantity;
+          } else if (price > 0) {
+            extraCounts[item.productName] = (extraCounts[item.productName] || 0) + item.quantity;
           }
         }
       }
 
       const availableMeals = Object.entries(mealCounts)
+        .sort((a, b) => b[1] - a[1])
+        .map(([name, count]) => ({ name, popularity: count }));
+      const availableExtras = Object.entries(extraCounts)
         .sort((a, b) => b[1] - a[1])
         .map(([name, count]) => ({ name, popularity: count }));
 
@@ -1392,6 +1398,7 @@ export async function registerRoutes(
         subscriptionQuantity: invite.subscriptionQuantity,
         status: invite.status,
         availableMeals,
+        availableExtras,
         selections: existingSelections,
       });
     } catch (error: any) {
@@ -1410,7 +1417,7 @@ export async function registerRoutes(
         return res.status(400).json({ message: "You have already submitted your meal choices" });
       }
 
-      const { email, selections } = req.body;
+      const { email, selections, extras } = req.body;
       if (!email || typeof email !== "string" || email.toLowerCase() !== invite.customerEmail.toLowerCase()) {
         return res.status(403).json({ message: "Email does not match the subscription order" });
       }
@@ -1434,8 +1441,10 @@ export async function registerRoutes(
         return res.status(400).json({ message: `You can select up to ${invite.subscriptionQuantity} meals` });
       }
 
+      const extrasList: any[] = Array.isArray(extras) ? extras : [];
+
       await storage.deleteSubscriptionSelectionsByInviteId(invite.id);
-      for (const sel of selections) {
+      for (const sel of [...selections, ...extrasList]) {
         await storage.createSubscriptionSelection({
           inviteId: invite.id,
           productName: sel.productName,
@@ -1462,6 +1471,16 @@ export async function registerRoutes(
           price: "7.50",
         });
       }
+      for (const extra of extrasList) {
+        if (!extra.productName?.trim()) continue;
+        await storage.createOrderItem({
+          orderId: order.id,
+          productId: null,
+          productName: extra.productName,
+          quantity: parseInt(extra.quantity, 10) || 1,
+          price: "0",
+        });
+      }
 
       await storage.updateSubscriptionInviteStatus(invite.id, "completed");
       await storage.setSubscriptionInviteSelectionsOrder(invite.id, order.id);
@@ -1485,20 +1504,27 @@ export async function registerRoutes(
         })
       );
 
+      const subPat = /meal\s+subscription/i;
+      const delPat = /add\s+delivery/i;
       const mealCounts: Record<string, number> = {};
-      const subscriptionPattern = /meal\s+subscription/i;
-      const addDeliveryPattern = /add\s+delivery/i;
+      const extraCounts: Record<string, number> = {};
       for (const order of ordersWithItems) {
         for (const item of order.items) {
-          if (subscriptionPattern.test(item.productName)) continue;
-          if (addDeliveryPattern.test(item.productName)) continue;
-          if (parseFloat(item.price || "0") === 7.50) {
+          if (subPat.test(item.productName)) continue;
+          if (delPat.test(item.productName)) continue;
+          const price = parseFloat(item.price || "0");
+          if (price === 7.50) {
             mealCounts[item.productName] = (mealCounts[item.productName] || 0) + item.quantity;
+          } else if (price > 0) {
+            extraCounts[item.productName] = (extraCounts[item.productName] || 0) + item.quantity;
           }
         }
       }
 
       const availableMeals = Object.entries(mealCounts)
+        .sort((a, b) => b[1] - a[1])
+        .map(([name, count]) => ({ name, popularity: count }));
+      const availableExtras = Object.entries(extraCounts)
         .sort((a, b) => b[1] - a[1])
         .map(([name, count]) => ({ name, popularity: count }));
 
@@ -1507,6 +1533,7 @@ export async function registerRoutes(
         customerName: invite.customerName,
         subscriptionQuantity: invite.subscriptionQuantity,
         availableMeals,
+        availableExtras,
         selections: existingSelections,
       });
     } catch (error: any) {
@@ -1520,7 +1547,7 @@ export async function registerRoutes(
       const invite = await storage.getSubscriptionInviteById(id);
       if (!invite) return res.status(404).json({ message: "Invite not found" });
 
-      const { selections, subscriptionQuantity } = req.body;
+      const { selections, extras, subscriptionQuantity } = req.body;
       if (!Array.isArray(selections) || selections.length === 0) {
         return res.status(400).json({ message: "Please select at least one meal" });
       }
@@ -1533,13 +1560,17 @@ export async function registerRoutes(
         await storage.updateSubscriptionInviteQuantity(id, effectiveMax);
       }
 
+      // Only meal selections count against the quota; extras are free
       const totalQty = selections.reduce((sum: number, s: any) => sum + (parseInt(s.quantity, 10) || 0), 0);
       if (totalQty > effectiveMax) {
         return res.status(400).json({ message: `Maximum ${effectiveMax} meals allowed` });
       }
 
+      const extrasList: any[] = Array.isArray(extras) ? extras : [];
+      const allSelections = [...selections, ...extrasList];
+
       await storage.deleteSubscriptionSelectionsByInviteId(id);
-      for (const sel of selections) {
+      for (const sel of allSelections) {
         if (!sel.productName?.trim()) continue;
         await storage.createSubscriptionSelection({
           inviteId: id,
@@ -1560,6 +1591,16 @@ export async function registerRoutes(
             price: "7.50",
           });
         }
+        for (const extra of extrasList) {
+          if (!extra.productName?.trim()) continue;
+          await storage.createOrderItem({
+            orderId: invite.selectionsOrderId,
+            productId: null,
+            productName: extra.productName,
+            quantity: parseInt(extra.quantity, 10) || 1,
+            price: "0",
+          });
+        }
       } else {
         const order = await storage.createOrder({
           customerName: invite.customerName,
@@ -1578,6 +1619,16 @@ export async function registerRoutes(
             productName: sel.productName,
             quantity: parseInt(sel.quantity, 10) || 1,
             price: "7.50",
+          });
+        }
+        for (const extra of extrasList) {
+          if (!extra.productName?.trim()) continue;
+          await storage.createOrderItem({
+            orderId: order.id,
+            productId: null,
+            productName: extra.productName,
+            quantity: parseInt(extra.quantity, 10) || 1,
+            price: "0",
           });
         }
         await storage.setSubscriptionInviteSelectionsOrder(id, order.id);
