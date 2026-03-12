@@ -949,6 +949,8 @@ export async function registerRoutes(
       const subRe = /meal\s+subscription\s*-\s*\d+/i;
       const isAddDeliveryOnly = (items: { productName: string }[]) =>
         items.length > 0 && items.every(i => i.productName.toLowerCase().includes("add delivery"));
+      // Subscription-origin orders count as "website" for reconciliation
+      const subscriptionOrderIds = await storage.getSubscriptionOriginOrderIds();
       const addresses = ordersWithItems
         .filter(o =>
           (o.deliveryAddress || o.fulfillmentType === "collection") &&
@@ -959,6 +961,8 @@ export async function registerRoutes(
           const fulfillment = (o.fulfillmentType === "delivery" || (!o.fulfillmentType && o.deliveryAddress))
             ? "delivery"
             : "collection";
+          // Treat subscription-created orders as website (not custom) for reconciliation
+          const effectiveIsManual = o.isManual && !subscriptionOrderIds.has(o.id);
           return {
             id: o.id,
             customerName: o.customerName,
@@ -966,7 +970,7 @@ export async function registerRoutes(
             lat: o.deliveryLat ? parseFloat(o.deliveryLat) : null,
             lng: o.deliveryLng ? parseFloat(o.deliveryLng) : null,
             fulfillment: fulfillment as "delivery" | "collection",
-            isManual: o.isManual,
+            isManual: effectiveIsManual,
           };
         });
       res.json(addresses);

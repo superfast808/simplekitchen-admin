@@ -300,6 +300,12 @@ export class DatabaseStorage implements IStorage {
       .orderBy(subscriptionInvites.customerName);
   }
 
+  async getSubscriptionOriginOrderIds(): Promise<Set<number>> {
+    const rows = await db.select({ id: subscriptionInvites.selectionsOrderId }).from(subscriptionInvites)
+      .where(isNotNull(subscriptionInvites.selectionsOrderId));
+    return new Set(rows.map(r => r.id as number));
+  }
+
   async updateSubscriptionInviteStatus(id: number, status: string): Promise<void> {
     await db.update(subscriptionInvites).set({ status }).where(eq(subscriptionInvites.id, id));
   }
