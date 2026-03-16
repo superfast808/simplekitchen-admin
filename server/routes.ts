@@ -121,6 +121,12 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   week1ReferenceDate: "",
   subscription_email_subject: DEFAULT_EMAIL_SUBJECT,
   subscription_email_body: DEFAULT_EMAIL_BODY,
+  portal_url: "https://admin.simplekitchenprep.com",
+  smtp_host: "",
+  smtp_port: "587",
+  smtp_user: "",
+  smtp_pass: "",
+  smtp_from: "",
 };
 
 const ALLOWED_SETTINGS_KEYS = new Set(Object.keys(DEFAULT_SETTINGS));
