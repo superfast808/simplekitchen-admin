@@ -98,7 +98,10 @@ export default function IngredientsPage() {
     queryKey: ["/api/ingredient-breakdown", `?from=${from.toISOString()}&to=${to.toISOString()}&source=${sourceFilter.toQueryParam()}`],
   });
 
-  const hasData = data && (data.products.length > 0 || data.grandTotals.length > 0);
+  // Only show products that have orders (or manual stock) this week
+  const activeProducts = data?.products.filter(p => p.orderedQuantity > 0) ?? [];
+  const hiddenCount = (data?.products.length ?? 0) - activeProducts.length;
+  const hasData = activeProducts.length > 0 || (data?.grandTotals.length ?? 0) > 0;
 
   return (
     <div className="p-6 space-y-6">
@@ -120,17 +123,24 @@ export default function IngredientsPage() {
         <Card>
           <CardContent className="p-12 text-center">
             <ChefHat className="w-12 h-12 mx-auto text-muted-foreground/40 mb-3" />
-            <p className="text-muted-foreground font-medium">No ingredient data</p>
+            <p className="text-muted-foreground font-medium">No orders this week</p>
             <p className="text-sm text-muted-foreground mt-1">
-              Add ingredients to products and sync orders to see the breakdown
+              Products with orders will appear here. Use the arrows above to view previous weeks.
             </p>
           </CardContent>
         </Card>
       ) : (
         <>
           <div className="space-y-3">
-            <h2 className="text-lg font-semibold">By Product</h2>
-            {data.products.map(product => (
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold">By Product</h2>
+              {hiddenCount > 0 && (
+                <span className="text-xs text-muted-foreground" data-testid="text-hidden-products">
+                  {hiddenCount} product{hiddenCount > 1 ? "s" : ""} with no orders this week hidden
+                </span>
+              )}
+            </div>
+            {activeProducts.map(product => (
               <ProductAccordion key={product.productId} product={product} />
             ))}
           </div>
