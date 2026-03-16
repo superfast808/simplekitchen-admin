@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Card, CardContent } from "@/components/ui/card";
@@ -9,8 +9,8 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Plus, Pencil, Trash2, Play, CalendarDays, ShoppingCart } from "lucide-react";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from "@/components/ui/table";
+import { Plus, Pencil, Trash2, Play, CalendarDays, ShoppingCart, Globe } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useDateFilter, DateRangeLabel } from "@/components/date-filter";
 import { format } from "date-fns";
@@ -36,6 +36,32 @@ export default function SaturdayOrdersPage() {
     queryKey: ["/api/orders", `?from=${from.toISOString()}&to=${to.toISOString()}`],
     select: (data) => data.filter(o => o.isManual && !o.isTuesday),
   });
+
+  const { data: websiteOrders } = useQuery<OrderWithItems[]>({
+    queryKey: ["/api/orders", `?from=${from.toISOString()}&to=${to.toISOString()}`],
+    select: (data) => data.filter(o => {
+      if (o.isManual) return false;
+      if (o.items.length > 0 && o.items.every(i => /add\s+delivery/i.test(i.productName))) return false;
+      return true;
+    }),
+  });
+
+  const grandTotals = useMemo(() => {
+    if (!websiteOrders) return { orders: 0, delivery: 0, collection: 0, revenue: 0, items: 0 };
+    let revenue = 0;
+    let items = 0;
+    let delivery = 0;
+    let collection = 0;
+    for (const order of websiteOrders) {
+      if (order.fulfillmentType === "delivery") delivery++;
+      else collection++;
+      for (const item of order.items) {
+        revenue += parseFloat(item.price) || 0;
+        items += item.quantity;
+      }
+    }
+    return { orders: websiteOrders.length, delivery, collection, revenue, items };
+  }, [websiteOrders]);
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => apiRequest("DELETE", `/api/recurring-orders/${id}`),
@@ -279,6 +305,99 @@ export default function SaturdayOrdersPage() {
                       </TableRow>
                     ))}
                   </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      <div>
+        <div className="flex items-center gap-2 mb-3">
+          <Globe className="w-5 h-5 text-muted-foreground" />
+          <div>
+            <h2 className="text-lg font-semibold" data-testid="text-website-orders-heading">This Week's Website Orders</h2>
+            <DateRangeLabel from={from} to={to} />
+          </div>
+        </div>
+        <Card>
+          <CardContent className="p-0">
+            {!websiteOrders || websiteOrders.length === 0 ? (
+              <div className="p-8 text-center">
+                <Globe className="w-10 h-10 mx-auto text-muted-foreground/40 mb-2" />
+                <p className="text-sm text-muted-foreground" data-testid="text-no-website-orders">
+                  No website orders found for this week
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="min-w-[140px]">Customer</TableHead>
+                      <TableHead className="min-w-[220px]">Items</TableHead>
+                      <TableHead className="min-w-[180px]">Address</TableHead>
+                      <TableHead className="w-[90px]">Type</TableHead>
+                      <TableHead className="w-[80px]">Date</TableHead>
+                      <TableHead className="w-[90px] text-right">Total</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {websiteOrders.map((order) => {
+                      const orderTotal = order.items.reduce((sum, i) => sum + (parseFloat(i.price) || 0), 0);
+                      return (
+                        <TableRow key={order.id} data-testid={`row-website-${order.id}`}>
+                          <TableCell className="font-medium" data-testid={`text-website-customer-${order.id}`}>
+                            {order.customerName}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex flex-wrap gap-1">
+                              {order.items.map((item, i) => (
+                                <Badge key={i} variant="secondary" className="text-xs" data-testid={`badge-website-item-${order.id}-${i}`}>
+                                  {item.quantity > 1 ? `${item.quantity}× ` : ""}{item.productName}
+                                </Badge>
+                              ))}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <span className="text-sm text-muted-foreground" data-testid={`text-website-address-${order.id}`}>
+                              {order.deliveryAddress || "—"}
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              variant={order.fulfillmentType === "delivery" ? "default" : "outline"}
+                              data-testid={`badge-website-fulfillment-${order.id}`}
+                            >
+                              {order.fulfillmentType === "delivery" ? "Delivery" : "Collection"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <span className="text-xs text-muted-foreground">
+                              {format(new Date(order.orderDate), "EEE d")}
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-right font-medium" data-testid={`text-website-total-${order.id}`}>
+                            £{orderTotal.toFixed(2)}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                  <TableFooter>
+                    <TableRow className="bg-muted/50 font-semibold" data-testid="row-grand-totals">
+                      <TableCell colSpan={2}>
+                        Grand Total — {grandTotals.orders} order{grandTotals.orders !== 1 ? "s" : ""}
+                        <span className="text-muted-foreground font-normal ml-2 text-xs">
+                          ({grandTotals.delivery} delivery · {grandTotals.collection} collection · {grandTotals.items} items)
+                        </span>
+                      </TableCell>
+                      <TableCell colSpan={3} />
+                      <TableCell className="text-right text-base" data-testid="text-grand-total-revenue">
+                        £{grandTotals.revenue.toFixed(2)}
+                      </TableCell>
+                    </TableRow>
+                  </TableFooter>
                 </Table>
               </div>
             )}
