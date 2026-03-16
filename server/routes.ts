@@ -1275,14 +1275,15 @@ export async function registerRoutes(
           cy = doc.y;
         }
 
-        // Notes — small italic text flowing directly below items
+        // Notes — small italic red text flowing directly below items
         if (noteText && cy < labelY + labelH - 3) {
           cy += GAP4;
-          doc.font("Helvetica-Oblique").fontSize(NOTE_FONT_SIZE);
+          doc.font("Helvetica-Oblique").fontSize(NOTE_FONT_SIZE).fillColor("red");
           const maxNoteH = labelY + labelH - cy - 1;
           if (maxNoteH > 4) {
             doc.text(noteText, cx, cy, { ...opts, lineBreak: false, ellipsis: true, height: maxNoteH });
           }
+          doc.fillColor("black");
         }
 
         doc.restore();
