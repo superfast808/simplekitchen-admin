@@ -2205,6 +2205,47 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/recurring-orders/generate-saturday", async (req, res) => {
+    try {
+      const recurringOrdersList = await storage.getRecurringOrders();
+      const active = recurringOrdersList.filter(ro => ro.active && ro.isTuesday === false);
+      if (active.length === 0) {
+        return res.json({ created: 0, message: "No active Saturday recurring orders" });
+      }
+
+      let created = 0;
+      for (const ro of active) {
+        const items = await storage.getRecurringOrderItems(ro.id);
+        if (items.length === 0) continue;
+
+        const order = await storage.createOrder({
+          customerName: ro.customerName,
+          deliveryAddress: ro.deliveryAddress || null,
+          fulfillmentType: ro.fulfillmentType,
+          orderDate: new Date(),
+          status: "processing",
+          isManual: true,
+          isTuesday: false,
+        });
+
+        for (const item of items) {
+          await storage.createOrderItem({
+            orderId: order.id,
+            productId: null,
+            productName: item.productName,
+            quantity: item.quantity,
+            price: "0",
+          });
+        }
+        created++;
+      }
+
+      res.json({ created, total: active.length });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   app.get("/api/weekly-stats", async (req, res) => {
     try {
       const from = req.query.from ? new Date(req.query.from as string) : undefined;
