@@ -149,6 +149,7 @@ export default function SettingsPage() {
   const [smtpUser, setSmtpUser] = useState("");
   const [smtpPass, setSmtpPass] = useState("");
   const [smtpFrom, setSmtpFrom] = useState("");
+  const [testSmtpEmail, setTestSmtpEmail] = useState("");
 
   const { data: currentWeek } = useQuery<{ weekNumber: number; categoryName: string; week1ReferenceDate: string | null }>({
     queryKey: ["/api/current-week"],
@@ -200,6 +201,23 @@ export default function SettingsPage() {
     },
     onError: (error: Error) => {
       toast({ title: "Sync failed", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const testSmtpMutation = useMutation({
+    mutationFn: async (to: string) => {
+      const res = await apiRequest("POST", "/api/settings/test-smtp", { to });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.message || "Failed to send test email");
+      }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      toast({ title: "Test email sent!", description: `A test email was delivered to ${data.to}. Check your inbox.` });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Test failed", description: error.message, variant: "destructive" });
     },
   });
 
@@ -586,6 +604,35 @@ export default function SettingsPage() {
           <p className="text-xs text-muted-foreground">
             These settings override any environment-variable SMTP configuration. Leave password blank if you only want to update other fields.
           </p>
+          <div className="border-t pt-4 space-y-3">
+            <p className="text-sm font-medium">Send a test email</p>
+            <div className="flex gap-2">
+              <Input
+                type="email"
+                value={testSmtpEmail}
+                onChange={(e) => setTestSmtpEmail(e.target.value)}
+                placeholder="recipient@example.com"
+                className="flex-1"
+                data-testid="input-test-smtp-email"
+              />
+              <Button
+                variant="outline"
+                onClick={() => testSmtpMutation.mutate(testSmtpEmail)}
+                disabled={testSmtpMutation.isPending || !testSmtpEmail.trim()}
+                data-testid="button-test-smtp"
+              >
+                {testSmtpMutation.isPending ? (
+                  <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <Mail className="w-4 h-4 mr-2" />
+                )}
+                {testSmtpMutation.isPending ? "Sending…" : "Send Test"}
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Save your SMTP settings first, then enter any address here to verify the connection works.
+            </p>
+          </div>
         </CardContent>
       </Card>
 

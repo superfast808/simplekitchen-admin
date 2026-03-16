@@ -1247,6 +1247,36 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/settings/test-smtp", async (req, res) => {
+    try {
+      const { to } = req.body;
+      if (!to?.trim()) return res.status(400).json({ message: "Please provide a recipient email address" });
+
+      const transporter = await getSmtpTransporter();
+      if (!transporter) return res.status(500).json({ message: "SMTP is not configured — fill in the SMTP settings and save first" });
+
+      const fromEmail = await getSmtpFromEmail();
+      const baseUrl = await getPortalBaseUrl();
+
+      await transporter.sendMail({
+        from: fromEmail || to.trim(),
+        to: to.trim(),
+        subject: "Simple Kitchen Prep — SMTP Test",
+        html: `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <h2 style="color: #16a34a;">SMTP Test Successful</h2>
+          <p>This is a test email from your Simple Kitchen Prep partner portal.</p>
+          <p>If you received this, your SMTP settings are working correctly.</p>
+          <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;" />
+          <p style="color: #999; font-size: 12px;">Sent from: ${baseUrl}</p>
+        </div>`,
+      });
+
+      res.json({ success: true, to: to.trim() });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   app.get("/api/orders/export", async (req, res) => {
     try {
       const from = req.query.from ? new Date(req.query.from as string) : undefined;
