@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Send, CheckCircle2, Clock, Mail, Pencil, Minus, Plus, UtensilsCrossed, ChevronDown, ChevronUp, ChevronLeft, ChevronRight } from "lucide-react";
+import { Send, CheckCircle2, Clock, Mail, Pencil, Minus, Plus, UtensilsCrossed, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
 import { format, addWeeks, startOfDay } from "date-fns";
 
 type Selection = {
@@ -76,6 +76,7 @@ export default function SubscriptionOverviewPage() {
   const [showSendPanel, setShowSendPanel] = useState(false);
   const [editingInvite, setEditingInvite] = useState<Invite | null>(null);
   const [weekOffset, setWeekOffset] = useState(0);
+  const [resendingId, setResendingId] = useState<number | null>(null);
 
   const weekRange = getCurrentWeekRange(weekOffset);
   const isCurrentWeek = weekOffset === 0;
@@ -112,6 +113,21 @@ export default function SubscriptionOverviewPage() {
     },
     onError: (err: Error) => {
       toast({ title: "Failed to send", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const resendMutation = useMutation({
+    mutationFn: async (inviteId: number) => {
+      return apiRequest("POST", `/api/subscription-invites/${inviteId}/resend`, {});
+    },
+    onSuccess: async (res) => {
+      const data = await res.json();
+      toast({ title: "Email resent", description: `Resent to ${data.to}` });
+      setResendingId(null);
+    },
+    onError: (err: Error) => {
+      toast({ title: "Failed to resend", description: err.message, variant: "destructive" });
+      setResendingId(null);
     },
   });
 
@@ -252,7 +268,7 @@ export default function SubscriptionOverviewPage() {
                   <TableHead className="text-center">Meals</TableHead>
                   <TableHead>Selections</TableHead>
                   <TableHead className="text-center">Status</TableHead>
-                  <TableHead className="w-[90px]"></TableHead>
+                  <TableHead className="w-[160px]"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -295,16 +311,32 @@ export default function SubscriptionOverviewPage() {
                         )}
                       </TableCell>
                       <TableCell>
-                        <Button
-                          size="sm"
-                          variant={isComplete ? "outline" : "default"}
-                          className="h-7 text-xs w-full"
-                          onClick={() => setEditingInvite(invite)}
-                          data-testid={`button-edit-invite-${invite.id}`}
-                        >
-                          <Pencil className="w-3 h-3 mr-1" />
-                          {isComplete ? "Edit" : "Fill in"}
-                        </Button>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            size="sm"
+                            variant={isComplete ? "outline" : "default"}
+                            className="h-7 text-xs flex-1"
+                            onClick={() => setEditingInvite(invite)}
+                            data-testid={`button-edit-invite-${invite.id}`}
+                          >
+                            <Pencil className="w-3 h-3 mr-1" />
+                            {isComplete ? "Edit" : "Fill in"}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 text-xs px-2"
+                            title="Resend invitation email"
+                            disabled={resendingId === invite.id && resendMutation.isPending}
+                            onClick={() => {
+                              setResendingId(invite.id);
+                              resendMutation.mutate(invite.id);
+                            }}
+                            data-testid={`button-resend-invite-${invite.id}`}
+                          >
+                            <RotateCcw className={`w-3 h-3 ${resendingId === invite.id && resendMutation.isPending ? "animate-spin" : ""}`} />
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   );
