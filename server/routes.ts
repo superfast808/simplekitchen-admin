@@ -1203,7 +1203,8 @@ export async function registerRoutes(
   app.get("/api/settings", async (_req, res) => {
     try {
       const settingsMap = await getSettingsMap();
-      res.json(settingsMap);
+      const safe = { ...settingsMap, smtp_pass: settingsMap.smtp_pass ? "••••••••" : "" };
+      res.json(safe);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
@@ -1241,7 +1242,8 @@ export async function registerRoutes(
       }
       await startAutoSync();
       const settingsMap = await getSettingsMap();
-      res.json(settingsMap);
+      const safe = { ...settingsMap, smtp_pass: settingsMap.smtp_pass ? "••••••••" : "" };
+      res.json(safe);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }

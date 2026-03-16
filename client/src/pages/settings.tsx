@@ -174,7 +174,7 @@ export default function SettingsPage() {
       if (settings.smtp_host) setSmtpHost(settings.smtp_host);
       if (settings.smtp_port) setSmtpPort(settings.smtp_port);
       if (settings.smtp_user) setSmtpUser(settings.smtp_user);
-      if (settings.smtp_pass) setSmtpPass(settings.smtp_pass);
+      if (settings.smtp_pass && settings.smtp_pass !== "••••••••") setSmtpPass(settings.smtp_pass);
       if (settings.smtp_from) setSmtpFrom(settings.smtp_from);
     }
   }, [settings]);
