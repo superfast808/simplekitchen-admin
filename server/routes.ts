@@ -127,6 +127,143 @@ const ALLOWED_SETTINGS_KEYS = new Set(Object.keys(DEFAULT_SETTINGS));
 const MIN_SYNC_INTERVAL = 5;
 const MAX_SYNC_INTERVAL = 1440;
 
+// Module-level SMTP transporter (available to auto-sync)
+const smtpTransporter = process.env.SMTP_HOST ? nodemailer.createTransport({
+  host: process.env.SMTP_HOST,
+  port: parseInt(process.env.SMTP_PORT || "587"),
+  secure: parseInt(process.env.SMTP_PORT || "587") === 465,
+  auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+}) : null;
+
+// Base URL captured from first incoming HTTP request (used by auto-send emails)
+let capturedBaseUrl = "";
+
+// Module-level week range helper (used by both sync and send endpoint)
+function getWeekRange(offset = 0): { from: Date; to: Date } {
+  const now = new Date();
+  const ukNow = new Date(now.toLocaleString("en-US", { timeZone: "Europe/London" }));
+  const dayOfWeek = ukNow.getDay();
+  let saturdayDate: Date;
+  if (dayOfWeek === 6) {
+    saturdayDate = new Date(ukNow);
+  } else {
+    const daysBack = dayOfWeek === 0 ? 1 : dayOfWeek + 1;
+    saturdayDate = new Date(ukNow);
+    saturdayDate.setDate(ukNow.getDate() - daysBack);
+  }
+  if (offset !== 0) {
+    saturdayDate.setDate(saturdayDate.getDate() + offset * 7);
+  }
+  const from = new Date(saturdayDate);
+  from.setHours(0, 0, 0, 0);
+  const to = new Date(saturdayDate);
+  to.setDate(to.getDate() + 4);
+  to.setHours(23, 59, 59, 999);
+  return { from, to };
+}
+
+// Auto-send window: Saturday through Wednesday 19:00 UK time
+function isWithinAutoSendWindow(): boolean {
+  const now = new Date();
+  const ukNow = new Date(now.toLocaleString("en-US", { timeZone: "Europe/London" }));
+  const day = ukNow.getDay(); // 0=Sun … 6=Sat
+  if (day === 6 || day === 0 || day === 1 || day === 2) return true; // Sat–Tue always ok
+  if (day === 3) return ukNow.getHours() < 19; // Wed before 7 pm ok
+  return false; // Thu/Fri — closed, admin does it manually
+}
+
+// Attempt to auto-send subscription invite emails for any subscription order
+// in the current week that hasn't already been invited.
+async function autoSendSubscriptionInvites(): Promise<void> {
+  if (!smtpTransporter) return;
+  if (!capturedBaseUrl) return;
+  if (!isWithinAutoSendWindow()) return;
+
+  try {
+    const subscriptionPattern = /meal\s+subscription\s*-\s*(\d+)/i;
+    const week = getWeekRange(0);
+    const ordersList = await storage.getOrders(week.from, week.to);
+    const ordersWithItems = await Promise.all(
+      ordersList.map(async (order) => ({ ...order, items: await storage.getOrderItems(order.id) }))
+    );
+
+    const subOrders = ordersWithItems.filter(o =>
+      o.items.some(i => subscriptionPattern.test(i.productName))
+    );
+    if (subOrders.length === 0) return;
+
+    const existingInvites = await storage.getSubscriptionInvites(week.from, week.to);
+    const alreadyInvitedOrderIds = new Set(existingInvites.map(i => i.orderId));
+
+    const settingsMap = await getSettingsMap();
+    const emailSubject = settingsMap.subscription_email_subject || DEFAULT_EMAIL_SUBJECT;
+    const emailBodyTemplate = settingsMap.subscription_email_body || DEFAULT_EMAIL_BODY;
+
+    for (const order of subOrders) {
+      if (alreadyInvitedOrderIds.has(order.id)) continue;
+
+      const subItem = order.items.find(i => subscriptionPattern.test(i.productName));
+      if (!subItem) continue;
+      const match = subItem.productName.match(subscriptionPattern);
+      const qty = match ? parseInt(match[1], 10) : 0;
+      if (qty === 0) continue;
+
+      const token = crypto.randomBytes(32).toString("hex");
+      let inviteAddress = order.deliveryAddress || null;
+      let inviteFulfillment = order.fulfillmentType || "delivery";
+      if (!inviteAddress) {
+        const pastAddr = await storage.getCustomerDeliveryAddress(order.customerEmail || "", order.customerName);
+        if (pastAddr?.deliveryAddress) {
+          inviteAddress = pastAddr.deliveryAddress;
+          inviteFulfillment = pastAddr.fulfillmentType || "delivery";
+        }
+      }
+
+      await storage.createSubscriptionInvite({
+        orderId: order.id,
+        customerEmail: order.customerEmail || "",
+        customerName: order.customerName,
+        token,
+        subscriptionQuantity: qty,
+        status: "pending",
+        weekFrom: week.from,
+        weekTo: week.to,
+        deliveryAddress: inviteAddress,
+        fulfillmentType: inviteFulfillment,
+      });
+
+      const toEmail = order.customerEmail;
+      if (!toEmail) continue;
+
+      const selectUrl = `${capturedBaseUrl}/subscribe/${token}`;
+      const firstName = order.customerName.split(" ")[0];
+      const emailBody = emailBodyTemplate
+        .replace(/\{\{firstName\}\}/g, firstName)
+        .replace(/\{\{fullName\}\}/g, order.customerName)
+        .replace(/\{\{qty\}\}/g, String(qty))
+        .replace(/\{\{url\}\}/g, selectUrl);
+      const emailHtml = `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">${emailBody}</div>`;
+
+      try {
+        await smtpTransporter.sendMail({
+          from: process.env.SMTP_FROM_EMAIL,
+          to: toEmail,
+          subject: emailSubject
+            .replace(/\{\{firstName\}\}/g, firstName)
+            .replace(/\{\{fullName\}\}/g, order.customerName)
+            .replace(/\{\{qty\}\}/g, String(qty)),
+          html: emailHtml,
+        });
+        log(`Auto-sent subscription invite to ${order.customerName} (${toEmail})`, "sync");
+      } catch (emailErr: any) {
+        log(`Auto-send subscription email failed for ${order.customerName}: ${emailErr.message}`, "sync");
+      }
+    }
+  } catch (err: any) {
+    log(`autoSendSubscriptionInvites error: ${err.message}`, "sync");
+  }
+}
+
 async function getSettingsMap(): Promise<Record<string, string>> {
   const allSettings = await storage.getAllSettings();
   const map: Record<string, string> = { ...DEFAULT_SETTINGS };
@@ -226,6 +363,8 @@ async function performSync() {
     }
 
     log(`Auto-sync complete: imported=${imported}, updated=${updated}, total=${wooOrders.length}`, "sync");
+    // After sync, auto-send any subscription invite emails that are still pending
+    await autoSendSubscriptionInvites();
   } catch (error: any) {
     log(`Auto-sync failed: ${error.message}`, "sync");
   } finally {
@@ -261,6 +400,15 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+
+  // Capture base URL from the first request so auto-send emails have correct links
+  app.use((req, _res, next) => {
+    if (!capturedBaseUrl) {
+      const proto = req.headers["x-forwarded-proto"] || req.protocol || "https";
+      capturedBaseUrl = `${proto}://${req.headers.host}`;
+    }
+    next();
+  });
 
   const userCount = await storage.countUsers();
   if (userCount === 0) {
@@ -1336,36 +1484,6 @@ export async function registerRoutes(
     }
   });
 
-  function getWeekRange(offset = 0): { from: Date; to: Date } {
-    const now = new Date();
-    const ukNow = new Date(now.toLocaleString("en-US", { timeZone: "Europe/London" }));
-    const dayOfWeek = ukNow.getDay();
-    let saturdayDate: Date;
-    if (dayOfWeek === 6) {
-      saturdayDate = new Date(ukNow);
-    } else {
-      const daysBack = dayOfWeek === 0 ? 1 : dayOfWeek + 1;
-      saturdayDate = new Date(ukNow);
-      saturdayDate.setDate(saturdayDate.getDate() - daysBack);
-    }
-    if (offset !== 0) {
-      saturdayDate.setDate(saturdayDate.getDate() + offset * 7);
-    }
-    const from = new Date(saturdayDate);
-    from.setHours(0, 0, 0, 0);
-    const to = new Date(saturdayDate);
-    to.setDate(to.getDate() + 4);
-    to.setHours(23, 59, 59, 999);
-    return { from, to };
-  }
-
-  const smtpTransporter = process.env.SMTP_HOST ? nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: parseInt(process.env.SMTP_PORT || "587"),
-    secure: parseInt(process.env.SMTP_PORT || "587") === 465,
-    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-  }) : null;
-
   app.post("/api/subscription-invites/send", async (req, res) => {
     try {
       if (!smtpTransporter) {
@@ -1394,9 +1512,7 @@ export async function registerRoutes(
       const existingInvites = await storage.getSubscriptionInvites(week.from, week.to);
       const alreadyInvitedOrderIds = new Set(existingInvites.map(i => i.orderId));
 
-      const protocol = req.headers["x-forwarded-proto"] || "https";
-      const host = req.headers.host;
-      const baseUrl = `${protocol}://${host}`;
+      const baseUrl = capturedBaseUrl || `${req.headers["x-forwarded-proto"] || req.protocol || "https"}://${req.headers.host}`;
 
       let sent = 0;
       let skipped = 0;
