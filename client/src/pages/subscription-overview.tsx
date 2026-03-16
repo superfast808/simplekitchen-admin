@@ -10,8 +10,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Send, CheckCircle2, Clock, Mail, Pencil, Minus, Plus, UtensilsCrossed, ChevronDown, ChevronUp } from "lucide-react";
-import { format } from "date-fns";
+import { Send, CheckCircle2, Clock, Mail, Pencil, Minus, Plus, UtensilsCrossed, ChevronDown, ChevronUp, ChevronLeft, ChevronRight } from "lucide-react";
+import { format, addWeeks, startOfDay } from "date-fns";
 
 type Selection = {
   id: number;
@@ -44,16 +44,47 @@ type MealData = {
   selections: Array<{ productName: string; quantity: number }>;
 };
 
+function getCurrentWeekRange(offsetWeeks: number = 0): { from: Date; to: Date } {
+  const now = new Date();
+  const day = now.getDay();
+  // Find the most recent or upcoming Saturday (day 6)
+  const daysUntilSat = (6 - day + 7) % 7;
+  const daysFromSat = day === 6 ? 0 : -(7 - daysUntilSat);
+  // If today is past Wednesday (day > 3) and not yet Saturday, use next Saturday
+  // Otherwise use last Saturday
+  let satOffset = 0;
+  if (day >= 4 && day < 6) {
+    // Thu/Fri — upcoming Saturday
+    satOffset = daysUntilSat;
+  } else if (day === 0 || day === 1 || day === 2 || day === 3) {
+    // Sun–Wed — last Saturday
+    satOffset = daysFromSat;
+  }
+  // day === 6 → satOffset = 0 (today is Saturday)
+  const sat = new Date(now);
+  sat.setDate(now.getDate() + satOffset + offsetWeeks * 7);
+  const from = startOfDay(sat);
+  const to = new Date(sat);
+  to.setDate(sat.getDate() + 4);
+  to.setHours(23, 59, 59, 999);
+  return { from, to };
+}
+
 export default function SubscriptionOverviewPage() {
   const { toast } = useToast();
   const [overrideEmail, setOverrideEmail] = useState("");
   const [showSendPanel, setShowSendPanel] = useState(false);
   const [editingInvite, setEditingInvite] = useState<Invite | null>(null);
+  const [weekOffset, setWeekOffset] = useState(0);
+
+  const weekRange = getCurrentWeekRange(weekOffset);
+  const isCurrentWeek = weekOffset === 0;
 
   const { data: invites = [], isLoading } = useQuery<Invite[]>({
-    queryKey: ["/api/subscription-invites"],
+    queryKey: ["/api/subscription-invites", weekRange.from.toISOString(), weekRange.to.toISOString()],
     queryFn: async () => {
-      const res = await fetch("/api/subscription-invites", { credentials: "include" });
+      const url = `/api/subscription-invites?from=${weekRange.from.toISOString()}&to=${weekRange.to.toISOString()}`;
+      const res = await fetch(url, { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch");
       return res.json();
     },
@@ -77,6 +108,7 @@ export default function SubscriptionOverviewPage() {
         description: desc || "No subscription customers found this week.",
       });
       queryClient.invalidateQueries({ queryKey: ["/api/subscription-invites"] });
+      setShowSendPanel(false);
     },
     onError: (err: Error) => {
       toast({ title: "Failed to send", description: err.message, variant: "destructive" });
@@ -85,6 +117,12 @@ export default function SubscriptionOverviewPage() {
 
   const completed = invites.filter(i => i.status === "completed");
   const pending = invites.filter(i => i.status === "pending");
+
+  const weekLabel = isCurrentWeek
+    ? `This week (${format(weekRange.from, "d MMM")} – ${format(weekRange.to, "d MMM")})`
+    : weekOffset < 0
+      ? `${Math.abs(weekOffset)} week${Math.abs(weekOffset) > 1 ? "s" : ""} ago (${format(weekRange.from, "d MMM")} – ${format(weekRange.to, "d MMM")})`
+      : `${weekOffset} week${weekOffset > 1 ? "s" : ""} ahead (${format(weekRange.from, "d MMM")} – ${format(weekRange.to, "d MMM")})`;
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6">
@@ -104,20 +142,44 @@ export default function SubscriptionOverviewPage() {
               </Badge>
             </>
           )}
-          <Button
-            onClick={() => setShowSendPanel(v => !v)}
-            variant="outline"
-            size="sm"
-            data-testid="button-toggle-send-panel"
-          >
-            <Mail className="w-4 h-4 mr-2" />
-            Send Emails
-            {showSendPanel ? <ChevronUp className="w-3 h-3 ml-1" /> : <ChevronDown className="w-3 h-3 ml-1" />}
-          </Button>
+          {isCurrentWeek && (
+            <Button
+              onClick={() => setShowSendPanel(v => !v)}
+              variant="outline"
+              size="sm"
+              data-testid="button-toggle-send-panel"
+            >
+              <Mail className="w-4 h-4 mr-2" />
+              Send Emails
+              {showSendPanel ? <ChevronUp className="w-3 h-3 ml-1" /> : <ChevronDown className="w-3 h-3 ml-1" />}
+            </Button>
+          )}
         </div>
       </div>
 
-      {showSendPanel && (
+      {/* Week navigation */}
+      <div className="flex items-center justify-between bg-muted/40 rounded-lg px-4 py-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setWeekOffset(w => w - 1)}
+          data-testid="button-prev-week"
+        >
+          <ChevronLeft className="w-4 h-4 mr-1" />Previous
+        </Button>
+        <span className="text-sm font-medium" data-testid="text-week-label">{weekLabel}</span>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setWeekOffset(w => w + 1)}
+          disabled={weekOffset >= 0}
+          data-testid="button-next-week"
+        >
+          Next<ChevronRight className="w-4 h-4 ml-1" />
+        </Button>
+      </div>
+
+      {isCurrentWeek && showSendPanel && (
         <Card data-testid="card-send-invites">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
@@ -159,10 +221,27 @@ export default function SubscriptionOverviewPage() {
               {[1, 2, 3].map(i => <Skeleton key={i} className="h-12 w-full" />)}
             </div>
           ) : invites.length === 0 ? (
-            <div className="p-12 text-center text-muted-foreground space-y-2">
+            <div className="p-12 text-center text-muted-foreground space-y-3">
               <UtensilsCrossed className="w-10 h-10 mx-auto opacity-30" />
-              <p className="font-medium">No subscription invites this week</p>
-              <p className="text-sm">Click "Send Emails" above to send preference emails to subscription customers.</p>
+              {isCurrentWeek ? (
+                <>
+                  <p className="font-medium">New week — no preference emails sent yet</p>
+                  <p className="text-sm">Click "Send Emails" above to send this week's meal choice emails to all subscription customers.</p>
+                  <Button
+                    onClick={() => setShowSendPanel(true)}
+                    className="mt-2"
+                    data-testid="button-send-invites-empty"
+                  >
+                    <Mail className="w-4 h-4 mr-2" />
+                    Send This Week's Emails
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <p className="font-medium">No subscription invites for this week</p>
+                  <p className="text-sm">No preference emails were sent for the week of {format(weekRange.from, "d MMM yyyy")}.</p>
+                </>
+              )}
             </div>
           ) : (
             <Table>
@@ -268,8 +347,6 @@ function AdminSelectionDialog({ invite, open, onOpenChange }: {
   });
 
   // Split existing selections: only put in extras if explicitly a confirmed extra product
-  // (availableExtras only contains non-7.50 products from the products table)
-  // Everything else defaults to meal — including new products not yet in the catalogue
   useEffect(() => {
     if (!mealData) return;
     const extraSet = new Set((mealData.availableExtras || []).map(e => e.name));
@@ -463,7 +540,6 @@ function AdminSelectionDialog({ invite, open, onOpenChange }: {
           </div>
         )}
 
-        {/* Extras (oats, soups, etc.) */}
         {availableExtras.length > 0 && (
           <div className="space-y-2">
             <div className="flex items-center gap-2 pt-1">
