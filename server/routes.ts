@@ -175,11 +175,15 @@ function isWithinAutoSendWindow(): boolean {
 // Attempt to auto-send subscription invite emails for any subscription order
 // in the current week that hasn't already been invited.
 async function autoSendSubscriptionInvites(): Promise<void> {
-  if (!smtpTransporter) return;
-  if (!capturedBaseUrl) return;
   if (!isWithinAutoSendWindow()) return;
 
   try {
+    const transporter = await getSmtpTransporter();
+    if (!transporter) return;
+
+    const baseUrl = await getPortalBaseUrl();
+    const fromEmail = await getSmtpFromEmail();
+
     const subscriptionPattern = /meal\s+subscription\s*-\s*(\d+)/i;
     const week = getWeekRange(0);
     const ordersList = await storage.getOrders(week.from, week.to);
@@ -235,7 +239,7 @@ async function autoSendSubscriptionInvites(): Promise<void> {
       const toEmail = order.customerEmail;
       if (!toEmail) continue;
 
-      const selectUrl = `${capturedBaseUrl}/subscribe/${token}`;
+      const selectUrl = `${baseUrl}/subscribe/${token}`;
       const firstName = order.customerName.split(" ")[0];
       const emailBody = emailBodyTemplate
         .replace(/\{\{firstName\}\}/g, firstName)
@@ -245,8 +249,8 @@ async function autoSendSubscriptionInvites(): Promise<void> {
       const emailHtml = `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">${emailBody}</div>`;
 
       try {
-        await smtpTransporter.sendMail({
-          from: process.env.SMTP_FROM_EMAIL,
+        await transporter.sendMail({
+          from: fromEmail,
           to: toEmail,
           subject: emailSubject
             .replace(/\{\{firstName\}\}/g, firstName)
@@ -271,6 +275,34 @@ async function getSettingsMap(): Promise<Record<string, string>> {
     map[s.key] = s.value;
   }
   return map;
+}
+
+// Build a nodemailer transporter preferring DB-stored SMTP settings over env vars
+async function getSmtpTransporter(): Promise<nodemailer.Transporter | null> {
+  const s = await getSettingsMap();
+  const host = s.smtp_host || process.env.SMTP_HOST;
+  const port = parseInt(s.smtp_port || process.env.SMTP_PORT || "587");
+  const user = s.smtp_user || process.env.SMTP_USER;
+  const pass = s.smtp_pass || process.env.SMTP_PASS;
+  if (!host || !user || !pass) return null;
+  return nodemailer.createTransport({
+    host,
+    port,
+    secure: port === 465,
+    auth: { user, pass },
+  });
+}
+
+// Return the portal base URL, preferring the DB-stored setting
+async function getPortalBaseUrl(): Promise<string> {
+  const s = await getSettingsMap();
+  return s.portal_url?.trim() || capturedBaseUrl || "https://admin.simplekitchenprep.com";
+}
+
+// Return the from-address for subscription emails
+async function getSmtpFromEmail(): Promise<string> {
+  const s = await getSettingsMap();
+  return s.smtp_from || process.env.SMTP_FROM_EMAIL || "";
 }
 
 async function performSync() {
@@ -1486,9 +1518,12 @@ export async function registerRoutes(
 
   app.post("/api/subscription-invites/send", async (req, res) => {
     try {
-      if (!smtpTransporter) {
+      const transporter = await getSmtpTransporter();
+      if (!transporter) {
         return res.status(500).json({ message: "SMTP not configured" });
       }
+      const fromEmail = await getSmtpFromEmail();
+      const baseUrl = await getPortalBaseUrl();
       const { overrideEmail } = req.body;
       const week = getWeekRange(0);
 
@@ -1511,8 +1546,6 @@ export async function registerRoutes(
 
       const existingInvites = await storage.getSubscriptionInvites(week.from, week.to);
       const alreadyInvitedOrderIds = new Set(existingInvites.map(i => i.orderId));
-
-      const baseUrl = capturedBaseUrl || `${req.headers["x-forwarded-proto"] || req.protocol || "https"}://${req.headers.host}`;
 
       let sent = 0;
       let skipped = 0;
@@ -1573,8 +1606,8 @@ export async function registerRoutes(
             .replace(/\{\{qty\}\}/g, String(qty))
             .replace(/\{\{url\}\}/g, selectUrl);
           const emailHtml = `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">${emailBody}</div>`;
-          await smtpTransporter.sendMail({
-            from: process.env.SMTP_FROM_EMAIL,
+          await transporter.sendMail({
+            from: fromEmail,
             to: toEmail,
             subject: emailSubject
               .replace(/\{\{firstName\}\}/g, firstName)

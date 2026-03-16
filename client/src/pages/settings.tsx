@@ -143,6 +143,12 @@ export default function SettingsPage() {
   const [week1ReferenceDate, setWeek1ReferenceDate] = useState("");
   const [emailSubject, setEmailSubject] = useState("Choose Your Meals This Week - Simple Kitchen Prep");
   const [emailBody, setEmailBody] = useState("");
+  const [portalUrl, setPortalUrl] = useState("https://admin.simplekitchenprep.com");
+  const [smtpHost, setSmtpHost] = useState("");
+  const [smtpPort, setSmtpPort] = useState("587");
+  const [smtpUser, setSmtpUser] = useState("");
+  const [smtpPass, setSmtpPass] = useState("");
+  const [smtpFrom, setSmtpFrom] = useState("");
 
   const { data: currentWeek } = useQuery<{ weekNumber: number; categoryName: string; week1ReferenceDate: string | null }>({
     queryKey: ["/api/current-week"],
@@ -163,6 +169,12 @@ export default function SettingsPage() {
       }
       if (settings.subscription_email_subject) setEmailSubject(settings.subscription_email_subject);
       if (settings.subscription_email_body) setEmailBody(settings.subscription_email_body);
+      if (settings.portal_url) setPortalUrl(settings.portal_url);
+      if (settings.smtp_host) setSmtpHost(settings.smtp_host);
+      if (settings.smtp_port) setSmtpPort(settings.smtp_port);
+      if (settings.smtp_user) setSmtpUser(settings.smtp_user);
+      if (settings.smtp_pass) setSmtpPass(settings.smtp_pass);
+      if (settings.smtp_from) setSmtpFrom(settings.smtp_from);
     }
   }, [settings]);
 
@@ -201,7 +213,13 @@ export default function SettingsPage() {
       order_window_close_hour: closeHour,
       subscription_email_subject: emailSubject,
       subscription_email_body: emailBody,
+      portal_url: portalUrl,
+      smtp_host: smtpHost,
+      smtp_port: smtpPort,
+      smtp_user: smtpUser,
+      smtp_from: smtpFrom,
     };
+    if (smtpPass) data.smtp_pass = smtpPass;
     if (week1ReferenceDate) {
       data.week1ReferenceDate = new Date(week1ReferenceDate).toISOString();
     }
@@ -479,6 +497,95 @@ export default function SettingsPage() {
               The Saturday noon when Week 1 last started. The week number advances every 7 days from this date, cycling 1→2→3→4→5→6→1.
             </p>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Portal URL</CardTitle>
+          <CardDescription>The public domain of this portal — used in subscription email links sent to customers</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Input
+            value={portalUrl}
+            onChange={(e) => setPortalUrl(e.target.value)}
+            placeholder="https://admin.simplekitchenprep.com"
+            data-testid="input-portal-url"
+          />
+          <p className="text-xs text-muted-foreground mt-1">
+            Customers clicking their meal-selection link will be directed to this domain.
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Mail className="w-4 h-4" />
+            SMTP Email Settings
+          </CardTitle>
+          <CardDescription>Configure the outgoing mail server used to send subscription invite emails</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="smtp-host">SMTP Host</Label>
+              <Input
+                id="smtp-host"
+                value={smtpHost}
+                onChange={(e) => setSmtpHost(e.target.value)}
+                placeholder="smtp.gmail.com"
+                data-testid="input-smtp-host"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="smtp-port">Port</Label>
+              <Input
+                id="smtp-port"
+                type="number"
+                value={smtpPort}
+                onChange={(e) => setSmtpPort(e.target.value)}
+                placeholder="587"
+                data-testid="input-smtp-port"
+              />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="smtp-from">From Address</Label>
+            <Input
+              id="smtp-from"
+              value={smtpFrom}
+              onChange={(e) => setSmtpFrom(e.target.value)}
+              placeholder="noreply@simplekitchenprep.com"
+              data-testid="input-smtp-from"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="smtp-user">Username</Label>
+              <Input
+                id="smtp-user"
+                value={smtpUser}
+                onChange={(e) => setSmtpUser(e.target.value)}
+                placeholder="your@email.com"
+                data-testid="input-smtp-user"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="smtp-pass">Password</Label>
+              <Input
+                id="smtp-pass"
+                type="password"
+                value={smtpPass}
+                onChange={(e) => setSmtpPass(e.target.value)}
+                placeholder="Leave blank to keep existing"
+                data-testid="input-smtp-pass"
+              />
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            These settings override any environment-variable SMTP configuration. Leave password blank if you only want to update other fields.
+          </p>
         </CardContent>
       </Card>
 
