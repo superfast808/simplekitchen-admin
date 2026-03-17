@@ -80,6 +80,7 @@ function AppContent() {
   const [location] = useLocation();
 
   const isPublicSubscribe = location.startsWith("/subscribe/");
+  const isPublicPayment = isPublicSubscribe && location.includes("/payment-success");
 
   const { data: user, isLoading, refetch } = useQuery<{ id: string; username: string } | null>({
     queryKey: ["/api/auth/me"],
@@ -93,8 +94,6 @@ function AppContent() {
     staleTime: Infinity,
     enabled: !isPublicSubscribe && !isPublicPayment,
   });
-
-  const isPublicPayment = isPublicSubscribe && location.includes("/payment-success");
 
   if (isPublicSubscribe || isPublicPayment) {
     return (
