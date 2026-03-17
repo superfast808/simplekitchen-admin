@@ -64,6 +64,7 @@ export interface IStorage {
   updateSubscriptionInviteQuantity(id: number, quantity: number): Promise<void>;
   setSubscriptionInviteSelectionsOrder(id: number, orderId: number): Promise<void>;
   getSubscriptionInviteById(id: number): Promise<SubscriptionInvite | undefined>;
+  updateSubscriptionInvitePayment(id: number, data: { stripePaymentIntentId?: string; addonAmountPence?: number; addonPaid?: boolean; addonPaymentToken?: string }): Promise<void>;
   createSubscriptionSelection(selection: InsertSubscriptionSelection): Promise<SubscriptionSelection>;
   getSubscriptionSelections(inviteId: number): Promise<SubscriptionSelection[]>;
   deleteSubscriptionSelectionsByInviteId(inviteId: number): Promise<void>;
@@ -321,6 +322,10 @@ export class DatabaseStorage implements IStorage {
   async getSubscriptionInviteById(id: number): Promise<SubscriptionInvite | undefined> {
     const [invite] = await db.select().from(subscriptionInvites).where(eq(subscriptionInvites.id, id));
     return invite;
+  }
+
+  async updateSubscriptionInvitePayment(id: number, data: { stripePaymentIntentId?: string; addonAmountPence?: number; addonPaid?: boolean; addonPaymentToken?: string }): Promise<void> {
+    await db.update(subscriptionInvites).set(data as any).where(eq(subscriptionInvites.id, id));
   }
 
   async createSubscriptionSelection(selection: InsertSubscriptionSelection): Promise<SubscriptionSelection> {

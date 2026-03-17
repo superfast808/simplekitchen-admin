@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Send, CheckCircle2, Clock, Mail, Pencil, Minus, Plus, UtensilsCrossed, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
+import { Send, CheckCircle2, Clock, Mail, Pencil, Minus, Plus, UtensilsCrossed, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, RotateCcw, CreditCard, ExternalLink } from "lucide-react";
 import { format, addWeeks, startOfDay } from "date-fns";
 
 type Selection = {
@@ -32,6 +32,10 @@ type Invite = {
   weekTo: string;
   createdAt: string;
   selections: Selection[];
+  addonPaid?: boolean;
+  addonAmountPence?: number;
+  addonPaymentToken?: string;
+  stripePaymentIntentId?: string;
 };
 
 type MealData = {
@@ -77,6 +81,7 @@ export default function SubscriptionOverviewPage() {
   const [editingInvite, setEditingInvite] = useState<Invite | null>(null);
   const [weekOffset, setWeekOffset] = useState(0);
   const [resendingId, setResendingId] = useState<number | null>(null);
+  const [sendingPaymentLinkId, setSendingPaymentLinkId] = useState<number | null>(null);
 
   const weekRange = getCurrentWeekRange(weekOffset);
   const isCurrentWeek = weekOffset === 0;
@@ -128,6 +133,22 @@ export default function SubscriptionOverviewPage() {
     onError: (err: Error) => {
       toast({ title: "Failed to resend", description: err.message, variant: "destructive" });
       setResendingId(null);
+    },
+  });
+
+  const sendPaymentLinkMutation = useMutation({
+    mutationFn: async ({ inviteId, amountPence, items }: { inviteId: number; amountPence: number; items: Array<{ name: string; pricePence: number; quantity: number }> }) => {
+      return apiRequest("POST", `/api/subscription-invites/${inviteId}/send-payment-link`, { amountPence, items });
+    },
+    onSuccess: async (res) => {
+      const data = await res.json();
+      toast({ title: "Payment link sent", description: `Sent to ${data.to}` });
+      setSendingPaymentLinkId(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/subscription-invites"] });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Failed to send payment link", description: err.message, variant: "destructive" });
+      setSendingPaymentLinkId(null);
     },
   });
 
@@ -275,6 +296,8 @@ export default function SubscriptionOverviewPage() {
                 {invites.map(invite => {
                   const isComplete = invite.status === "completed";
                   const totalSelected = invite.selections.reduce((s, sel) => s + sel.quantity, 0);
+                  const hasUnpaidAddon = isComplete && invite.addonAmountPence && invite.addonAmountPence >= 50 && !invite.addonPaid;
+                  const addonAmountGbp = invite.addonAmountPence ? (invite.addonAmountPence / 100).toFixed(2) : "0.00";
                   return (
                     <TableRow key={invite.id} data-testid={`invite-row-${invite.id}`}>
                       <TableCell className="font-medium">{invite.customerName}</TableCell>
@@ -300,18 +323,31 @@ export default function SubscriptionOverviewPage() {
                         )}
                       </TableCell>
                       <TableCell className="text-center">
-                        {isComplete ? (
-                          <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300 gap-1">
-                            <CheckCircle2 className="w-3 h-3" /> Chosen
-                          </Badge>
-                        ) : (
-                          <Badge variant="secondary" className="gap-1">
-                            <Clock className="w-3 h-3" /> Waiting
-                          </Badge>
-                        )}
+                        <div className="flex flex-col items-center gap-1">
+                          {isComplete ? (
+                            <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300 gap-1">
+                              <CheckCircle2 className="w-3 h-3" /> Chosen
+                            </Badge>
+                          ) : (
+                            <Badge variant="secondary" className="gap-1">
+                              <Clock className="w-3 h-3" /> Waiting
+                            </Badge>
+                          )}
+                          {isComplete && invite.addonAmountPence && invite.addonAmountPence >= 50 ? (
+                            invite.addonPaid ? (
+                              <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300 gap-1 text-xs">
+                                <CreditCard className="w-3 h-3" /> £{addonAmountGbp} paid
+                              </Badge>
+                            ) : (
+                              <Badge className="bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300 gap-1 text-xs">
+                                <CreditCard className="w-3 h-3" /> £{addonAmountGbp} unpaid
+                              </Badge>
+                            )
+                          ) : null}
+                        </div>
                       </TableCell>
                       <TableCell>
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-1 flex-wrap">
                           <Button
                             size="sm"
                             variant={isComplete ? "outline" : "default"}
@@ -336,6 +372,30 @@ export default function SubscriptionOverviewPage() {
                           >
                             <RotateCcw className={`w-3 h-3 ${resendingId === invite.id && resendMutation.isPending ? "animate-spin" : ""}`} />
                           </Button>
+                          {hasUnpaidAddon && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 text-xs px-2 border-orange-300 text-orange-700"
+                              title={`Send payment link for £${addonAmountGbp}`}
+                              disabled={sendingPaymentLinkId === invite.id && sendPaymentLinkMutation.isPending}
+                              onClick={() => {
+                                setSendingPaymentLinkId(invite.id);
+                                sendPaymentLinkMutation.mutate({
+                                  inviteId: invite.id,
+                                  amountPence: invite.addonAmountPence!,
+                                  items: [],
+                                });
+                              }}
+                              data-testid={`button-send-payment-link-${invite.id}`}
+                            >
+                              {sendingPaymentLinkId === invite.id && sendPaymentLinkMutation.isPending ? (
+                                <RotateCcw className="w-3 h-3 animate-spin" />
+                              ) : (
+                                <CreditCard className="w-3 h-3" />
+                              )}
+                            </Button>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>

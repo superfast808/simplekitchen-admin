@@ -10,12 +10,15 @@ import { UtensilsCrossed, ChefHat, Check, Minus, Plus, ArrowRight, PartyPopper }
 type AvailableMeal = {
   name: string;
   popularity: number;
+  price?: string;
 };
 
 type InviteData = {
   customerName: string;
   subscriptionQuantity: number;
   status: string;
+  addonPaid?: boolean;
+  addonAmountPence?: number;
   weekNumber?: number;
   categoryName?: string;
   availableMeals: AvailableMeal[];
@@ -158,6 +161,14 @@ export default function SubscribePage({ params }: { params: { token: string } })
         } else {
           setSubmitError(err.message || "Failed to submit");
         }
+        return;
+      }
+
+      const result = await res.json();
+
+      // If the server returned a Stripe checkout URL, redirect to it
+      if (result.checkoutUrl) {
+        window.location.href = result.checkoutUrl;
         return;
       }
 
@@ -377,6 +388,7 @@ export default function SubscribePage({ params }: { params: { token: string } })
             {(data.availableExtras || []).map((extra) => {
               const qty = extras[extra.name] || 0;
               const isSelected = qty > 0;
+              const unitPrice = extra.price ? parseFloat(extra.price) : 0;
               return (
                 <Card
                   key={extra.name}
@@ -386,6 +398,9 @@ export default function SubscribePage({ params }: { params: { token: string } })
                   <CardContent className="p-4 flex items-center justify-between gap-3">
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-sm truncate">{extra.name}</p>
+                      {unitPrice > 0 && (
+                        <p className="text-xs text-muted-foreground">£{unitPrice.toFixed(2)}</p>
+                      )}
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       {isSelected ? (
@@ -430,10 +445,28 @@ export default function SubscribePage({ params }: { params: { token: string } })
               {Object.entries(selections).filter(([_, q]) => q > 0).map(([name, qty]) => (
                 <Badge key={name} variant="secondary" className="shrink-0 text-xs">{name} ×{qty}</Badge>
               ))}
-              {Object.entries(extras).filter(([_, q]) => q > 0).map(([name, qty]) => (
-                <Badge key={name} className="shrink-0 text-xs bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">{name} ×{qty}</Badge>
-              ))}
+              {Object.entries(extras).filter(([_, q]) => q > 0).map(([name, qty]) => {
+                const extraProduct = data.availableExtras.find(e => e.name === name);
+                const price = extraProduct?.price ? parseFloat(extraProduct.price) : 0;
+                return (
+                  <Badge key={name} className="shrink-0 text-xs bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
+                    {name} ×{qty}{price > 0 ? ` (£${(price * qty).toFixed(2)})` : ""}
+                  </Badge>
+                );
+              })}
             </div>
+            {totalExtras > 0 && (() => {
+              const addonTotal = Object.entries(extras).reduce((sum, [name, qty]) => {
+                const extraProduct = data.availableExtras.find(e => e.name === name);
+                const price = extraProduct?.price ? parseFloat(extraProduct.price) : 0;
+                return sum + price * qty;
+              }, 0);
+              return addonTotal > 0 ? (
+                <p className="text-xs text-blue-700 dark:text-blue-300 mb-2 font-medium">
+                  Add-ons total: £{addonTotal.toFixed(2)} — payment required at checkout
+                </p>
+              ) : null;
+            })()}
             <Button
               className="w-full bg-emerald-600 hover:bg-emerald-700 text-white"
               size="lg"
@@ -441,7 +474,7 @@ export default function SubscribePage({ params }: { params: { token: string } })
               disabled={submitting || totalSelected === 0}
               data-testid="button-submit-selections"
             >
-              {submitting ? "Submitting..." : `Confirm ${totalSelected} Meal${totalSelected !== 1 ? "s" : ""}${totalExtras > 0 ? ` + ${totalExtras} add-on${totalExtras !== 1 ? "s" : ""}` : ""}`}
+              {submitting ? "Processing..." : `Confirm ${totalSelected} Meal${totalSelected !== 1 ? "s" : ""}${totalExtras > 0 ? ` + ${totalExtras} add-on${totalExtras !== 1 ? "s" : ""}` : ""}`}
             </Button>
           </div>
         </div>

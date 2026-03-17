@@ -23,6 +23,7 @@ import SubscriptionOverviewPage from "@/pages/subscription-overview";
 import TuesdayOrdersPage from "@/pages/tuesday-orders";
 import SaturdayOrdersPage from "@/pages/saturday-orders";
 import SubscribePage from "@/pages/subscribe";
+import PaymentSuccessPage from "@/pages/payment-success";
 import LoginPage from "@/pages/login";
 
 function PageRouter() {
@@ -90,14 +91,21 @@ function AppContent() {
     },
     retry: false,
     staleTime: Infinity,
-    enabled: !isPublicSubscribe,
+    enabled: !isPublicSubscribe && !isPublicPayment,
   });
 
-  if (isPublicSubscribe) {
+  const isPublicPayment = isPublicSubscribe && location.includes("/payment-success");
+
+  if (isPublicSubscribe || isPublicPayment) {
     return (
-      <Route path="/subscribe/:token">
-        {(params) => <SubscribePage params={params} />}
-      </Route>
+      <Switch>
+        <Route path="/subscribe/:token/payment-success">
+          {(params) => <PaymentSuccessPage params={params} />}
+        </Route>
+        <Route path="/subscribe/:token">
+          {(params) => <SubscribePage params={params} />}
+        </Route>
+      </Switch>
     );
   }
 

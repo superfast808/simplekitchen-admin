@@ -81,6 +81,10 @@ export const subscriptionInvites = pgTable("subscription_invites", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
   deliveryAddress: text("delivery_address"),
   fulfillmentType: text("fulfillment_type").notNull().default("delivery"),
+  stripePaymentIntentId: text("stripe_payment_intent_id"),
+  addonAmountPence: integer("addon_amount_pence"),
+  addonPaid: boolean("addon_paid").notNull().default(false),
+  addonPaymentToken: text("addon_payment_token"),
 });
 
 export const subscriptionSelections = pgTable("subscription_selections", {

@@ -10,6 +10,7 @@ import bcrypt from "bcrypt";
 import nodemailer from "nodemailer";
 import crypto from "crypto";
 import { log } from "./index";
+import { getUncachableStripeClient } from "./stripeClient";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
@@ -1720,15 +1721,21 @@ export async function registerRoutes(
       let availableMeals: Array<{ name: string; popularity: number }>;
       let availableExtras: Array<{ name: string; popularity: number }>;
 
+      // Build a price map: product name -> price string from products DB
+      const extraPriceMap: Record<string, string> = {};
+      for (const p of allProducts) {
+        extraPriceMap[p.name] = p.price || "0";
+      }
+
       if (weekProducts.length > 0) {
         availableMeals = weekProducts
           .filter(p => Math.abs(parseFloat(p.price || "0") - 7.50) < 0.01)
           .sort((a, b) => a.name.localeCompare(b.name))
-          .map(p => ({ name: p.name, popularity: 0 }));
+          .map(p => ({ name: p.name, popularity: 0, price: p.price || "7.50" }));
         availableExtras = weekProducts
           .filter(p => { const pr = parseFloat(p.price || "0"); return pr > 0 && Math.abs(pr - 7.50) >= 0.01; })
           .sort((a, b) => a.name.localeCompare(b.name))
-          .map(p => ({ name: p.name, popularity: 0 }));
+          .map(p => ({ name: p.name, popularity: 0, price: p.price || "0" }));
       } else {
         const mealProductNames = new Set(
           allProducts.filter(p => Math.abs(parseFloat(p.price || "0") - 7.50) < 0.01).map(p => p.name)
@@ -1761,8 +1768,8 @@ export async function registerRoutes(
             }
           }
         }
-        availableMeals = Object.entries(mealCounts).sort((a, b) => b[1] - a[1]).map(([name, count]) => ({ name, popularity: count }));
-        availableExtras = Object.entries(extraCounts).sort((a, b) => b[1] - a[1]).map(([name, count]) => ({ name, popularity: count }));
+        availableMeals = Object.entries(mealCounts).sort((a, b) => b[1] - a[1]).map(([name, count]) => ({ name, popularity: count, price: "7.50" }));
+        availableExtras = Object.entries(extraCounts).sort((a, b) => b[1] - a[1]).map(([name, count]) => ({ name, popularity: count, price: extraPriceMap[name] || "0" }));
       }
 
       const existingSelections = await storage.getSubscriptionSelections(invite.id);
@@ -1771,6 +1778,8 @@ export async function registerRoutes(
         customerName: invite.customerName,
         subscriptionQuantity: invite.subscriptionQuantity,
         status: invite.status,
+        addonPaid: invite.addonPaid,
+        addonAmountPence: invite.addonAmountPence,
         weekNumber,
         categoryName,
         availableMeals,
@@ -1819,6 +1828,27 @@ export async function registerRoutes(
 
       const extrasList: any[] = Array.isArray(extras) ? extras : [];
 
+      // Look up prices for extras from products DB
+      const allProducts = await storage.getProducts();
+      const productPriceMap: Record<string, string> = {};
+      for (const p of allProducts) {
+        productPriceMap[p.name] = p.price || "0";
+      }
+
+      // Calculate addon cost: sum of extra items at their WooCommerce price
+      let addonAmountPence = 0;
+      const addonLineItems: Array<{ name: string; pricePence: number; quantity: number }> = [];
+      for (const extra of extrasList) {
+        if (!extra.productName?.trim()) continue;
+        const qty = parseInt(extra.quantity, 10) || 1;
+        const unitPrice = parseFloat(productPriceMap[extra.productName] || "0");
+        if (unitPrice > 0) {
+          const pricePence = Math.round(unitPrice * 100);
+          addonAmountPence += pricePence * qty;
+          addonLineItems.push({ name: extra.productName, pricePence, quantity: qty });
+        }
+      }
+
       await storage.deleteSubscriptionSelectionsByInviteId(invite.id);
       for (const sel of [...selections, ...extrasList]) {
         await storage.createSubscriptionSelection({
@@ -1863,17 +1893,61 @@ export async function registerRoutes(
       }
       for (const extra of extrasList) {
         if (!extra.productName?.trim()) continue;
+        const qty = parseInt(extra.quantity, 10) || 1;
+        const unitPrice = parseFloat(productPriceMap[extra.productName] || "0");
         await storage.createOrderItem({
           orderId: order.id,
           productId: null,
           productName: extra.productName,
-          quantity: parseInt(extra.quantity, 10) || 1,
-          price: "0",
+          quantity: qty,
+          price: unitPrice > 0 ? String(unitPrice) : "0",
         });
       }
 
       await storage.updateSubscriptionInviteStatus(invite.id, "completed");
       await storage.setSubscriptionInviteSelectionsOrder(invite.id, order.id);
+
+      // If there are paid addons, create a Stripe Checkout session
+      if (addonAmountPence >= 50) {
+        try {
+          const baseUrl = await getPortalBaseUrl();
+          const stripe = await getUncachableStripeClient();
+          const session = await stripe.checkout.sessions.create({
+            payment_method_types: ["card"],
+            line_items: addonLineItems.map(item => ({
+              price_data: {
+                currency: "gbp",
+                unit_amount: item.pricePence,
+                product_data: { name: item.name },
+              },
+              quantity: item.quantity,
+            })),
+            mode: "payment",
+            customer_email: invite.customerEmail || undefined,
+            success_url: `${baseUrl}/subscribe/${invite.token}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+            cancel_url: `${baseUrl}/subscribe/${invite.token}`,
+            metadata: {
+              inviteId: String(invite.id),
+              customerName: invite.customerName,
+              orderId: String(order.id),
+            },
+          });
+          await storage.updateSubscriptionInvitePayment(invite.id, {
+            addonAmountPence,
+            addonPaid: false,
+            addonPaymentToken: session.id,
+          });
+          return res.json({ success: true, orderId: order.id, checkoutUrl: session.url });
+        } catch (stripeError: any) {
+          log(`Stripe checkout creation failed: ${stripeError.message}`);
+          // Fall through and complete without payment link
+        }
+      } else if (addonAmountPence > 0) {
+        await storage.updateSubscriptionInvitePayment(invite.id, {
+          addonAmountPence,
+          addonPaid: false,
+        });
+      }
 
       res.json({ success: true, orderId: order.id });
     } catch (error: any) {
@@ -2471,6 +2545,175 @@ export async function registerRoutes(
         topSeller,
         worstSeller,
         orderCount,
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // ─── Stripe: create payment intent for addon charges ───────────────────────
+  app.post("/api/subscribe/:token/create-payment-intent", async (req, res) => {
+    try {
+      const invite = await storage.getSubscriptionInviteByToken(req.params.token);
+      if (!invite) return res.status(404).json({ message: "Invitation not found" });
+
+      const { amountPence, description, items } = req.body;
+      if (!amountPence || amountPence < 50) {
+        return res.status(400).json({ message: "Amount must be at least 50p" });
+      }
+
+      const stripe = await getUncachableStripeClient();
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount: amountPence,
+        currency: "gbp",
+        description: description || `Add-on/extra meals for ${invite.customerName}`,
+        metadata: {
+          inviteId: String(invite.id),
+          customerName: invite.customerName,
+          customerEmail: invite.customerEmail,
+          items: JSON.stringify(items || []),
+        },
+        receipt_email: invite.customerEmail || undefined,
+      });
+
+      await storage.updateSubscriptionInvitePayment(invite.id, {
+        stripePaymentIntentId: paymentIntent.id,
+        addonAmountPence: amountPence,
+        addonPaid: false,
+      });
+
+      res.json({ clientSecret: paymentIntent.client_secret });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // ─── Stripe: confirm payment completed (called after redirect) ──────────────
+  app.post("/api/subscribe/:token/confirm-payment", async (req, res) => {
+    try {
+      const invite = await storage.getSubscriptionInviteByToken(req.params.token);
+      if (!invite) return res.status(404).json({ message: "Invitation not found" });
+
+      const { paymentIntentId } = req.body;
+      if (!paymentIntentId) return res.status(400).json({ message: "paymentIntentId required" });
+
+      const stripe = await getUncachableStripeClient();
+      const pi = await stripe.paymentIntents.retrieve(paymentIntentId);
+
+      if (pi.status === "succeeded") {
+        await storage.updateSubscriptionInvitePayment(invite.id, { addonPaid: true });
+        res.json({ success: true, status: "succeeded" });
+      } else {
+        res.json({ success: false, status: pi.status });
+      }
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // ─── Stripe: admin create checkout session and send payment link via email ──
+  app.post("/api/subscription-invites/:id/send-payment-link", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const invite = await storage.getSubscriptionInviteById(id);
+      if (!invite) return res.status(404).json({ message: "Invite not found" });
+
+      const { amountPence, items, overrideEmail } = req.body;
+      if (!amountPence || amountPence < 50) {
+        return res.status(400).json({ message: "Amount must be at least 50p" });
+      }
+
+      const baseUrl = await getPortalBaseUrl();
+      const stripe = await getUncachableStripeClient();
+
+      const lineItems = Array.isArray(items) && items.length > 0
+        ? items.map((item: any) => ({
+            price_data: {
+              currency: "gbp",
+              unit_amount: Math.round(item.pricePence),
+              product_data: { name: item.name },
+            },
+            quantity: item.quantity,
+          }))
+        : [{
+            price_data: {
+              currency: "gbp",
+              unit_amount: amountPence,
+              product_data: { name: `Add-ons / Extra meals – ${invite.customerName}` },
+            },
+            quantity: 1,
+          }];
+
+      const session = await stripe.checkout.sessions.create({
+        payment_method_types: ["card"],
+        line_items: lineItems,
+        mode: "payment",
+        customer_email: invite.customerEmail || undefined,
+        success_url: `${baseUrl}/subscribe/${invite.token}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${baseUrl}/subscribe/${invite.token}`,
+        metadata: {
+          inviteId: String(invite.id),
+          customerName: invite.customerName,
+        },
+      });
+
+      await storage.updateSubscriptionInvitePayment(invite.id, {
+        addonAmountPence: amountPence,
+        addonPaid: false,
+        addonPaymentToken: session.id,
+      });
+
+      const toEmail = overrideEmail?.trim() || invite.customerEmail;
+      if (toEmail) {
+        const transporter = await getSmtpTransporter();
+        const fromEmail = await getSmtpFromEmail();
+        if (transporter && fromEmail) {
+          const firstName = invite.customerName.split(" ")[0];
+          const amountFormatted = `£${(amountPence / 100).toFixed(2)}`;
+          const itemsList = Array.isArray(items) && items.length > 0
+            ? items.map((i: any) => `<li>${i.name} ×${i.quantity} — £${(i.pricePence / 100 * i.quantity).toFixed(2)}</li>`).join("")
+            : "";
+          await transporter.sendMail({
+            from: fromEmail,
+            to: toEmail,
+            subject: `Payment required for your add-ons – Simple Kitchen Prep`,
+            html: `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+              <h2 style="color: #059669;">Hi ${firstName},</h2>
+              <p>You have selected some extra meals or add-ons that require payment of <strong>${amountFormatted}</strong>.</p>
+              ${itemsList ? `<ul style="margin: 16px 0;">${itemsList}</ul>` : ""}
+              <p>Please click the button below to complete your payment securely via Stripe:</p>
+              <a href="${session.url}" style="display:inline-block;background:#059669;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold;margin:12px 0;">Pay ${amountFormatted} Now</a>
+              <p style="color:#6b7280;font-size:13px;margin-top:24px;">If you have any questions, please reply to this email.</p>
+            </div>`,
+          });
+        }
+      }
+
+      res.json({ success: true, checkoutUrl: session.url, to: toEmail });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // ─── Stripe: verify checkout session paid (used by success redirect page) ──
+  app.get("/api/stripe/session-status", async (req, res) => {
+    try {
+      const sessionId = req.query.session_id as string;
+      if (!sessionId) return res.status(400).json({ message: "session_id required" });
+      const stripe = await getUncachableStripeClient();
+      const session = await stripe.checkout.sessions.retrieve(sessionId);
+      if (session.payment_status === "paid") {
+        const inviteId = session.metadata?.inviteId ? parseInt(session.metadata.inviteId) : null;
+        if (inviteId) {
+          await storage.updateSubscriptionInvitePayment(inviteId, { addonPaid: true });
+        }
+      }
+      res.json({
+        status: session.payment_status,
+        customerEmail: session.customer_email,
+        customerName: session.metadata?.customerName,
+        amountTotal: session.amount_total,
+        lineItems: session.line_items,
       });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
