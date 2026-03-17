@@ -2245,6 +2245,56 @@ export async function registerRoutes(
     }
   });
 
+  // ─── Reset subscription invite: wipe selections + resend email ─────────────
+  app.post("/api/subscription-invites/:id/reset", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const invite = await storage.getSubscriptionInviteById(id);
+      if (!invite) return res.status(404).json({ message: "Invite not found" });
+
+      const { deletedOrderId } = await storage.resetSubscriptionInvite(id);
+
+      // Resend the invite email
+      let emailSent = false;
+      const transporter = await getSmtpTransporter();
+      if (transporter) {
+        const baseUrl = await getPortalBaseUrl();
+        const fromEmail = await getSmtpFromEmail();
+        const settingsMap = await getSettingsMap();
+        const emailSubject = settingsMap.subscription_email_subject || DEFAULT_EMAIL_SUBJECT;
+        const emailBodyTemplate = settingsMap.subscription_email_body || DEFAULT_EMAIL_BODY;
+
+        const toEmail = invite.customerEmail;
+        if (toEmail) {
+          const selectUrl = `${baseUrl}/subscribe/${invite.token}`;
+          const firstName = invite.customerName.split(" ")[0];
+          const qty = invite.subscriptionQuantity;
+          const emailBody = emailBodyTemplate
+            .replace(/\{\{firstName\}\}/g, firstName)
+            .replace(/\{\{fullName\}\}/g, invite.customerName)
+            .replace(/\{\{qty\}\}/g, String(qty))
+            .replace(/\{\{url\}\}/g, selectUrl);
+          const emailHtml = `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">${emailBody}</div>`;
+
+          await transporter.sendMail({
+            from: fromEmail,
+            to: toEmail,
+            subject: emailSubject
+              .replace(/\{\{firstName\}\}/g, firstName)
+              .replace(/\{\{fullName\}\}/g, invite.customerName)
+              .replace(/\{\{qty\}\}/g, String(qty)),
+            html: emailHtml,
+          });
+          emailSent = true;
+        }
+      }
+
+      res.json({ success: true, emailSent, deletedOrderId });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   app.get("/api/recurring-orders", async (req, res) => {
     try {
       const recurringOrdersList = await storage.getRecurringOrders();

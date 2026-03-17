@@ -68,6 +68,8 @@ export interface IStorage {
   createSubscriptionSelection(selection: InsertSubscriptionSelection): Promise<SubscriptionSelection>;
   getSubscriptionSelections(inviteId: number): Promise<SubscriptionSelection[]>;
   deleteSubscriptionSelectionsByInviteId(inviteId: number): Promise<void>;
+  resetSubscriptionInvite(id: number): Promise<{ deletedOrderId: number | null }>;
+
 
   getRecurringOrders(): Promise<RecurringOrder[]>;
   getRecurringOrder(id: number): Promise<RecurringOrder | undefined>;
@@ -339,6 +341,21 @@ export class DatabaseStorage implements IStorage {
 
   async deleteSubscriptionSelectionsByInviteId(inviteId: number): Promise<void> {
     await db.delete(subscriptionSelections).where(eq(subscriptionSelections.inviteId, inviteId));
+  }
+
+  async resetSubscriptionInvite(id: number): Promise<{ deletedOrderId: number | null }> {
+    const [invite] = await db.select().from(subscriptionInvites).where(eq(subscriptionInvites.id, id));
+    if (!invite) return { deletedOrderId: null };
+    const selectionsOrderId = invite.selectionsOrderId ?? null;
+    await db.delete(subscriptionSelections).where(eq(subscriptionSelections.inviteId, id));
+    await db.update(subscriptionInvites)
+      .set({ status: "pending", selectionsOrderId: null, addonAmountPence: null, addonPaid: false, stripePaymentIntentId: null, addonPaymentToken: null })
+      .where(eq(subscriptionInvites.id, id));
+    if (selectionsOrderId) {
+      await db.delete(orderItems).where(eq(orderItems.orderId, selectionsOrderId));
+      await db.delete(orders).where(and(eq(orders.id, selectionsOrderId), eq(orders.isManual, true)));
+    }
+    return { deletedOrderId: selectionsOrderId };
   }
 
   async getRecurringOrders(): Promise<RecurringOrder[]> {

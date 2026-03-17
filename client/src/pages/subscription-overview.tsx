@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Send, CheckCircle2, Clock, Mail, Pencil, Minus, Plus, UtensilsCrossed, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, RotateCcw, CreditCard, ExternalLink } from "lucide-react";
+import { Send, CheckCircle2, Clock, Mail, Pencil, Minus, Plus, UtensilsCrossed, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, RotateCcw, CreditCard, ExternalLink, Trash2 } from "lucide-react";
 import { format, addWeeks, startOfDay } from "date-fns";
 
 type Selection = {
@@ -83,6 +83,8 @@ export default function SubscriptionOverviewPage() {
   const [weekOffset, setWeekOffset] = useState(0);
   const [resendingId, setResendingId] = useState<number | null>(null);
   const [sendingPaymentLinkId, setSendingPaymentLinkId] = useState<number | null>(null);
+  const [resettingId, setResettingId] = useState<number | null>(null);
+  const [confirmResetId, setConfirmResetId] = useState<number | null>(null);
 
   const weekRange = getCurrentWeekRange(weekOffset);
   const isCurrentWeek = weekOffset === 0;
@@ -156,6 +158,35 @@ export default function SubscriptionOverviewPage() {
       } catch {}
       toast({ title: "Failed to send payment link", description, variant: "destructive" });
       setSendingPaymentLinkId(null);
+    },
+  });
+
+  const resetMutation = useMutation({
+    mutationFn: async (inviteId: number) => {
+      return apiRequest("POST", `/api/subscription-invites/${inviteId}/reset`, {});
+    },
+    onSuccess: async (res) => {
+      const data = await res.json();
+      toast({
+        title: "Selections wiped",
+        description: data.emailSent
+          ? "Meal choices cleared and invite email resent."
+          : "Meal choices cleared. (Email not sent — SMTP not configured.)",
+      });
+      setResettingId(null);
+      setConfirmResetId(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/subscription-invites"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/orders/"] });
+    },
+    onError: (err: Error) => {
+      let description = err.message;
+      try {
+        const parsed = JSON.parse(err.message.replace(/^\d+:\s*/, ""));
+        if (parsed?.message) description = parsed.message;
+      } catch {}
+      toast({ title: "Failed to reset", description, variant: "destructive" });
+      setResettingId(null);
+      setConfirmResetId(null);
     },
   });
 
@@ -380,6 +411,46 @@ export default function SubscriptionOverviewPage() {
                           >
                             <RotateCcw className={`w-3 h-3 ${resendingId === invite.id && resendMutation.isPending ? "animate-spin" : ""}`} />
                           </Button>
+                          {confirmResetId === invite.id ? (
+                            <div className="flex items-center gap-1">
+                              <span className="text-xs text-red-600 whitespace-nowrap">Wipe choices?</span>
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                className="h-7 text-xs px-2"
+                                disabled={resettingId === invite.id && resetMutation.isPending}
+                                onClick={() => {
+                                  setResettingId(invite.id);
+                                  resetMutation.mutate(invite.id);
+                                }}
+                                data-testid={`button-confirm-reset-${invite.id}`}
+                              >
+                                {resettingId === invite.id && resetMutation.isPending ? (
+                                  <RotateCcw className="w-3 h-3 animate-spin" />
+                                ) : "Yes"}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 text-xs px-2"
+                                onClick={() => setConfirmResetId(null)}
+                                data-testid={`button-cancel-reset-${invite.id}`}
+                              >
+                                No
+                              </Button>
+                            </div>
+                          ) : (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 text-xs px-2 border-red-200 text-red-600"
+                              title="Wipe meal choices and resend invite"
+                              onClick={() => setConfirmResetId(invite.id)}
+                              data-testid={`button-reset-invite-${invite.id}`}
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </Button>
+                          )}
                           {hasUnpaidAddon && (
                             <Button
                               size="sm"
