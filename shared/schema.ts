@@ -41,6 +41,7 @@ export const orders = pgTable("orders", {
   isTuesday: boolean("is_tuesday").notNull().default(false),
   notes: text("notes"),
   cashAmount: decimal("cash_amount", { precision: 10, scale: 2 }),
+  paymentMethod: varchar("payment_method"),
 });
 
 export const orderItems = pgTable("order_items", {

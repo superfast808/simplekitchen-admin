@@ -541,10 +541,10 @@ export default function OrdersPage() {
                               </Tooltip>
                             </TooltipProvider>
                           )}
-                          {(order as any).cashAmount && parseFloat((order as any).cashAmount) > 0 && (
-                            <div className="flex items-center gap-1 text-xs text-green-700 dark:text-green-400 font-medium" data-testid={`text-cash-${order.id}`}>
+                          {(order as any).paymentMethod && (order as any).paymentMethod !== "none" && (
+                            <div className="flex items-center gap-1 text-xs text-green-700 dark:text-green-400 font-medium" data-testid={`text-payment-${order.id}`}>
                               <Banknote className="w-3 h-3 flex-shrink-0" />
-                              Cash £{parseFloat((order as any).cashAmount).toFixed(2)}
+                              {(order as any).paymentMethod === "cash" ? "Cash" : "Bank Transfer"}
                             </div>
                           )}
                         </div>
@@ -636,10 +636,14 @@ export default function OrdersPage() {
                       £{(orders || []).reduce((sum, o) => sum + o.items.reduce((s, i) => s + parseFloat(i.price || "0"), 0), 0).toFixed(2)}
                     </TableCell>
                     <TableCell></TableCell>
-                    <TableCell className="text-sm font-medium text-green-700 dark:text-green-400" data-testid="text-total-cash">
+                    <TableCell className="text-sm font-medium text-green-700 dark:text-green-400" data-testid="text-total-payment-methods">
                       {(() => {
-                        const totalCash = (orders || []).reduce((sum, o) => sum + (parseFloat((o as any).cashAmount || "0") || 0), 0);
-                        return totalCash > 0 ? `Cash: £${totalCash.toFixed(2)}` : "";
+                        const cashCount = (orders || []).filter(o => (o as any).paymentMethod === "cash").length;
+                        const btCount = (orders || []).filter(o => (o as any).paymentMethod === "bank_transfer").length;
+                        const parts = [];
+                        if (cashCount > 0) parts.push(`Cash: ${cashCount}`);
+                        if (btCount > 0) parts.push(`BT: ${btCount}`);
+                        return parts.join(" · ");
                       })()}
                     </TableCell>
                     <TableCell></TableCell>
@@ -687,7 +691,7 @@ function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
   const [fulfillmentType, setFulfillmentType] = useState<"delivery" | "collection">("delivery");
   const [isTuesday, setIsTuesday] = useState(false);
   const [notes, setNotes] = useState("");
-  const [cashAmount, setCashAmount] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState<"" | "cash" | "bank_transfer">("");
   const [saveAsConsistent, setSaveAsConsistent] = useState(true);
   const [itemLines, setItemLines] = useState([{ productName: "", quantity: 1 }]);
 
@@ -709,7 +713,7 @@ function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
       setFulfillmentType("delivery");
       setIsTuesday(false);
       setNotes("");
-      setCashAmount("");
+      setPaymentMethod("");
       setSaveAsConsistent(true);
       setItemLines([{ productName: "", quantity: 1 }]);
     },
@@ -730,7 +734,7 @@ function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
       fulfillmentType,
       isTuesday,
       notes: notes || null,
-      cashAmount: cashAmount ? cashAmount : null,
+      paymentMethod: paymentMethod || null,
       saveAsConsistent,
       items: validItems.map(i => ({
         productName: i.productName,
@@ -803,17 +807,17 @@ function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
             />
           </div>
           <div>
-            <Label className="flex items-center gap-1"><Banknote className="w-4 h-4" />Cash Payment (optional)</Label>
-            <Input
-              type="number"
-              step="0.01"
-              min="0"
-              value={cashAmount}
-              onChange={(e) => setCashAmount(e.target.value)}
-              placeholder="0.00"
-              data-testid="input-manual-cash"
-            />
-            <p className="text-xs text-muted-foreground mt-1">Enter cash amount if payment wasn't taken online</p>
+            <Label className="flex items-center gap-1"><Banknote className="w-4 h-4" />Payment Method (optional)</Label>
+            <Select value={paymentMethod || "none"} onValueChange={(v) => setPaymentMethod(v === "none" ? "" : v as "cash" | "bank_transfer")}>
+              <SelectTrigger data-testid="select-manual-payment-method">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Online / not specified</SelectItem>
+                <SelectItem value="cash">Cash</SelectItem>
+                <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           <div className="space-y-2">
             <Label>Items</Label>
@@ -892,7 +896,7 @@ function EditOrderDialog({ order, open, onOpenChange }: { order: OrderWithItems;
   );
   const [isTuesday, setIsTuesday] = useState(order.isTuesday || false);
   const [notes, setNotes] = useState((order as any).notes || "");
-  const [cashAmount, setCashAmount] = useState((order as any).cashAmount ? String(parseFloat((order as any).cashAmount)) : "");
+  const [paymentMethod, setPaymentMethod] = useState<"" | "cash" | "bank_transfer">((order as any).paymentMethod || "");
   const [itemLines, setItemLines] = useState(
     order.items.map(i => ({ productName: i.productName, quantity: i.quantity }))
   );
@@ -923,7 +927,7 @@ function EditOrderDialog({ order, open, onOpenChange }: { order: OrderWithItems;
       fulfillmentType,
       isTuesday,
       notes: notes || null,
-      cashAmount: cashAmount ? cashAmount : null,
+      paymentMethod: paymentMethod || null,
       items: validItems.map(i => ({
         productName: i.productName,
         quantity: i.quantity,
@@ -989,16 +993,17 @@ function EditOrderDialog({ order, open, onOpenChange }: { order: OrderWithItems;
             />
           </div>
           <div>
-            <Label className="flex items-center gap-1"><Banknote className="w-4 h-4" />Cash Payment (optional)</Label>
-            <Input
-              type="number"
-              step="0.01"
-              min="0"
-              value={cashAmount}
-              onChange={(e) => setCashAmount(e.target.value)}
-              placeholder="0.00"
-              data-testid="input-edit-cash"
-            />
+            <Label className="flex items-center gap-1"><Banknote className="w-4 h-4" />Payment Method (optional)</Label>
+            <Select value={paymentMethod || "none"} onValueChange={(v) => setPaymentMethod(v === "none" ? "" : v as "cash" | "bank_transfer")}>
+              <SelectTrigger data-testid="select-edit-payment-method">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Online / not specified</SelectItem>
+                <SelectItem value="cash">Cash</SelectItem>
+                <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           <div className="space-y-2">
             <Label>Items</Label>
