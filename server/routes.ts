@@ -86,6 +86,26 @@ function applyAddDeliveryUpgrades(ordersWithItems: Array<{ customerEmail: string
   }
 }
 
+async function persistDeliveryUpgrades(): Promise<number> {
+  const from = new Date();
+  from.setDate(from.getDate() - 28);
+  const ordersList = await storage.getOrders(from, new Date());
+  const ordersWithItems = await Promise.all(
+    ordersList.map(async (o) => ({ ...o, items: await storage.getOrderItems(o.id) }))
+  );
+  const originalTypes = new Map(ordersWithItems.map(o => [o.id, o.fulfillmentType]));
+  applyAddDeliveryUpgrades(ordersWithItems);
+  let upgraded = 0;
+  for (const o of ordersWithItems) {
+    if (o.fulfillmentType !== originalTypes.get(o.id)) {
+      await storage.updateOrder(o.id, { fulfillmentType: o.fulfillmentType ?? "delivery" });
+      log(`Delivery upgrade: order ${o.id} (${o.customerName}) → delivery`, "sync");
+      upgraded++;
+    }
+  }
+  return upgraded;
+}
+
 function detectFulfillmentType(wooOrder: any): string {
   const shippingLines = wooOrder.shipping_lines || [];
   if (shippingLines.length === 0) return "collection";
@@ -401,6 +421,8 @@ async function performSync() {
     }
 
     log(`Auto-sync complete: imported=${imported}, updated=${updated}, total=${wooOrders.length}`, "sync");
+    const upgraded = await persistDeliveryUpgrades();
+    if (upgraded > 0) log(`Auto-sync: persisted delivery upgrade for ${upgraded} order(s)`, "sync");
     // After sync, auto-send any subscription invite emails that are still pending
     await autoSendSubscriptionInvites();
   } catch (error: any) {
@@ -1077,7 +1099,8 @@ export async function registerRoutes(
         }
       }
 
-      res.json({ imported, updated, total: wooOrders.length });
+      const upgraded = await persistDeliveryUpgrades();
+      res.json({ imported, updated, upgraded, total: wooOrders.length });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
