@@ -148,7 +148,13 @@ export default function SubscriptionOverviewPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/subscription-invites"] });
     },
     onError: (err: Error) => {
-      toast({ title: "Failed to send payment link", description: err.message, variant: "destructive" });
+      let description = err.message;
+      try {
+        const jsonPart = err.message.replace(/^\d+:\s*/, "");
+        const parsed = JSON.parse(jsonPart);
+        if (parsed?.message) description = parsed.message;
+      } catch {}
+      toast({ title: "Failed to send payment link", description, variant: "destructive" });
       setSendingPaymentLinkId(null);
     },
   });

@@ -2694,8 +2694,13 @@ export async function registerRoutes(
         }
       }
 
+      const stripeKey = await getActiveStripeSecretKey();
+      if (!stripeKey) {
+        return res.status(400).json({ message: "No Stripe API key configured. Add your Stripe keys in Settings → Stripe Payments." });
+      }
+
       const baseUrl = await getPortalBaseUrl();
-      const stripe = await getUncachableStripeClient(await getActiveStripeSecretKey());
+      const stripe = await getUncachableStripeClient(stripeKey);
 
       const lineItems = Array.isArray(items) && items.length > 0
         ? items.map((item: any) => ({
