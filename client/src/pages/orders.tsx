@@ -449,6 +449,7 @@ export default function OrdersPage() {
                     {allProductNames.map(name => (
                       <TableHead key={name} className="text-center min-w-[80px]">{name}</TableHead>
                     ))}
+                    <TableHead className="text-center w-[60px]">Total</TableHead>
                     <TableHead className="min-w-[180px]">Delivery Address</TableHead>
                     <TableHead className="w-[100px]">Type</TableHead>
                     <TableHead className="w-[70px] text-right">Spend</TableHead>
@@ -499,6 +500,9 @@ export default function OrdersPage() {
                           </TableCell>
                         );
                       })}
+                      <TableCell className="text-center font-bold text-sm" data-testid={`text-total-items-${order.id}`}>
+                        {order.items.filter(i => !i.productName.toLowerCase().includes("add delivery")).reduce((s, i) => s + i.quantity, 0)}
+                      </TableCell>
                       <TableCell>
                         <span className="text-sm" data-testid={`text-address-${order.id}`}>
                           {order.deliveryAddress || <span className="text-muted-foreground/40 text-xs">No address</span>}
@@ -608,6 +612,7 @@ export default function OrdersPage() {
                     {allProductNames.map(name => (
                       <TableCell key={name} className="text-center font-bold text-xs text-muted-foreground">{name}</TableCell>
                     ))}
+                    <TableCell className="text-center font-bold text-xs text-muted-foreground">Total</TableCell>
                     <TableCell className="font-bold text-xs text-muted-foreground">Address</TableCell>
                     <TableCell className="font-bold text-xs text-muted-foreground">Type</TableCell>
                     <TableCell className="font-bold text-xs text-muted-foreground text-right">Spend</TableCell>
@@ -622,6 +627,9 @@ export default function OrdersPage() {
                         {productTotals[name] || 0}
                       </TableCell>
                     ))}
+                    <TableCell className="text-center font-bold text-sm" data-testid="text-grand-total-items">
+                      {(orders || []).reduce((sum, o) => sum + o.items.filter(i => !i.productName.toLowerCase().includes("add delivery")).reduce((s, i) => s + i.quantity, 0), 0)}
+                    </TableCell>
                     <TableCell></TableCell>
                     <TableCell></TableCell>
                     <TableCell className="text-right font-bold text-sm" data-testid="text-total-spend">

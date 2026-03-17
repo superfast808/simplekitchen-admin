@@ -2392,16 +2392,9 @@ export async function registerRoutes(
         for (const item of order.items) {
           const name = item.productName.toLowerCase();
           if (name.includes("add delivery")) continue;
+          if (subscriptionPattern.test(item.productName)) continue;
           revenue += parseFloat(item.price || "0");
-
-          const subMatch = item.productName.match(subscriptionPattern);
-          if (subMatch) {
-            const mealCount = parseInt(subMatch[1], 10);
-            mealsSold += mealCount * item.quantity;
-          } else {
-            mealsSold += item.quantity;
-          }
-
+          mealsSold += item.quantity;
           mealCounts[item.productName] = (mealCounts[item.productName] || 0) + item.quantity;
         }
       }
@@ -2438,14 +2431,10 @@ export async function registerRoutes(
       let topSeller = "-";
       let worstSeller = "-";
       const mealEntries = Object.entries(mealCounts);
-      const nonSubEntries = mealEntries.filter(([name]) => !subscriptionPattern.test(name));
       if (mealEntries.length > 0) {
         mealEntries.sort((a, b) => b[1] - a[1]);
         topSeller = `${mealEntries[0][0]} (${mealEntries[0][1]})`;
-      }
-      if (nonSubEntries.length > 0) {
-        nonSubEntries.sort((a, b) => a[1] - b[1]);
-        worstSeller = `${nonSubEntries[0][0]} (${nonSubEntries[0][1]})`;
+        worstSeller = `${mealEntries[mealEntries.length - 1][0]} (${mealEntries[mealEntries.length - 1][1]})`;
       }
 
       res.json({
