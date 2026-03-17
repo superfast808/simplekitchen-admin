@@ -1695,10 +1695,24 @@ export async function registerRoutes(
       const from = req.query.from ? new Date(req.query.from as string) : undefined;
       const to = req.query.to ? new Date(req.query.to as string) : undefined;
       const invites = await storage.getSubscriptionInvites(from, to);
+      const allProducts = await storage.getProducts();
+      const productPriceByName = new Map<string, number>();
+      for (const p of allProducts) {
+        const price = parseFloat(p.price || "0");
+        productPriceByName.set(p.name.toLowerCase(), price);
+      }
+      const STANDARD_PRICE = 7.50;
       const result = await Promise.all(
         invites.map(async (invite) => {
           const selections = await storage.getSubscriptionSelections(invite.id);
-          return { ...invite, selections };
+          let computedAddonAmountPence = 0;
+          for (const sel of selections) {
+            const price = productPriceByName.get(sel.productName.toLowerCase());
+            if (price !== undefined && price !== STANDARD_PRICE) {
+              computedAddonAmountPence += Math.round(price * 100) * sel.quantity;
+            }
+          }
+          return { ...invite, selections, computedAddonAmountPence };
         })
       );
       res.json(result);
@@ -2618,9 +2632,29 @@ export async function registerRoutes(
       const invite = await storage.getSubscriptionInviteById(id);
       if (!invite) return res.status(404).json({ message: "Invite not found" });
 
-      const { amountPence, items, overrideEmail } = req.body;
+      const { overrideEmail } = req.body;
+      let { amountPence, items } = req.body as { amountPence?: number; items?: any[] };
+
       if (!amountPence || amountPence < 50) {
-        return res.status(400).json({ message: "Amount must be at least 50p" });
+        const allProducts = await storage.getProducts();
+        const productPriceByName = new Map<string, number>();
+        for (const p of allProducts) {
+          productPriceByName.set(p.name.toLowerCase(), parseFloat(p.price || "0"));
+        }
+        const STANDARD_PRICE = 7.50;
+        const selections = await storage.getSubscriptionSelections(invite.id);
+        const extraItems: Array<{ name: string; pricePence: number; quantity: number }> = [];
+        for (const sel of selections) {
+          const price = productPriceByName.get(sel.productName.toLowerCase());
+          if (price !== undefined && price !== STANDARD_PRICE) {
+            extraItems.push({ name: sel.productName, pricePence: Math.round(price * 100), quantity: sel.quantity });
+          }
+        }
+        amountPence = extraItems.reduce((sum, i) => sum + i.pricePence * i.quantity, 0);
+        items = extraItems;
+        if (!amountPence || amountPence < 50) {
+          return res.status(400).json({ message: "No chargeable add-ons found for this invite" });
+        }
       }
 
       const baseUrl = await getPortalBaseUrl();

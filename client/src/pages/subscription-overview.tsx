@@ -34,6 +34,7 @@ type Invite = {
   selections: Selection[];
   addonPaid?: boolean;
   addonAmountPence?: number;
+  computedAddonAmountPence?: number;
   addonPaymentToken?: string;
   stripePaymentIntentId?: string;
 };
@@ -296,8 +297,9 @@ export default function SubscriptionOverviewPage() {
                 {invites.map(invite => {
                   const isComplete = invite.status === "completed";
                   const totalSelected = invite.selections.reduce((s, sel) => s + sel.quantity, 0);
-                  const hasUnpaidAddon = isComplete && invite.addonAmountPence && invite.addonAmountPence >= 50 && !invite.addonPaid;
-                  const addonAmountGbp = invite.addonAmountPence ? (invite.addonAmountPence / 100).toFixed(2) : "0.00";
+                  const effectiveAddonPence = invite.addonAmountPence ?? invite.computedAddonAmountPence ?? 0;
+                  const hasUnpaidAddon = isComplete && effectiveAddonPence >= 50 && !invite.addonPaid;
+                  const addonAmountGbp = effectiveAddonPence > 0 ? (effectiveAddonPence / 100).toFixed(2) : "0.00";
                   return (
                     <TableRow key={invite.id} data-testid={`invite-row-${invite.id}`}>
                       <TableCell className="font-medium">{invite.customerName}</TableCell>
@@ -333,7 +335,7 @@ export default function SubscriptionOverviewPage() {
                               <Clock className="w-3 h-3" /> Waiting
                             </Badge>
                           )}
-                          {isComplete && invite.addonAmountPence && invite.addonAmountPence >= 50 ? (
+                          {isComplete && effectiveAddonPence >= 50 ? (
                             invite.addonPaid ? (
                               <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300 gap-1 text-xs">
                                 <CreditCard className="w-3 h-3" /> £{addonAmountGbp} paid
@@ -383,7 +385,7 @@ export default function SubscriptionOverviewPage() {
                                 setSendingPaymentLinkId(invite.id);
                                 sendPaymentLinkMutation.mutate({
                                   inviteId: invite.id,
-                                  amountPence: invite.addonAmountPence!,
+                                  amountPence: effectiveAddonPence,
                                   items: [],
                                 });
                               }}
