@@ -2827,13 +2827,83 @@ export async function registerRoutes(
       const sessionId = req.query.session_id as string;
       if (!sessionId) return res.status(400).json({ message: "session_id required" });
       const stripe = await getUncachableStripeClient(await getActiveStripeSecretKey());
-      const session = await stripe.checkout.sessions.retrieve(sessionId);
+      const session = await stripe.checkout.sessions.retrieve(sessionId, {
+        expand: ["line_items"],
+      });
+
       if (session.payment_status === "paid") {
         const inviteId = session.metadata?.inviteId ? parseInt(session.metadata.inviteId) : null;
         if (inviteId) {
+          const invite = await storage.getSubscriptionInviteById(inviteId);
+          const alreadyPaid = invite?.addonPaid === true;
+
           await storage.updateSubscriptionInvitePayment(inviteId, { addonPaid: true });
+
+          // Send receipt email once, on first confirmation
+          if (!alreadyPaid && invite) {
+            try {
+              const transporter = await getSmtpTransporter();
+              const fromEmail = await getSmtpFromEmail();
+
+              if (transporter && fromEmail && invite.customerEmail) {
+                const firstName = invite.customerName.split(" ")[0];
+                const amountTotal = session.amount_total ?? 0;
+                const amountFormatted = `£${(amountTotal / 100).toFixed(2)}`;
+                const lineItems = (session.line_items?.data ?? []) as Array<{ description?: string | null; quantity?: number | null; amount_total?: number | null }>;
+
+                const itemRows = lineItems.length > 0
+                  ? lineItems.map(li => {
+                      const desc = li.description ?? "Add-on";
+                      const qty = li.quantity ?? 1;
+                      const lineTotal = `£${((li.amount_total ?? 0) / 100).toFixed(2)}`;
+                      return `<tr>
+                        <td style="padding:6px 12px;border-bottom:1px solid #eee;">${desc}</td>
+                        <td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:center;">${qty}</td>
+                        <td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:right;">${lineTotal}</td>
+                      </tr>`;
+                    }).join("")
+                  : `<tr><td colspan="3" style="padding:6px 12px;">Add-on extras</td></tr>`;
+
+                const html = `
+<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;color:#333;">
+  <h2 style="color:#059669;">Payment Receipt – Simple Kitchen Prep</h2>
+  <p>Hi ${firstName},</p>
+  <p>Thank you for your payment! Here's your receipt for your add-on extras this week.</p>
+  <table style="width:100%;border-collapse:collapse;margin:20px 0;">
+    <thead>
+      <tr style="background:#f3f4f6;">
+        <th style="padding:8px 12px;text-align:left;">Item</th>
+        <th style="padding:8px 12px;text-align:center;">Qty</th>
+        <th style="padding:8px 12px;text-align:right;">Amount</th>
+      </tr>
+    </thead>
+    <tbody>${itemRows}</tbody>
+    <tfoot>
+      <tr>
+        <td colspan="2" style="padding:8px 12px;font-weight:bold;text-align:right;">Total paid:</td>
+        <td style="padding:8px 12px;font-weight:bold;text-align:right;">${amountFormatted}</td>
+      </tr>
+    </tfoot>
+  </table>
+  <p style="color:#6b7280;font-size:13px;">Your meals will be ready for collection/delivery as usual this week. If you have any questions, just reply to this email.</p>
+  <p style="color:#6b7280;font-size:13px;">— Simple Kitchen Prep</p>
+</div>`;
+
+                await transporter.sendMail({
+                  from: fromEmail,
+                  to: invite.customerEmail,
+                  subject: `Payment confirmed – ${amountFormatted} – Simple Kitchen Prep`,
+                  html,
+                });
+                log(`Receipt email sent to ${invite.customerEmail} for invite ${inviteId}`, "stripe");
+              }
+            } catch (emailErr: any) {
+              log(`Receipt email failed for invite ${inviteId}: ${emailErr.message}`, "stripe");
+            }
+          }
         }
       }
+
       res.json({
         status: session.payment_status,
         customerEmail: session.customer_email,
