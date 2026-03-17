@@ -148,6 +148,11 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   smtp_user: "",
   smtp_pass: "",
   smtp_from: "",
+  stripe_mode: "test",
+  stripe_test_secret_key: "",
+  stripe_test_publishable_key: "",
+  stripe_live_secret_key: "",
+  stripe_live_publishable_key: "",
 };
 
 const ALLOWED_SETTINGS_KEYS = new Set(Object.keys(DEFAULT_SETTINGS));
@@ -330,6 +335,24 @@ async function getPortalBaseUrl(): Promise<string> {
 async function getSmtpFromEmail(): Promise<string> {
   const s = await getSettingsMap();
   return s.smtp_from || process.env.SMTP_FROM_EMAIL || "";
+}
+
+// Return the active Stripe secret key (DB settings → env var → undefined for proxy fallback)
+async function getActiveStripeSecretKey(): Promise<string | undefined> {
+  const s = await getSettingsMap();
+  const mode = s.stripe_mode || "test";
+  const dbKey = mode === "live" ? s.stripe_live_secret_key : s.stripe_test_secret_key;
+  if (dbKey && dbKey.trim()) return dbKey.trim();
+  return process.env.STRIPE_SECRET_KEY;
+}
+
+// Return the active Stripe publishable key
+async function getActiveStripePublishableKey(): Promise<string> {
+  const s = await getSettingsMap();
+  const mode = s.stripe_mode || "test";
+  const dbKey = mode === "live" ? s.stripe_live_publishable_key : s.stripe_test_publishable_key;
+  if (dbKey && dbKey.trim()) return dbKey.trim();
+  return process.env.STRIPE_PUBLISHABLE_KEY || "";
 }
 
 async function performSync() {
@@ -1228,7 +1251,12 @@ export async function registerRoutes(
   app.get("/api/settings", async (_req, res) => {
     try {
       const settingsMap = await getSettingsMap();
-      const safe = { ...settingsMap, smtp_pass: settingsMap.smtp_pass ? "••••••••" : "" };
+      const safe = {
+        ...settingsMap,
+        smtp_pass: settingsMap.smtp_pass ? "••••••••" : "",
+        stripe_test_secret_key: settingsMap.stripe_test_secret_key ? "••••••••" : "",
+        stripe_live_secret_key: settingsMap.stripe_live_secret_key ? "••••••••" : "",
+      };
       res.json(safe);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
@@ -1238,9 +1266,13 @@ export async function registerRoutes(
   app.post("/api/settings", async (req, res) => {
     try {
       const entries = req.body as Record<string, string>;
+      const MASKED = "••••••••";
       for (const [key, value] of Object.entries(entries)) {
         if (!ALLOWED_SETTINGS_KEYS.has(key)) {
           return res.status(400).json({ message: `Unknown setting: ${key}` });
+        }
+        if ((key === "smtp_pass" || key === "stripe_test_secret_key" || key === "stripe_live_secret_key") && value === MASKED) {
+          continue;
         }
         if (key === "sync_interval_minutes") {
           const v = parseInt(String(value));
@@ -1267,7 +1299,12 @@ export async function registerRoutes(
       }
       await startAutoSync();
       const settingsMap = await getSettingsMap();
-      const safe = { ...settingsMap, smtp_pass: settingsMap.smtp_pass ? "••••••••" : "" };
+      const safe = {
+        ...settingsMap,
+        smtp_pass: settingsMap.smtp_pass ? "••••••••" : "",
+        stripe_test_secret_key: settingsMap.stripe_test_secret_key ? "••••••••" : "",
+        stripe_live_secret_key: settingsMap.stripe_live_secret_key ? "••••••••" : "",
+      };
       res.json(safe);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
@@ -1925,7 +1962,7 @@ export async function registerRoutes(
       if (addonAmountPence >= 50) {
         try {
           const baseUrl = await getPortalBaseUrl();
-          const stripe = await getUncachableStripeClient();
+          const stripe = await getUncachableStripeClient(await getActiveStripeSecretKey());
           const session = await stripe.checkout.sessions.create({
             payment_method_types: ["card"],
             line_items: addonLineItems.map(item => ({
@@ -2576,7 +2613,7 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Amount must be at least 50p" });
       }
 
-      const stripe = await getUncachableStripeClient();
+      const stripe = await getUncachableStripeClient(await getActiveStripeSecretKey());
       const paymentIntent = await stripe.paymentIntents.create({
         amount: amountPence,
         currency: "gbp",
@@ -2611,7 +2648,7 @@ export async function registerRoutes(
       const { paymentIntentId } = req.body;
       if (!paymentIntentId) return res.status(400).json({ message: "paymentIntentId required" });
 
-      const stripe = await getUncachableStripeClient();
+      const stripe = await getUncachableStripeClient(await getActiveStripeSecretKey());
       const pi = await stripe.paymentIntents.retrieve(paymentIntentId);
 
       if (pi.status === "succeeded") {
@@ -2658,7 +2695,7 @@ export async function registerRoutes(
       }
 
       const baseUrl = await getPortalBaseUrl();
-      const stripe = await getUncachableStripeClient();
+      const stripe = await getUncachableStripeClient(await getActiveStripeSecretKey());
 
       const lineItems = Array.isArray(items) && items.length > 0
         ? items.map((item: any) => ({
@@ -2734,7 +2771,7 @@ export async function registerRoutes(
     try {
       const sessionId = req.query.session_id as string;
       if (!sessionId) return res.status(400).json({ message: "session_id required" });
-      const stripe = await getUncachableStripeClient();
+      const stripe = await getUncachableStripeClient(await getActiveStripeSecretKey());
       const session = await stripe.checkout.sessions.retrieve(sessionId);
       if (session.payment_status === "paid") {
         const inviteId = session.metadata?.inviteId ? parseInt(session.metadata.inviteId) : null;

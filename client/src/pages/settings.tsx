@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
-import { Save, RefreshCw, Upload, Trash2, Image, UserPlus, X, CalendarDays, Mail } from "lucide-react";
+import { Save, RefreshCw, Upload, Trash2, Image, UserPlus, X, CalendarDays, Mail, CreditCard } from "lucide-react";
 
 const DAYS = [
   { value: "0", label: "Sunday" },
@@ -150,6 +150,11 @@ export default function SettingsPage() {
   const [smtpPass, setSmtpPass] = useState("");
   const [smtpFrom, setSmtpFrom] = useState("");
   const [testSmtpEmail, setTestSmtpEmail] = useState("");
+  const [stripeMode, setStripeMode] = useState<"test" | "live">("test");
+  const [stripeTestSecretKey, setStripeTestSecretKey] = useState("");
+  const [stripeTestPublishableKey, setStripeTestPublishableKey] = useState("");
+  const [stripeLiveSecretKey, setStripeLiveSecretKey] = useState("");
+  const [stripeLivePublishableKey, setStripeLivePublishableKey] = useState("");
 
   const { data: currentWeek } = useQuery<{ weekNumber: number; categoryName: string; week1ReferenceDate: string | null }>({
     queryKey: ["/api/current-week"],
@@ -176,6 +181,9 @@ export default function SettingsPage() {
       if (settings.smtp_user) setSmtpUser(settings.smtp_user);
       if (settings.smtp_pass && settings.smtp_pass !== "••••••••") setSmtpPass(settings.smtp_pass);
       if (settings.smtp_from) setSmtpFrom(settings.smtp_from);
+      if (settings.stripe_mode === "live" || settings.stripe_mode === "test") setStripeMode(settings.stripe_mode);
+      if (settings.stripe_test_publishable_key) setStripeTestPublishableKey(settings.stripe_test_publishable_key);
+      if (settings.stripe_live_publishable_key) setStripeLivePublishableKey(settings.stripe_live_publishable_key);
     }
   }, [settings]);
 
@@ -238,6 +246,11 @@ export default function SettingsPage() {
       smtp_from: smtpFrom,
     };
     if (smtpPass) data.smtp_pass = smtpPass;
+    data.stripe_mode = stripeMode;
+    data.stripe_test_publishable_key = stripeTestPublishableKey;
+    data.stripe_live_publishable_key = stripeLivePublishableKey;
+    if (stripeTestSecretKey) data.stripe_test_secret_key = stripeTestSecretKey;
+    if (stripeLiveSecretKey) data.stripe_live_secret_key = stripeLiveSecretKey;
     if (week1ReferenceDate) {
       data.week1ReferenceDate = new Date(week1ReferenceDate).toISOString();
     }
@@ -672,6 +685,94 @@ export default function SettingsPage() {
               This HTML is wrapped in a centred 600px container before sending. Use <code className="bg-muted px-0.5 rounded">{"{{url}}"}</code> wherever you want the selection link to appear (in href attributes or as visible text).
             </p>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <CreditCard className="w-4 h-4" />
+            Stripe Payments
+          </CardTitle>
+          <CardDescription>
+            Configure Stripe to charge customers for add-on extras. Secret keys are stored securely and never displayed after saving.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <div className="flex items-center gap-3">
+            <Label className="w-32 shrink-0">Mode</Label>
+            <Select value={stripeMode} onValueChange={(v) => setStripeMode(v as "test" | "live")}>
+              <SelectTrigger className="w-40" data-testid="select-stripe-mode">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="test">Test mode</SelectItem>
+                <SelectItem value="live">Live mode</SelectItem>
+              </SelectContent>
+            </Select>
+            {stripeMode === "live" && (
+              <span className="text-xs font-medium text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20 px-2 py-1 rounded">
+                Live payments active
+              </span>
+            )}
+          </div>
+
+          <div className="space-y-4">
+            <p className="text-sm font-medium text-muted-foreground">Test keys (pk_test_ / sk_test_)</p>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <Label htmlFor="stripe-test-pk">Publishable key</Label>
+                <Input
+                  id="stripe-test-pk"
+                  value={stripeTestPublishableKey}
+                  onChange={(e) => setStripeTestPublishableKey(e.target.value)}
+                  placeholder="pk_test_…"
+                  data-testid="input-stripe-test-publishable-key"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="stripe-test-sk">Secret key</Label>
+                <Input
+                  id="stripe-test-sk"
+                  type="password"
+                  value={stripeTestSecretKey}
+                  onChange={(e) => setStripeTestSecretKey(e.target.value)}
+                  placeholder={settings?.stripe_test_secret_key ? "••••••••  (saved)" : "sk_test_…"}
+                  data-testid="input-stripe-test-secret-key"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <p className="text-sm font-medium text-muted-foreground">Live keys (pk_live_ / sk_live_)</p>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <Label htmlFor="stripe-live-pk">Publishable key</Label>
+                <Input
+                  id="stripe-live-pk"
+                  value={stripeLivePublishableKey}
+                  onChange={(e) => setStripeLivePublishableKey(e.target.value)}
+                  placeholder="pk_live_…"
+                  data-testid="input-stripe-live-publishable-key"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="stripe-live-sk">Secret key</Label>
+                <Input
+                  id="stripe-live-sk"
+                  type="password"
+                  value={stripeLiveSecretKey}
+                  onChange={(e) => setStripeLiveSecretKey(e.target.value)}
+                  placeholder={settings?.stripe_live_secret_key ? "••••••••  (saved)" : "sk_live_…"}
+                  data-testid="input-stripe-live-secret-key"
+                />
+              </div>
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Leave secret key fields blank to keep the existing saved key. The active mode's keys will be used for all Stripe requests.
+          </p>
         </CardContent>
       </Card>
 
