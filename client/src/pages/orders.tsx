@@ -524,7 +524,10 @@ export default function OrdersPage() {
                     <TableHead className="text-center w-[60px]">Total</TableHead>
                     <TableHead className="min-w-[180px]">Delivery Address</TableHead>
                     <TableHead className="w-[100px]">Type</TableHead>
-                    <TableHead className="w-[70px] text-right">Spend</TableHead>
+                    <TableHead className="w-[70px] text-right">
+                      <span>Spend</span>
+                      <span className="block text-[10px] font-normal text-muted-foreground leading-tight">excl. delivery</span>
+                    </TableHead>
                     <TableHead className="w-[80px]">Status</TableHead>
                     <TableHead className="min-w-[120px]">Notes / Cash</TableHead>
                     <TableHead className="w-[50px]"></TableHead>
@@ -687,7 +690,10 @@ export default function OrdersPage() {
                     <TableCell className="text-center font-bold text-xs text-muted-foreground">Total</TableCell>
                     <TableCell className="font-bold text-xs text-muted-foreground">Address</TableCell>
                     <TableCell className="font-bold text-xs text-muted-foreground">Type</TableCell>
-                    <TableCell className="font-bold text-xs text-muted-foreground text-right">Spend</TableCell>
+                    <TableCell className="font-bold text-xs text-muted-foreground text-right">
+                      <span>Spend</span>
+                      <span className="block text-[10px] font-normal leading-tight">excl. delivery</span>
+                    </TableCell>
                     <TableCell className="font-bold text-xs text-muted-foreground">Status</TableCell>
                     <TableCell className="font-bold text-xs text-muted-foreground">Notes / Cash</TableCell>
                     <TableCell></TableCell>
