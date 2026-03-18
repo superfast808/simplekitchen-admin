@@ -2588,6 +2588,196 @@ export async function registerRoutes(
     }
   });
 
+  // Smart stamp: create this week's orders for all active recurring customers,
+  // using last week's actual orders as the item template and mapping to the current week's menu.
+  app.post("/api/recurring-orders/smart-stamp-all", async (req, res) => {
+    try {
+      const week = getWeekRange(0);
+      const prevWeek = getWeekRange(-1);
+      const STANDARD_PRICE = 7.50;
+
+      // Resolve current week's menu
+      const { categoryName } = await getCurrentWeekInfo();
+      const allProducts = await storage.getProducts();
+      const weekProducts = allProducts.filter(p => p.category === categoryName);
+      const menuProducts = weekProducts.length > 0 ? weekProducts : allProducts;
+      const menuMeals = menuProducts.filter(p => Math.abs(parseFloat(p.price || "0") - STANDARD_PRICE) < 0.01);
+      const menuExtras = menuProducts.filter(p => {
+        const pr = parseFloat(p.price || "0");
+        return pr > 0 && Math.abs(pr - STANDARD_PRICE) >= 0.01;
+      });
+
+      // Active recurring customers
+      const recurringOrdersList = await storage.getRecurringOrders();
+      const active = recurringOrdersList.filter(ro => ro.active);
+      if (active.length === 0) return res.json({ created: 0, skipped: 0, total: 0, details: [] });
+
+      // This week's manual orders (for dedup check)
+      const thisWeekOrders = await storage.getOrders(week.from, week.to);
+
+      // Last week's orders with items
+      const lastWeekOrders = await storage.getOrders(prevWeek.from, prevWeek.to);
+      const lastWeekWithItems = await Promise.all(
+        lastWeekOrders.map(async o => ({ ...o, items: await storage.getOrderItems(o.id) }))
+      );
+
+      // Helper: build items from a last-week item list mapped to current menu
+      function resolveItems(
+        sourceItems: Array<{ productName: string; quantity: number; price?: string | null }>,
+        allMeals: typeof menuMeals,
+        allExtras: typeof menuExtras,
+      ) {
+        const SKIP = /add\s+delivery|subscription/i;
+        const src = sourceItems.filter(i => !SKIP.test(i.productName));
+
+        // Separate meals vs extras by price
+        const mealSrc = src.filter(i => {
+          const pr = parseFloat(i.price || "0");
+          return pr <= 0 || Math.abs(pr - STANDARD_PRICE) < 0.01;
+        });
+        const extraSrc = src.filter(i => {
+          const pr = parseFloat(i.price || "0");
+          return pr > 0 && Math.abs(pr - STANDARD_PRICE) >= 0.01;
+        });
+
+        const totalMealQty = mealSrc.reduce((s, i) => s + i.quantity, 0);
+        const resolved: Array<{ productName: string; quantity: number; price: string; productId: number | null }> = [];
+
+        // --- Meals ---
+        if (totalMealQty > 0) {
+          const usedMeals = new Map<string, { product: (typeof menuMeals)[0]; qty: number }>();
+          let remaining = totalMealQty;
+
+          // Try to match by name first
+          for (const src of mealSrc) {
+            const match = allMeals.find(m => m.name.toLowerCase() === src.productName.toLowerCase());
+            if (match) {
+              const ex = usedMeals.get(match.name);
+              if (ex) ex.qty += src.quantity; else usedMeals.set(match.name, { product: match, qty: src.quantity });
+              remaining -= src.quantity;
+            }
+          }
+
+          // Fill remaining from available current menu meals (excluding already used)
+          if (remaining > 0 && allMeals.length > 0) {
+            const available = allMeals.filter(m => !usedMeals.has(m.name));
+            const pool = available.length > 0 ? available : allMeals;
+            for (let i = 0; remaining > 0; i++, remaining--) {
+              const meal = pool[i % pool.length];
+              const ex = usedMeals.get(meal.name);
+              if (ex) ex.qty++; else usedMeals.set(meal.name, { product: meal, qty: 1 });
+            }
+          }
+
+          for (const { product, qty } of usedMeals.values()) {
+            resolved.push({ productName: product.name, quantity: qty, price: product.price || "7.50", productId: product.id });
+          }
+        }
+
+        // --- Extras / add-ons ---
+        for (const ex of extraSrc) {
+          const srcPrice = ex.price || "0";
+          const exact = allExtras.find(m => m.name.toLowerCase() === ex.productName.toLowerCase());
+          if (exact) {
+            resolved.push({ productName: exact.name, quantity: ex.quantity, price: exact.price || srcPrice, productId: exact.id });
+            continue;
+          }
+          // Same price tier
+          const samePrice = allExtras.find(m => Math.abs(parseFloat(m.price || "0") - parseFloat(srcPrice)) < 0.01);
+          if (samePrice) {
+            resolved.push({ productName: samePrice.name, quantity: ex.quantity, price: samePrice.price || srcPrice, productId: samePrice.id });
+            continue;
+          }
+          // Keep original (item not in current menu, keep as-is)
+          resolved.push({ productName: ex.productName, quantity: ex.quantity, price: srcPrice, productId: null });
+        }
+
+        return resolved;
+      }
+
+      let created = 0;
+      let skipped = 0;
+      const details: string[] = [];
+
+      for (const ro of active) {
+        // Dedup: skip if a manual order for this customer+day already exists this week
+        const alreadyExists = thisWeekOrders.some(
+          o => o.customerName.toLowerCase().trim() === ro.customerName.toLowerCase().trim()
+            && o.isTuesday === ro.isTuesday && o.isManual
+        );
+        if (alreadyExists) {
+          skipped++;
+          details.push(`${ro.customerName} (${ro.isTuesday ? "Tue" : "Sat"}): already stamped this week — skipped`);
+          continue;
+        }
+
+        // Find last week's order for this customer + day
+        const lastOrder = lastWeekWithItems.find(
+          o => o.customerName.toLowerCase().trim() === ro.customerName.toLowerCase().trim()
+            && o.isTuesday === ro.isTuesday
+        );
+
+        let newItems: ReturnType<typeof resolveItems>;
+
+        if (lastOrder && lastOrder.items.length > 0) {
+          newItems = resolveItems(
+            lastOrder.items.map(i => ({ productName: i.productName, quantity: i.quantity, price: i.price })),
+            menuMeals,
+            menuExtras,
+          );
+          details.push(`${ro.customerName} (${ro.isTuesday ? "Tue" : "Sat"}): based on last week's order`);
+        } else {
+          // Fall back to stored template — treat all template items as £7.50 meals
+          const templateItems = await storage.getRecurringOrderItems(ro.id);
+          if (templateItems.length === 0) {
+            skipped++;
+            details.push(`${ro.customerName} (${ro.isTuesday ? "Tue" : "Sat"}): no template or last week's order — skipped`);
+            continue;
+          }
+          newItems = resolveItems(
+            templateItems.map(i => ({ productName: i.productName, quantity: i.quantity, price: "7.50" })),
+            menuMeals,
+            menuExtras,
+          );
+          details.push(`${ro.customerName} (${ro.isTuesday ? "Tue" : "Sat"}): based on stored template (no last week order found)`);
+        }
+
+        if (newItems.length === 0) {
+          skipped++;
+          details.push(`${ro.customerName} (${ro.isTuesday ? "Tue" : "Sat"}): no items resolved — skipped`);
+          continue;
+        }
+
+        const order = await storage.createOrder({
+          customerName: ro.customerName,
+          deliveryAddress: ro.deliveryAddress || null,
+          fulfillmentType: ro.fulfillmentType,
+          orderDate: new Date(),
+          status: "processing",
+          isManual: true,
+          isTuesday: ro.isTuesday,
+          notes: ro.notes || null,
+        });
+
+        for (const item of newItems) {
+          await storage.createOrderItem({
+            orderId: order.id,
+            productId: item.productId,
+            productName: item.productName,
+            quantity: item.quantity,
+            price: item.price,
+          });
+        }
+
+        created++;
+      }
+
+      res.json({ created, skipped, total: active.length, details });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   app.get("/api/weekly-stats", async (req, res) => {
     try {
       const from = req.query.from ? new Date(req.query.from as string) : undefined;

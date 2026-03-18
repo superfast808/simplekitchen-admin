@@ -141,6 +141,22 @@ export default function OrdersPage() {
     },
   });
 
+  const [smartStampResult, setSmartStampResult] = useState<{ created: number; skipped: number; total: number; details: string[] } | null>(null);
+  const [showSmartStampResult, setShowSmartStampResult] = useState(false);
+
+  const smartStampAllMutation = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/recurring-orders/smart-stamp-all"),
+    onSuccess: async (res) => {
+      const data = await res.json();
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      setSmartStampResult(data);
+      setShowSmartStampResult(true);
+    },
+    onError: (error: Error) => {
+      toast({ title: "Smart stamp failed", description: error.message, variant: "destructive" });
+    },
+  });
+
   const orders = allOrders?.filter(o => {
     if (dayFilter === "saturday" && o.isTuesday) return false;
     if (dayFilter === "tuesday" && !o.isTuesday) return false;
@@ -305,6 +321,16 @@ export default function OrdersPage() {
                 {showConsistent ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
               </button>
               <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  className="h-7 text-xs bg-emerald-600 text-white"
+                  onClick={() => smartStampAllMutation.mutate()}
+                  disabled={smartStampAllMutation.isPending}
+                  data-testid="button-smart-stamp-all"
+                >
+                  <Stamp className="w-3 h-3 mr-1" />
+                  {smartStampAllMutation.isPending ? "Stamping…" : "Stamp All This Week"}
+                </Button>
                 <Button
                   size="sm" variant="outline" className="h-7 text-xs text-amber-600 border-amber-300"
                   onClick={() => deduplicateMutation.mutate()}
@@ -680,6 +706,45 @@ export default function OrdersPage() {
         open={showAddConsistentDialog}
         onOpenChange={setShowAddConsistentDialog}
       />
+
+      {/* Smart Stamp Results Dialog */}
+      <Dialog open={showSmartStampResult} onOpenChange={setShowSmartStampResult}>
+        <DialogContent className="max-w-lg max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Stamp All This Week — Results</DialogTitle>
+          </DialogHeader>
+          {smartStampResult && (
+            <div className="flex flex-col gap-4 overflow-y-auto">
+              <div className="flex gap-4">
+                <div className="flex-1 rounded-lg border p-3 text-center">
+                  <div className="text-2xl font-bold text-emerald-600">{smartStampResult.created}</div>
+                  <div className="text-xs text-muted-foreground mt-1">Orders created</div>
+                </div>
+                <div className="flex-1 rounded-lg border p-3 text-center">
+                  <div className="text-2xl font-bold text-amber-500">{smartStampResult.skipped}</div>
+                  <div className="text-xs text-muted-foreground mt-1">Skipped</div>
+                </div>
+                <div className="flex-1 rounded-lg border p-3 text-center">
+                  <div className="text-2xl font-bold">{smartStampResult.total}</div>
+                  <div className="text-xs text-muted-foreground mt-1">Total customers</div>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Items were selected from this week&apos;s menu using last week&apos;s order as a template. All orders can be edited from the orders table below.
+              </p>
+              {smartStampResult.details.length > 0 && (
+                <div className="rounded-md border overflow-y-auto max-h-60">
+                  {smartStampResult.details.map((d, i) => (
+                    <div key={i} className={`px-3 py-1.5 text-xs border-b last:border-b-0 ${d.includes("skipped") ? "text-amber-600 dark:text-amber-400" : "text-foreground"}`} data-testid={`smart-stamp-detail-${i}`}>
+                      {d}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
