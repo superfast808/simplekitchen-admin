@@ -194,13 +194,13 @@ function getWeekRange(offset = 0): { from: Date; to: Date } {
   return { from, to };
 }
 
-// Auto-send window: Saturday through Wednesday 19:00 UK time
+// Auto-send window: Saturday through Wednesday 20:00 UK time
 function isWithinAutoSendWindow(): boolean {
   const now = new Date();
   const ukNow = new Date(now.toLocaleString("en-US", { timeZone: "Europe/London" }));
   const day = ukNow.getDay(); // 0=Sun … 6=Sat
   if (day === 6 || day === 0 || day === 1 || day === 2) return true; // Sat–Tue always ok
-  if (day === 3) return ukNow.getHours() < 19; // Wed before 7 pm ok
+  if (day === 3) return ukNow.getHours() < 20; // Wed before 8 pm ok
   return false; // Thu/Fri — closed, admin does it manually
 }
 
