@@ -93,6 +93,7 @@ export default function IngredientsPage() {
   const dateFilter = useDateFilter();
   const sourceFilter = useOrderSourceFilter();
   const { from, to } = dateFilter;
+  const [showZeroIngredients, setShowZeroIngredients] = useState(false);
 
   const { data, isLoading } = useQuery<BreakdownResponse>({
     queryKey: ["/api/ingredient-breakdown", `?from=${from.toISOString()}&to=${to.toISOString()}&source=${sourceFilter.toQueryParam()}`],
@@ -148,9 +149,21 @@ export default function IngredientsPage() {
           {data.grandTotals.length > 0 && (
             <Card>
               <CardContent className="p-0">
-                <div className="p-4 border-b">
-                  <h2 className="text-lg font-semibold" data-testid="text-grand-totals-heading">Grand Totals</h2>
-                  <p className="text-sm text-muted-foreground">Combined ingredient totals across all products</p>
+                <div className="p-4 border-b flex items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-lg font-semibold" data-testid="text-grand-totals-heading">Grand Totals</h2>
+                    <p className="text-sm text-muted-foreground">Combined ingredient totals across all products</p>
+                  </div>
+                  <label className="flex items-center gap-2 cursor-pointer select-none text-sm text-muted-foreground shrink-0" data-testid="toggle-show-zeros">
+                    <input
+                      type="checkbox"
+                      className="rounded"
+                      checked={showZeroIngredients}
+                      onChange={e => setShowZeroIngredients(e.target.checked)}
+                      data-testid="checkbox-show-zeros"
+                    />
+                    Show zero items
+                  </label>
                 </div>
                 <Table>
                   <TableHeader>
@@ -161,15 +174,17 @@ export default function IngredientsPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {data.grandTotals.map((item, idx) => (
-                      <TableRow key={idx} data-testid={`row-grand-total-${idx}`}>
-                        <TableCell className="font-medium" data-testid={`text-grand-ingredient-${idx}`}>{item.name}</TableCell>
-                        <TableCell className="text-right font-semibold tabular-nums" data-testid={`text-grand-qty-${idx}`}>
-                          {formatQty(item.totalQuantity)}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground" data-testid={`text-grand-unit-${idx}`}>{item.unit}</TableCell>
-                      </TableRow>
-                    ))}
+                    {data.grandTotals
+                      .filter(item => showZeroIngredients || item.totalQuantity > 0)
+                      .map((item, idx) => (
+                        <TableRow key={idx} data-testid={`row-grand-total-${idx}`}>
+                          <TableCell className="font-medium" data-testid={`text-grand-ingredient-${idx}`}>{item.name}</TableCell>
+                          <TableCell className="text-right font-semibold tabular-nums" data-testid={`text-grand-qty-${idx}`}>
+                            {formatQty(item.totalQuantity)}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground" data-testid={`text-grand-unit-${idx}`}>{item.unit}</TableCell>
+                        </TableRow>
+                      ))}
                   </TableBody>
                 </Table>
               </CardContent>
