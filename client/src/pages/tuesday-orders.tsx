@@ -10,7 +10,7 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Plus, Pencil, Trash2, Play, CalendarCheck, ShoppingCart, CalendarDays, Copy } from "lucide-react";
+import { Plus, Pencil, Trash2, Play, CalendarCheck, ShoppingCart, CalendarDays, Copy, CheckCircle2, AlertCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useDateFilter, DateRangeLabel } from "@/components/date-filter";
 import { format } from "date-fns";
@@ -154,8 +154,22 @@ export default function TuesdayOrdersPage() {
                           data-testid={`switch-active-${order.id}`}
                         />
                       </TableCell>
-                      <TableCell className="font-medium" data-testid={`text-customer-${order.id}`}>
-                        {order.customerName}
+                      <TableCell data-testid={`text-customer-${order.id}`}>
+                        <div className="font-medium">{order.customerName}</div>
+                        {order.active && order.items.length > 0 && (() => {
+                          const isStamped = manualOrders?.some(
+                            m => m.customerName.toLowerCase() === order.customerName.toLowerCase()
+                          );
+                          return isStamped ? (
+                            <span className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400 mt-0.5" data-testid={`status-stamped-${order.id}`}>
+                              <CheckCircle2 className="w-3 h-3" />Stamped
+                            </span>
+                          ) : (
+                            <span className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400 mt-0.5" data-testid={`status-needs-stamp-${order.id}`}>
+                              <AlertCircle className="w-3 h-3" />Needs stamp
+                            </span>
+                          );
+                        })()}
                       </TableCell>
                       <TableCell>
                         <div className="flex flex-wrap gap-1">
