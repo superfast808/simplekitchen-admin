@@ -204,6 +204,35 @@ function isWithinAutoSendWindow(): boolean {
   return false; // Thu/Fri — closed, admin does it manually
 }
 
+// Extract subscription slots from an order.
+// Returns one entry per subscription item found, with the correct isTuesday flag.
+// For orders that contain both "Saturday Delivery" and "Tuesday Delivery" (dual-day orders),
+// one slot gets isTuesday=false (Saturday) and one gets isTuesday=true (Tuesday).
+const SUB_PATTERN = /meal\s+subscription\s*-\s*(\d+)/i;
+function getSubscriptionSlots(order: { isTuesday: boolean; items: Array<{ productName: string }> }): Array<{ qty: number; isTuesday: boolean }> {
+  const subItems = order.items.filter(i => SUB_PATTERN.test(i.productName));
+  if (subItems.length === 0) return [];
+
+  const hasSatDelivery = order.items.some(i => /saturday.*delivery|delivery.*saturday/i.test(i.productName));
+  const hasTueDelivery = order.items.some(i => /tuesday.*delivery|delivery.*tuesday/i.test(i.productName));
+
+  if (subItems.length > 1 && hasSatDelivery && hasTueDelivery) {
+    // Dual-day order — assign alternate days (Sat first, then Tue, then repeat)
+    return subItems.map((item, idx) => {
+      const m = item.productName.match(SUB_PATTERN);
+      const qty = m ? parseInt(m[1], 10) : 0;
+      return { qty, isTuesday: idx % 2 !== 0 };
+    }).filter(s => s.qty > 0);
+  }
+
+  // Single subscription (or same day repeated)
+  return subItems.map(item => {
+    const m = item.productName.match(SUB_PATTERN);
+    const qty = m ? parseInt(m[1], 10) : 0;
+    return { qty, isTuesday: order.isTuesday };
+  }).filter(s => s.qty > 0);
+}
+
 // Attempt to auto-send subscription invite emails for any subscription order
 // in the current week that hasn't already been invited.
 async function autoSendSubscriptionInvites(): Promise<void> {
@@ -216,83 +245,81 @@ async function autoSendSubscriptionInvites(): Promise<void> {
     const baseUrl = await getPortalBaseUrl();
     const fromEmail = await getSmtpFromEmail();
 
-    const subscriptionPattern = /meal\s+subscription\s*-\s*(\d+)/i;
     const week = getWeekRange(0);
     const ordersList = await storage.getOrders(week.from, week.to);
     const ordersWithItems = await Promise.all(
       ordersList.map(async (order) => ({ ...order, items: await storage.getOrderItems(order.id) }))
     );
 
-    const subOrders = ordersWithItems.filter(o =>
-      o.items.some(i => subscriptionPattern.test(i.productName))
-    );
+    const subOrders = ordersWithItems.filter(o => o.items.some(i => SUB_PATTERN.test(i.productName)));
     if (subOrders.length === 0) return;
 
     const existingInvites = await storage.getSubscriptionInvites(week.from, week.to);
-    const alreadyInvitedOrderIds = new Set(existingInvites.map(i => i.orderId));
+    const alreadyInvitedKeys = new Set(existingInvites.map(i => `${i.orderId}-${i.isTuesday}`));
 
     const settingsMap = await getSettingsMap();
     const emailSubject = settingsMap.subscription_email_subject || DEFAULT_EMAIL_SUBJECT;
     const emailBodyTemplate = settingsMap.subscription_email_body || DEFAULT_EMAIL_BODY;
 
     for (const order of subOrders) {
-      if (alreadyInvitedOrderIds.has(order.id)) continue;
+      const slots = getSubscriptionSlots(order);
+      for (const slot of slots) {
+        const key = `${order.id}-${slot.isTuesday}`;
+        if (alreadyInvitedKeys.has(key)) continue;
 
-      const subItem = order.items.find(i => subscriptionPattern.test(i.productName));
-      if (!subItem) continue;
-      const match = subItem.productName.match(subscriptionPattern);
-      const qty = match ? parseInt(match[1], 10) : 0;
-      if (qty === 0) continue;
-
-      const token = crypto.randomBytes(32).toString("hex");
-      let inviteAddress = order.deliveryAddress || null;
-      let inviteFulfillment = order.fulfillmentType || "delivery";
-      if (!inviteAddress) {
-        const pastAddr = await storage.getCustomerDeliveryAddress(order.customerEmail || "", order.customerName);
-        if (pastAddr?.deliveryAddress) {
-          inviteAddress = pastAddr.deliveryAddress;
-          inviteFulfillment = pastAddr.fulfillmentType || "delivery";
+        const token = crypto.randomBytes(32).toString("hex");
+        let inviteAddress = order.deliveryAddress || null;
+        let inviteFulfillment = order.fulfillmentType || "delivery";
+        if (!inviteAddress) {
+          const pastAddr = await storage.getCustomerDeliveryAddress(order.customerEmail || "", order.customerName);
+          if (pastAddr?.deliveryAddress) {
+            inviteAddress = pastAddr.deliveryAddress;
+            inviteFulfillment = pastAddr.fulfillmentType || "delivery";
+          }
         }
-      }
 
-      await storage.createSubscriptionInvite({
-        orderId: order.id,
-        customerEmail: order.customerEmail || "",
-        customerName: order.customerName,
-        token,
-        subscriptionQuantity: qty,
-        status: "pending",
-        weekFrom: week.from,
-        weekTo: week.to,
-        deliveryAddress: inviteAddress,
-        fulfillmentType: inviteFulfillment,
-      });
-
-      const toEmail = order.customerEmail;
-      if (!toEmail) continue;
-
-      const selectUrl = `${baseUrl}/subscribe/${token}`;
-      const firstName = order.customerName.split(" ")[0];
-      const emailBody = emailBodyTemplate
-        .replace(/\{\{firstName\}\}/g, firstName)
-        .replace(/\{\{fullName\}\}/g, order.customerName)
-        .replace(/\{\{qty\}\}/g, String(qty))
-        .replace(/\{\{url\}\}/g, selectUrl);
-      const emailHtml = `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">${emailBody}</div>`;
-
-      try {
-        await transporter.sendMail({
-          from: fromEmail,
-          to: toEmail,
-          subject: emailSubject
-            .replace(/\{\{firstName\}\}/g, firstName)
-            .replace(/\{\{fullName\}\}/g, order.customerName)
-            .replace(/\{\{qty\}\}/g, String(qty)),
-          html: emailHtml,
+        await storage.createSubscriptionInvite({
+          orderId: order.id,
+          customerEmail: order.customerEmail || "",
+          customerName: order.customerName,
+          token,
+          subscriptionQuantity: slot.qty,
+          status: "pending",
+          weekFrom: week.from,
+          weekTo: week.to,
+          deliveryAddress: inviteAddress,
+          fulfillmentType: inviteFulfillment,
+          isTuesday: slot.isTuesday,
         });
-        log(`Auto-sent subscription invite to ${order.customerName} (${toEmail})`, "sync");
-      } catch (emailErr: any) {
-        log(`Auto-send subscription email failed for ${order.customerName}: ${emailErr.message}`, "sync");
+        alreadyInvitedKeys.add(key);
+
+        const toEmail = order.customerEmail;
+        if (!toEmail) continue;
+
+        const selectUrl = `${baseUrl}/subscribe/${token}`;
+        const firstName = order.customerName.split(" ")[0];
+        const dayLabel = slot.isTuesday ? " (Tuesday)" : " (Saturday)";
+        const emailBody = emailBodyTemplate
+          .replace(/\{\{firstName\}\}/g, firstName)
+          .replace(/\{\{fullName\}\}/g, order.customerName)
+          .replace(/\{\{qty\}\}/g, String(slot.qty))
+          .replace(/\{\{url\}\}/g, selectUrl);
+        const emailHtml = `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">${emailBody}</div>`;
+
+        try {
+          await transporter.sendMail({
+            from: fromEmail,
+            to: toEmail,
+            subject: (emailSubject
+              .replace(/\{\{firstName\}\}/g, firstName)
+              .replace(/\{\{fullName\}\}/g, order.customerName)
+              .replace(/\{\{qty\}\}/g, String(slot.qty))) + (slots.length > 1 ? dayLabel : ""),
+            html: emailHtml,
+          });
+          log(`Auto-sent subscription invite to ${order.customerName} (${toEmail})${slots.length > 1 ? dayLabel : ""}`, "sync");
+        } catch (emailErr: any) {
+          log(`Auto-send subscription email failed for ${order.customerName}: ${(emailErr as Error).message}`, "sync");
+        }
       }
     }
   } catch (err: any) {
@@ -1635,89 +1662,86 @@ export async function registerRoutes(
         })
       );
 
-      const subscriptionPattern = /meal\s+subscription\s*-\s*(\d+)/i;
-      const subOrders = ordersWithItems.filter(o =>
-        o.items.some(i => subscriptionPattern.test(i.productName))
-      );
+      const subOrders = ordersWithItems.filter(o => o.items.some(i => SUB_PATTERN.test(i.productName)));
 
       if (subOrders.length === 0) {
         return res.json({ sent: 0, message: "No subscription orders found this week" });
       }
 
       const existingInvites = await storage.getSubscriptionInvites(week.from, week.to);
-      const alreadyInvitedOrderIds = new Set(existingInvites.map(i => i.orderId));
+      const alreadyInvitedKeys = new Set(existingInvites.map(i => `${i.orderId}-${i.isTuesday}`));
 
       let sent = 0;
       let skipped = 0;
       const errors: string[] = [];
+      const settingsMap = await getSettingsMap();
+      const emailSubject = settingsMap.subscription_email_subject || DEFAULT_EMAIL_SUBJECT;
+      const emailBodyTemplate = settingsMap.subscription_email_body || DEFAULT_EMAIL_BODY;
+
       for (const order of subOrders) {
-        if (alreadyInvitedOrderIds.has(order.id)) {
-          skipped++;
-          continue;
-        }
-
-        const subItem = order.items.find(i => subscriptionPattern.test(i.productName));
-        if (!subItem) continue;
-        const match = subItem.productName.match(subscriptionPattern);
-        const qty = match ? parseInt(match[1], 10) : 0;
-        if (qty === 0) continue;
-
-        const token = crypto.randomBytes(32).toString("hex");
-        let inviteAddress = order.deliveryAddress || null;
-        let inviteFulfillment = order.fulfillmentType || "delivery";
-        if (!inviteAddress) {
-          const pastAddr = await storage.getCustomerDeliveryAddress(
-            order.customerEmail || "",
-            order.customerName
-          );
-          if (pastAddr?.deliveryAddress) {
-            inviteAddress = pastAddr.deliveryAddress;
-            inviteFulfillment = pastAddr.fulfillmentType || "delivery";
+        const slots = getSubscriptionSlots(order);
+        for (const slot of slots) {
+          const key = `${order.id}-${slot.isTuesday}`;
+          if (alreadyInvitedKeys.has(key)) {
+            skipped++;
+            continue;
           }
-        }
-        await storage.createSubscriptionInvite({
-          orderId: order.id,
-          customerEmail: order.customerEmail || "",
-          customerName: order.customerName,
-          token,
-          subscriptionQuantity: qty,
-          status: "pending",
-          weekFrom: week.from,
-          weekTo: week.to,
-          deliveryAddress: inviteAddress,
-          fulfillmentType: inviteFulfillment,
-        });
 
-        const selectUrl = `${baseUrl}/subscribe/${token}`;
-        const toEmail = overrideEmail || order.customerEmail;
-        if (!toEmail) {
-          errors.push(`No email for ${order.customerName}`);
-          continue;
-        }
+          const token = crypto.randomBytes(32).toString("hex");
+          let inviteAddress = order.deliveryAddress || null;
+          let inviteFulfillment = order.fulfillmentType || "delivery";
+          if (!inviteAddress) {
+            const pastAddr = await storage.getCustomerDeliveryAddress(order.customerEmail || "", order.customerName);
+            if (pastAddr?.deliveryAddress) {
+              inviteAddress = pastAddr.deliveryAddress;
+              inviteFulfillment = pastAddr.fulfillmentType || "delivery";
+            }
+          }
+          await storage.createSubscriptionInvite({
+            orderId: order.id,
+            customerEmail: order.customerEmail || "",
+            customerName: order.customerName,
+            token,
+            subscriptionQuantity: slot.qty,
+            status: "pending",
+            weekFrom: week.from,
+            weekTo: week.to,
+            deliveryAddress: inviteAddress,
+            fulfillmentType: inviteFulfillment,
+            isTuesday: slot.isTuesday,
+          });
+          alreadyInvitedKeys.add(key);
 
-        try {
-          const settingsMap = await getSettingsMap();
-          const emailSubject = settingsMap.subscription_email_subject || DEFAULT_EMAIL_SUBJECT;
-          const emailBodyTemplate = settingsMap.subscription_email_body || DEFAULT_EMAIL_BODY;
+          const toEmail = overrideEmail || order.customerEmail;
+          if (!toEmail) {
+            errors.push(`No email for ${order.customerName}`);
+            continue;
+          }
+
+          const selectUrl = `${baseUrl}/subscribe/${token}`;
           const firstName = order.customerName.split(" ")[0];
+          const dayLabel = slot.isTuesday ? " (Tuesday)" : " (Saturday)";
           const emailBody = emailBodyTemplate
             .replace(/\{\{firstName\}\}/g, firstName)
             .replace(/\{\{fullName\}\}/g, order.customerName)
-            .replace(/\{\{qty\}\}/g, String(qty))
+            .replace(/\{\{qty\}\}/g, String(slot.qty))
             .replace(/\{\{url\}\}/g, selectUrl);
           const emailHtml = `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">${emailBody}</div>`;
-          await transporter.sendMail({
-            from: fromEmail,
-            to: toEmail,
-            subject: emailSubject
-              .replace(/\{\{firstName\}\}/g, firstName)
-              .replace(/\{\{fullName\}\}/g, order.customerName)
-              .replace(/\{\{qty\}\}/g, String(qty)),
-            html: emailHtml,
-          });
-          sent++;
-        } catch (emailErr: any) {
-          errors.push(`Failed to email ${order.customerName}: ${emailErr.message}`);
+
+          try {
+            await transporter.sendMail({
+              from: fromEmail,
+              to: toEmail,
+              subject: (emailSubject
+                .replace(/\{\{firstName\}\}/g, firstName)
+                .replace(/\{\{fullName\}\}/g, order.customerName)
+                .replace(/\{\{qty\}\}/g, String(slot.qty))) + (slots.length > 1 ? dayLabel : ""),
+              html: emailHtml,
+            });
+            sent++;
+          } catch (emailErr: any) {
+            errors.push(`Failed to email ${order.customerName}: ${(emailErr as Error).message}`);
+          }
         }
       }
 
@@ -1831,6 +1855,7 @@ export async function registerRoutes(
         status: invite.status,
         addonPaid: invite.addonPaid,
         addonAmountPence: invite.addonAmountPence,
+        isTuesday: invite.isTuesday,
         weekNumber,
         categoryName,
         availableMeals,
@@ -1931,6 +1956,7 @@ export async function registerRoutes(
         status: "processing",
         fulfillmentType: resolvedFulfillment as "delivery" | "collection",
         isManual: true,
+        isTuesday: invite.isTuesday ?? false,
       });
 
       for (const sel of selections) {

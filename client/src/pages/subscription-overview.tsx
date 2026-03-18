@@ -37,6 +37,7 @@ type Invite = {
   computedAddonAmountPence?: number;
   addonPaymentToken?: string;
   stripePaymentIntentId?: string;
+  isTuesday?: boolean;
 };
 
 type MealData = {
@@ -339,7 +340,16 @@ export default function SubscriptionOverviewPage() {
                   const addonAmountGbp = effectiveAddonPence > 0 ? (effectiveAddonPence / 100).toFixed(2) : "0.00";
                   return (
                     <TableRow key={invite.id} data-testid={`invite-row-${invite.id}`}>
-                      <TableCell className="font-medium">{invite.customerName}</TableCell>
+                      <TableCell className="font-medium">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {invite.customerName}
+                          {invite.isTuesday !== undefined && (
+                            <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${invite.isTuesday ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300" : "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300"}`}>
+                              {invite.isTuesday ? "Tue" : "Sat"}
+                            </span>
+                          )}
+                        </div>
+                      </TableCell>
                       <TableCell className="text-sm text-muted-foreground">{invite.customerEmail}</TableCell>
                       <TableCell className="text-center">
                         <Badge variant="outline" className="text-xs">

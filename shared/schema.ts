@@ -85,6 +85,7 @@ export const subscriptionInvites = pgTable("subscription_invites", {
   addonAmountPence: integer("addon_amount_pence"),
   addonPaid: boolean("addon_paid").notNull().default(false),
   addonPaymentToken: text("addon_payment_token"),
+  isTuesday: boolean("is_tuesday").notNull().default(false),
 });
 
 export const subscriptionSelections = pgTable("subscription_selections", {
