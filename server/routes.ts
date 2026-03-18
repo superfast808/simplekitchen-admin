@@ -2621,7 +2621,31 @@ export async function registerRoutes(
         lastWeekOrders.map(async o => ({ ...o, items: await storage.getOrderItems(o.id) }))
       );
 
-      // Helper: build items from a last-week item list mapped to current menu
+      // Detect the primary protein / ingredient category of a meal by its name.
+      // Returns a stable category key used for matching across weeks.
+      function detectProtein(name: string): string | null {
+        const CATEGORIES: Array<{ key: string; re: RegExp }> = [
+          { key: "oats",    re: /oat|porridge|overnight/i },
+          { key: "chicken", re: /chicken/i },
+          { key: "beef",    re: /beef|steak|bolognese|mince/i },
+          { key: "lamb",    re: /lamb|kofta/i },
+          { key: "pork",    re: /pork|ham\b/i },
+          { key: "turkey",  re: /turkey/i },
+          { key: "salmon",  re: /salmon/i },
+          { key: "fish",    re: /fish|tuna|cod|haddock|prawn|shrimp|seafood/i },
+          { key: "veg",     re: /vegetarian|vegan|tofu|lentil|bean|chickpea|falafel|halloumi|quorn/i },
+        ];
+        for (const { key, re } of CATEGORIES) {
+          if (re.test(name)) return key;
+        }
+        return null;
+      }
+
+      // Helper: build items from a source item list mapped to the current week's menu.
+      // Strategy (in priority order):
+      //  1. Exact name match — same product exists this week → keep it.
+      //  2. Protein/category match — find a this-week meal in the same protein category.
+      //  3. Any remaining quantity — fill from unused current-week meals (predictable order, not random).
       function resolveItems(
         sourceItems: Array<{ productName: string; quantity: number; price?: string | null }>,
         allMeals: typeof menuMeals,
@@ -2645,27 +2669,59 @@ export async function registerRoutes(
 
         // --- Meals ---
         if (totalMealQty > 0) {
-          const usedMeals = new Map<string, { product: (typeof menuMeals)[0]; qty: number }>();
-          let remaining = totalMealQty;
+          type MenuMeal = (typeof menuMeals)[0];
+          const usedMeals = new Map<string, { product: MenuMeal; qty: number }>();
 
-          // Try to match by name first
-          for (const src of mealSrc) {
-            const match = allMeals.find(m => m.name.toLowerCase() === src.productName.toLowerCase());
-            if (match) {
-              const ex = usedMeals.get(match.name);
-              if (ex) ex.qty += src.quantity; else usedMeals.set(match.name, { product: match, qty: src.quantity });
-              remaining -= src.quantity;
-            }
+          function assign(product: MenuMeal, qty: number) {
+            const ex = usedMeals.get(product.name);
+            if (ex) ex.qty += qty; else usedMeals.set(product.name, { product, qty });
           }
 
-          // Fill remaining from available current menu meals (excluding already used)
-          if (remaining > 0 && allMeals.length > 0) {
-            const available = allMeals.filter(m => !usedMeals.has(m.name));
-            const pool = available.length > 0 ? available : allMeals;
-            for (let i = 0; remaining > 0; i++, remaining--) {
-              const meal = pool[i % pool.length];
-              const ex = usedMeals.get(meal.name);
-              if (ex) ex.qty++; else usedMeals.set(meal.name, { product: meal, qty: 1 });
+          let remaining = totalMealQty;
+
+          // Pass 1: exact name match
+          for (const item of mealSrc) {
+            const match = allMeals.find(m => m.name.toLowerCase() === item.productName.toLowerCase());
+            if (match) { assign(match, item.quantity); remaining -= item.quantity; }
+          }
+
+          if (remaining > 0) {
+            // Build protein demand from items NOT yet matched by name
+            const unmatched = mealSrc.filter(
+              item => !allMeals.some(m => m.name.toLowerCase() === item.productName.toLowerCase())
+            );
+
+            // Group current-week meals by protein category (unused meals first)
+            const unusedMeals = allMeals.filter(m => !usedMeals.has(m.name));
+            const mealsByProtein = new Map<string, MenuMeal[]>();
+            for (const m of unusedMeals) {
+              const cat = detectProtein(m.name) ?? "__other__";
+              const arr = mealsByProtein.get(cat) ?? [];
+              arr.push(m);
+              mealsByProtein.set(cat, arr);
+            }
+
+            // Pass 2: match by protein category using unmatched source items
+            for (const item of unmatched) {
+              const cat = detectProtein(item.productName);
+              const candidates = cat ? (mealsByProtein.get(cat) ?? []) : [];
+              if (candidates.length > 0) {
+                // Take from the front of the candidates list (stable, alphabetical)
+                const pick = candidates.shift()!;
+                assign(pick, item.quantity);
+                remaining -= item.quantity;
+                // Remove this category list if now empty
+                if (candidates.length === 0) mealsByProtein.delete(cat!);
+              }
+            }
+
+            // Pass 3: fill any remaining quantity from unused meals (stable order)
+            if (remaining > 0) {
+              const pool = allMeals.filter(m => !usedMeals.has(m.name));
+              const fallback = pool.length > 0 ? pool : allMeals;
+              for (let i = 0; remaining > 0; i++, remaining--) {
+                assign(fallback[i % fallback.length], 1);
+              }
             }
           }
 
@@ -2688,7 +2744,7 @@ export async function registerRoutes(
             resolved.push({ productName: samePrice.name, quantity: ex.quantity, price: samePrice.price || srcPrice, productId: samePrice.id });
             continue;
           }
-          // Keep original (item not in current menu, keep as-is)
+          // Keep original (not in current menu — keep as-is so admin can review)
           resolved.push({ productName: ex.productName, quantity: ex.quantity, price: srcPrice, productId: null });
         }
 
