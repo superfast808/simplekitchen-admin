@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from "@/components/ui/table";
-import { RefreshCw, Trash2, Plus, ShoppingCart, Download, Tag, Pencil, CalendarCheck, Banknote, MessageSquare, UserCheck, ChevronDown, ChevronUp, Stamp, Search, X, UserPlus, ArrowUpFromLine, CheckCircle2, AlertCircle } from "lucide-react";
+import { RefreshCw, Trash2, Plus, ShoppingCart, Download, Tag, Pencil, CalendarCheck, Banknote, MessageSquare, UserCheck, ChevronDown, ChevronUp, ChevronsUpDown, Stamp, Search, X, UserPlus, ArrowUpFromLine, CheckCircle2, AlertCircle } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -34,6 +34,8 @@ export default function OrdersPage() {
   const [editingOrder, setEditingOrder] = useState<OrderWithItems | null>(null);
   const [showConsistent, setShowConsistent] = useState(true);
   const [hideSubscriptions, setHideSubscriptions] = useState(false);
+  const [orderSortCol, setOrderSortCol] = useState<"customer" | "total" | "spend" | "type" | "status" | null>(null);
+  const [orderSortDir, setOrderSortDir] = useState<"asc" | "desc">("asc");
   const SUBSCRIPTION_RE = /meal\s+subscription\s*-\s*\d+/i;
   const [stampingCustomer, setStampingCustomer] = useState<RecurringOrderWithItems | null>(null);
   const [editingConsistentCustomer, setEditingConsistentCustomer] = useState<RecurringOrderWithItems | null>(null);
@@ -201,6 +203,37 @@ export default function OrdersPage() {
     productTotals[name] = (orders || []).reduce((sum, order) => {
       return sum + order.items.filter(i => i.productName === name).reduce((s, i) => s + i.quantity, 0);
     }, 0);
+  }
+
+  function handleOrderSort(col: typeof orderSortCol) {
+    if (orderSortCol === col) {
+      setOrderSortDir(d => d === "asc" ? "desc" : "asc");
+    } else {
+      setOrderSortCol(col);
+      setOrderSortDir(col === "customer" || col === "type" || col === "status" ? "asc" : "desc");
+    }
+  }
+
+  const sortedOrders = useMemo(() => {
+    if (!orders || !orderSortCol) return orders || [];
+    return [...orders].sort((a, b) => {
+      let av: number | string, bv: number | string;
+      if (orderSortCol === "customer") { av = a.customerName?.toLowerCase() ?? ""; bv = b.customerName?.toLowerCase() ?? ""; }
+      else if (orderSortCol === "total") { av = a.items.filter(i => !i.productName.toLowerCase().includes("add delivery")).reduce((s, i) => s + i.quantity, 0); bv = b.items.filter(i => !i.productName.toLowerCase().includes("add delivery")).reduce((s, i) => s + i.quantity, 0); }
+      else if (orderSortCol === "spend") { av = a.items.reduce((s, i) => s + parseFloat(i.price || "0"), 0); bv = b.items.reduce((s, i) => s + parseFloat(i.price || "0"), 0); }
+      else if (orderSortCol === "type") { av = a.fulfillmentType ?? ""; bv = b.fulfillmentType ?? ""; }
+      else { av = a.status ?? ""; bv = b.status ?? ""; }
+      if (av < bv) return orderSortDir === "asc" ? -1 : 1;
+      if (av > bv) return orderSortDir === "asc" ? 1 : -1;
+      return 0;
+    });
+  }, [orders, orderSortCol, orderSortDir]);
+
+  function OrderSortIcon({ col }: { col: typeof orderSortCol }) {
+    if (orderSortCol !== col) return <ChevronsUpDown className="w-3 h-3 ml-1 inline text-muted-foreground/40" />;
+    return orderSortDir === "asc"
+      ? <ChevronUp className="w-3 h-3 ml-1 inline" />
+      : <ChevronDown className="w-3 h-3 ml-1 inline" />;
   }
 
   const statusColor = (status: string) => {
@@ -517,24 +550,32 @@ export default function OrdersPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="min-w-[150px]">Customer</TableHead>
+                    <TableHead className="min-w-[150px] cursor-pointer select-none" onClick={() => handleOrderSort("customer")}>
+                      Customer <OrderSortIcon col="customer" />
+                    </TableHead>
                     {allProductNames.map(name => (
                       <TableHead key={name} className="text-center min-w-[80px]">{name}</TableHead>
                     ))}
-                    <TableHead className="text-center w-[60px]">Total</TableHead>
+                    <TableHead className="text-center w-[60px] cursor-pointer select-none" onClick={() => handleOrderSort("total")}>
+                      Total <OrderSortIcon col="total" />
+                    </TableHead>
                     <TableHead className="min-w-[180px]">Delivery Address</TableHead>
-                    <TableHead className="w-[100px]">Type</TableHead>
-                    <TableHead className="w-[70px] text-right">
-                      <span>Spend</span>
+                    <TableHead className="w-[100px] cursor-pointer select-none" onClick={() => handleOrderSort("type")}>
+                      Type <OrderSortIcon col="type" />
+                    </TableHead>
+                    <TableHead className="w-[70px] text-right cursor-pointer select-none" onClick={() => handleOrderSort("spend")}>
+                      <span>Spend <OrderSortIcon col="spend" /></span>
                       <span className="block text-[10px] font-normal text-muted-foreground leading-tight">excl. delivery</span>
                     </TableHead>
-                    <TableHead className="w-[80px]">Status</TableHead>
+                    <TableHead className="w-[80px] cursor-pointer select-none" onClick={() => handleOrderSort("status")}>
+                      Status <OrderSortIcon col="status" />
+                    </TableHead>
                     <TableHead className="min-w-[120px]">Notes / Cash</TableHead>
                     <TableHead className="w-[50px]"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {orders.map((order) => {
+                  {sortedOrders.map((order) => {
                     const orderSpend = order.items.reduce((sum, i) => sum + parseFloat(i.price || "0"), 0);
                     const itemSummary = order.items
                       .filter(i => !i.productName.toLowerCase().includes("add delivery"))
