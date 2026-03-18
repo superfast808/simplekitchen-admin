@@ -1452,10 +1452,9 @@ export async function registerRoutes(
       const subscriptionItemRe = /meal\s+subscription\s*-\s*\d+/i;
       const isAddDeliveryOnlyLabel = (items: { productName: string }[]) =>
         items.length > 0 && items.every(i => i.productName.toLowerCase().includes("add delivery"));
-      // Only print labels for orders that have a delivery address, are not subscription parent orders,
-      // and are not standalone "Add Delivery" charge orders
+      // Print labels for all orders that are not subscription parent orders and not
+      // standalone "Add Delivery" charge orders (collection orders get a label too)
       const labelOrders = ordersWithItems.filter(o =>
-        o.deliveryAddress && o.deliveryAddress.trim() &&
         !o.items.some(i => subscriptionItemRe.test(i.productName)) &&
         !isAddDeliveryOnlyLabel(o.items)
       );
