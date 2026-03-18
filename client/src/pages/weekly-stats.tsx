@@ -1,20 +1,32 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { format, subDays, addDays } from "date-fns";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ChevronLeft, ChevronRight, UtensilsCrossed, PoundSterling, Receipt, Truck, UserPlus, UserCheck, TrendingUp, TrendingDown } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import {
+  ChevronLeft, ChevronRight, UtensilsCrossed, PoundSterling, Receipt,
+  Truck, UserPlus, UserCheck, TrendingUp, TrendingDown, Globe, Stamp,
+} from "lucide-react";
 
-type WeeklyStats = {
+type OrderItem = { productName: string; quantity: number; price: string };
+type OrderWithItems = {
+  id: number;
+  customerName: string;
+  customerEmail: string | null;
+  fulfillmentType: string;
+  isManual: boolean;
+  isTuesday: boolean;
+  items: OrderItem[];
+};
+type GroupStats = {
+  orderCount: number;
   mealsSold: number;
   revenue: number;
   avgOrderValue: number;
   deliveryStops: number;
-  newCustomers: number;
-  returningCustomers: number;
-  topSeller: string;
-  worstSeller: string;
-  orderCount: number;
+  mealCounts: Record<string, number>;
 };
 
 function getWeekRange(offset: number): { from: Date; to: Date; isCurrent: boolean } {
@@ -29,21 +41,14 @@ function getWeekRange(offset: number): { from: Date; to: Date; isCurrent: boolea
     const daysBack = dayOfWeek === 0 ? 1 : dayOfWeek + 1;
     saturdayDate = subDays(ukNow, daysBack);
   }
-
-  if (offset !== 0) {
-    saturdayDate = addDays(saturdayDate, offset * 7);
-  }
+  if (offset !== 0) saturdayDate = addDays(saturdayDate, offset * 7);
 
   const from = new Date(saturdayDate);
   from.setHours(0, 0, 0, 0);
-
   const wednesday = addDays(saturdayDate, 4);
   const to = new Date(wednesday);
   to.setHours(23, 59, 59, 999);
-
-  const isCurrent = offset === 0;
-
-  return { from, to, isCurrent };
+  return { from, to, isCurrent: offset === 0 };
 }
 
 function isVisibleCurrentWeek(): boolean {
@@ -52,38 +57,71 @@ function isVisibleCurrentWeek(): boolean {
   const day = ukNow.getDay();
   const hour = ukNow.getHours();
   if (day === 6 && hour >= 12) return false;
-  if (day === 0 || day === 1 || day === 2 || day === 3 || day === 4 || day === 5) return true;
-  return day === 6 && hour < 12;
+  return day !== 6 || hour < 12;
 }
 
-const statCards: Array<{
-  key: keyof WeeklyStats;
-  label: string;
-  icon: typeof UtensilsCrossed;
-  format?: (v: any) => string;
-  span?: boolean;
-  color: string;
-  iconColor: string;
-  bgColor: string;
-}> = [
-  { key: "mealsSold", label: "Meals Sold", icon: UtensilsCrossed, color: "border-l-orange-500", iconColor: "text-orange-500", bgColor: "bg-orange-50 dark:bg-orange-950/30" },
-  { key: "revenue", label: "Revenue", icon: PoundSterling, format: (v: number) => `£${v.toFixed(2)}`, color: "border-l-emerald-500", iconColor: "text-emerald-500", bgColor: "bg-emerald-50 dark:bg-emerald-950/30" },
-  { key: "avgOrderValue", label: "Avg Order Value", icon: Receipt, format: (v: number) => `£${v.toFixed(2)}`, color: "border-l-blue-500", iconColor: "text-blue-500", bgColor: "bg-blue-50 dark:bg-blue-950/30" },
-  { key: "deliveryStops", label: "Delivery Stops", icon: Truck, color: "border-l-violet-500", iconColor: "text-violet-500", bgColor: "bg-violet-50 dark:bg-violet-950/30" },
-  { key: "newCustomers", label: "New Customers", icon: UserPlus, color: "border-l-cyan-500", iconColor: "text-cyan-500", bgColor: "bg-cyan-50 dark:bg-cyan-950/30" },
-  { key: "returningCustomers", label: "Returning Customers", icon: UserCheck, color: "border-l-pink-500", iconColor: "text-pink-500", bgColor: "bg-pink-50 dark:bg-pink-950/30" },
-  { key: "topSeller", label: "Top Seller", icon: TrendingUp, span: true, color: "border-l-green-500", iconColor: "text-green-500", bgColor: "bg-green-50 dark:bg-green-950/30" },
-  { key: "worstSeller", label: "Worst Seller", icon: TrendingDown, span: true, color: "border-l-red-500", iconColor: "text-red-500", bgColor: "bg-red-50 dark:bg-red-950/30" },
-];
+function filterItems(
+  items: OrderItem[],
+  hideAddons: boolean,
+  hideAddDelivery: boolean,
+  hideSubscriptionBase: boolean,
+): OrderItem[] {
+  return items.filter(item => {
+    const name = item.productName.toLowerCase();
+    const price = parseFloat(item.price || "0");
+    if (hideAddDelivery && /add.*delivery/i.test(name)) return false;
+    if (hideSubscriptionBase && /meal\s+subscription/i.test(item.productName)) return false;
+    if (hideAddons && price > 0 && price <= 4.05) return false;
+    return true;
+  });
+}
+
+function computeGroup(
+  orders: OrderWithItems[],
+  hideAddons: boolean,
+  hideAddDelivery: boolean,
+  hideSubscriptionBase: boolean,
+): GroupStats {
+  let mealsSold = 0, revenue = 0, deliveryStops = 0;
+  const mealCounts: Record<string, number> = {};
+  for (const order of orders) {
+    const items = filterItems(order.items, hideAddons, hideAddDelivery, hideSubscriptionBase);
+    if (order.fulfillmentType === "delivery") deliveryStops++;
+    for (const item of items) {
+      revenue += parseFloat(item.price || "0");
+      mealsSold += item.quantity;
+      mealCounts[item.productName] = (mealCounts[item.productName] || 0) + item.quantity;
+    }
+  }
+  const orderCount = orders.length;
+  return { orderCount, mealsSold, revenue, avgOrderValue: orderCount > 0 ? revenue / orderCount : 0, deliveryStops, mealCounts };
+}
+
+function StatMini({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="text-center">
+      <p className="text-xl font-bold tabular-nums">{value}</p>
+      <p className="text-xs text-muted-foreground mt-0.5">{label}</p>
+    </div>
+  );
+}
 
 export default function WeeklyStatsPage() {
   const [offset, setOffset] = useState(0);
-  const { from, to, isCurrent } = getWeekRange(offset);
+  const [hideAddons, setHideAddons] = useState(false);
+  const [hideAddDelivery, setHideAddDelivery] = useState(false);
+  const [hideSubscriptionBase, setHideSubscriptionBase] = useState(false);
 
+  const { from, to, isCurrent } = getWeekRange(offset);
   const canViewCurrent = isVisibleCurrentWeek();
   const effectiveRange = isCurrent && !canViewCurrent ? getWeekRange(-1) : { from, to };
+  const displayRange = effectiveRange;
 
-  const { data: stats, isLoading } = useQuery<WeeklyStats>({
+  const { data: rawOrders, isLoading } = useQuery<OrderWithItems[]>({
+    queryKey: ["/api/orders", `?from=${effectiveRange.from.toISOString()}&to=${effectiveRange.to.toISOString()}`],
+  });
+
+  const { data: legacyStats } = useQuery<{ newCustomers: number; returningCustomers: number }>({
     queryKey: ["/api/weekly-stats", effectiveRange.from.toISOString(), effectiveRange.to.toISOString()],
     queryFn: async () => {
       const params = new URLSearchParams({
@@ -96,10 +134,27 @@ export default function WeeklyStatsPage() {
     },
   });
 
-  const displayRange = isCurrent && !canViewCurrent ? getWeekRange(-1) : { from, to };
+  const computed = useMemo(() => {
+    if (!rawOrders) return null;
+    const webOrders = rawOrders.filter(o => !o.isManual);
+    const manualOrders = rawOrders.filter(o => o.isManual);
+    const all = computeGroup(rawOrders, hideAddons, hideAddDelivery, hideSubscriptionBase);
+    const web = computeGroup(webOrders, hideAddons, hideAddDelivery, hideSubscriptionBase);
+    const manual = computeGroup(manualOrders, hideAddons, hideAddDelivery, hideSubscriptionBase);
+    const entries = Object.entries(all.mealCounts).sort((a, b) => b[1] - a[1]);
+    const topSeller = entries.length > 0 ? `${entries[0][0]} (${entries[0][1]})` : "—";
+    const worstSeller = entries.length > 0 ? `${entries[entries.length - 1][0]} (${entries[entries.length - 1][1]})` : "—";
+    return { all, web, manual, topSeller, worstSeller };
+  }, [rawOrders, hideAddons, hideAddDelivery, hideSubscriptionBase]);
+
+  const filters = [
+    { id: "hideAddons", label: "Hide addons (≤ £4 items)", checked: hideAddons, onChange: setHideAddons },
+    { id: "hideAddDelivery", label: "Hide Add Delivery (£4.99)", checked: hideAddDelivery, onChange: setHideAddDelivery },
+    { id: "hideSubscriptionBase", label: "Hide subscription base orders", checked: hideSubscriptionBase, onChange: setHideSubscriptionBase },
+  ];
 
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-6">
+    <div className="p-6 max-w-5xl mx-auto space-y-5">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold" data-testid="text-weekly-stats-title">Weekly Stats</h1>
@@ -113,38 +168,41 @@ export default function WeeklyStatsPage() {
           )}
         </div>
         <div className="flex items-center gap-1">
-          <Button
-            size="icon"
-            variant="ghost"
-            onClick={() => setOffset(o => o - 1)}
-            data-testid="button-stats-prev"
-          >
+          <Button size="icon" variant="ghost" onClick={() => setOffset(o => o - 1)} data-testid="button-stats-prev">
             <ChevronLeft className="w-4 h-4" />
           </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setOffset(0)}
-            data-testid="button-stats-current"
-          >
+          <Button size="sm" variant="outline" onClick={() => setOffset(0)} data-testid="button-stats-current">
             {canViewCurrent ? "This Week" : "Latest"}
           </Button>
-          <Button
-            size="icon"
-            variant="ghost"
-            onClick={() => setOffset(o => o + 1)}
-            disabled={offset >= 0}
-            data-testid="button-stats-next"
-          >
+          <Button size="icon" variant="ghost" onClick={() => setOffset(o => o + 1)} disabled={offset >= 0} data-testid="button-stats-next">
             <ChevronRight className="w-4 h-4" />
           </Button>
         </div>
       </div>
 
+      <Card>
+        <CardContent className="py-3 px-4">
+          <div className="flex flex-wrap gap-x-6 gap-y-2 items-center">
+            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Filters</span>
+            {filters.map(f => (
+              <div key={f.id} className="flex items-center gap-2">
+                <Checkbox
+                  id={f.id}
+                  checked={f.checked}
+                  onCheckedChange={(v) => f.onChange(!!v)}
+                  data-testid={`checkbox-filter-${f.id}`}
+                />
+                <Label htmlFor={f.id} className="text-sm cursor-pointer">{f.label}</Label>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
       {isLoading ? (
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-          {Array.from({ length: 8 }).map((_, i) => (
-            <Card key={i} className={i >= 6 ? "col-span-2 md:col-span-1 md:last:col-span-1" : ""}>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Card key={i}>
               <CardContent className="p-5">
                 <div className="h-4 w-20 bg-muted animate-pulse rounded mb-3" />
                 <div className="h-8 w-16 bg-muted animate-pulse rounded" />
@@ -152,31 +210,106 @@ export default function WeeklyStatsPage() {
             </Card>
           ))}
         </div>
-      ) : stats ? (
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-          {statCards.map((card) => {
-            const value = stats[card.key];
-            const displayValue = card.format ? card.format(value) : String(value);
-            const Icon = card.icon;
-            return (
-              <Card
-                key={card.key}
-                className={`border-l-4 ${card.color} ${card.bgColor} ${card.span ? "col-span-2 md:col-span-3" : ""}`}
-                data-testid={`card-stat-${card.key}`}
-              >
-                <CardContent className="p-5">
-                  <div className="flex items-center gap-2 mb-1">
-                    <Icon className={`w-4 h-4 ${card.iconColor}`} />
-                    <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{card.label}</span>
-                  </div>
-                  <p className={`font-bold ${card.span ? "text-lg" : "text-2xl"} tabular-nums`} data-testid={`text-stat-${card.key}`}>
-                    {displayValue}
-                  </p>
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
+      ) : computed ? (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {([
+              { key: "mealsSold", label: "Meals Sold", icon: UtensilsCrossed, color: "border-l-orange-500", iconColor: "text-orange-500", bgColor: "bg-orange-50 dark:bg-orange-950/30", fmt: (v: number) => String(v) },
+              { key: "revenue", label: "Revenue", icon: PoundSterling, color: "border-l-emerald-500", iconColor: "text-emerald-500", bgColor: "bg-emerald-50 dark:bg-emerald-950/30", fmt: (v: number) => `£${v.toFixed(2)}` },
+              { key: "avgOrderValue", label: "Avg Order", icon: Receipt, color: "border-l-blue-500", iconColor: "text-blue-500", bgColor: "bg-blue-50 dark:bg-blue-950/30", fmt: (v: number) => `£${v.toFixed(2)}` },
+              { key: "deliveryStops", label: "Delivery Stops", icon: Truck, color: "border-l-violet-500", iconColor: "text-violet-500", bgColor: "bg-violet-50 dark:bg-violet-950/30", fmt: (v: number) => String(v) },
+            ] as const).map(card => {
+              const value = computed.all[card.key as keyof typeof computed.all] as number;
+              const Icon = card.icon;
+              return (
+                <Card key={card.key} className={`border-l-4 ${card.color} ${card.bgColor}`} data-testid={`card-stat-${card.key}`}>
+                  <CardContent className="p-5">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Icon className={`w-4 h-4 ${card.iconColor}`} />
+                      <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{card.label}</span>
+                    </div>
+                    <p className="text-2xl font-bold tabular-nums" data-testid={`text-stat-${card.key}`}>{card.fmt(value)}</p>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Card className="border-l-4 border-l-sky-500 bg-sky-50 dark:bg-sky-950/30" data-testid="card-stat-web">
+              <CardContent className="p-5">
+                <div className="flex items-center gap-2 mb-4">
+                  <Globe className="w-4 h-4 text-sky-500" />
+                  <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Web Orders</span>
+                  <span className="ml-auto text-sm font-semibold tabular-nums">{computed.web.orderCount} orders</span>
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  <StatMini label="Meals" value={String(computed.web.mealsSold)} />
+                  <StatMini label="Revenue" value={`£${computed.web.revenue.toFixed(2)}`} />
+                  <StatMini label="Deliveries" value={String(computed.web.deliveryStops)} />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="border-l-4 border-l-amber-500 bg-amber-50 dark:bg-amber-950/30" data-testid="card-stat-manual">
+              <CardContent className="p-5">
+                <div className="flex items-center gap-2 mb-4">
+                  <Stamp className="w-4 h-4 text-amber-500" />
+                  <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Consistent / Manual</span>
+                  <span className="ml-auto text-sm font-semibold tabular-nums">{computed.manual.orderCount} orders</span>
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  <StatMini label="Meals" value={String(computed.manual.mealsSold)} />
+                  <StatMini label="Revenue" value={`£${computed.manual.revenue.toFixed(2)}`} />
+                  <StatMini label="Deliveries" value={String(computed.manual.deliveryStops)} />
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <Card className="border-l-4 border-l-cyan-500 bg-cyan-50 dark:bg-cyan-950/30" data-testid="card-stat-newCustomers">
+              <CardContent className="p-5">
+                <div className="flex items-center gap-2 mb-1">
+                  <UserPlus className="w-4 h-4 text-cyan-500" />
+                  <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">New Customers</span>
+                </div>
+                <p className="text-2xl font-bold tabular-nums" data-testid="text-stat-newCustomers">
+                  {legacyStats?.newCustomers ?? "—"}
+                </p>
+              </CardContent>
+            </Card>
+            <Card className="border-l-4 border-l-pink-500 bg-pink-50 dark:bg-pink-950/30" data-testid="card-stat-returningCustomers">
+              <CardContent className="p-5">
+                <div className="flex items-center gap-2 mb-1">
+                  <UserCheck className="w-4 h-4 text-pink-500" />
+                  <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Returning</span>
+                </div>
+                <p className="text-2xl font-bold tabular-nums" data-testid="text-stat-returningCustomers">
+                  {legacyStats?.returningCustomers ?? "—"}
+                </p>
+              </CardContent>
+            </Card>
+            <Card className="border-l-4 border-l-green-500 bg-green-50 dark:bg-green-950/30 col-span-2" data-testid="card-stat-topSeller">
+              <CardContent className="p-5">
+                <div className="flex items-center gap-2 mb-1">
+                  <TrendingUp className="w-4 h-4 text-green-500" />
+                  <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Top Seller</span>
+                </div>
+                <p className="text-lg font-bold" data-testid="text-stat-topSeller">{computed.topSeller}</p>
+              </CardContent>
+            </Card>
+            <Card className="border-l-4 border-l-red-500 bg-red-50 dark:bg-red-950/30 col-span-2" data-testid="card-stat-worstSeller">
+              <CardContent className="p-5">
+                <div className="flex items-center gap-2 mb-1">
+                  <TrendingDown className="w-4 h-4 text-red-500" />
+                  <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Worst Seller</span>
+                </div>
+                <p className="text-lg font-bold" data-testid="text-stat-worstSeller">{computed.worstSeller}</p>
+              </CardContent>
+            </Card>
+          </div>
+        </>
       ) : null}
     </div>
   );
