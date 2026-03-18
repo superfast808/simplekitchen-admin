@@ -895,26 +895,33 @@ export async function registerRoutes(
       const allIngredients = await storage.getAllIngredients();
       const allProducts = await storage.getProducts();
 
-      // Build name→id lookup for items where productId is null
-      const productByName: Record<string, number> = {};
-      for (const p of allProducts) {
-        productByName[p.name.toLowerCase()] = p.id;
-      }
-
-      const productQuantities: Record<number, number> = {};
+      // Group quantities by product name so duplicate product IDs for the same name are merged
+      const quantsByName: Record<string, number> = {};
       for (const item of items) {
-        const pid = item.productId ?? productByName[item.productName?.toLowerCase()] ?? null;
-        if (pid) {
-          productQuantities[pid] = (productQuantities[pid] || 0) + item.quantity;
-        }
+        const name = (item.productName || "").toLowerCase().trim();
+        if (name) quantsByName[name] = (quantsByName[name] || 0) + item.quantity;
       }
       for (const mq of manualQtys) {
-        productQuantities[mq.productId] = (productQuantities[mq.productId] || 0) + mq.quantity;
+        const product = allProducts.find(p => p.id === mq.productId);
+        if (product) {
+          const name = product.name.toLowerCase().trim();
+          quantsByName[name] = (quantsByName[name] || 0) + mq.quantity;
+        }
       }
+      // Build name lookup per product ID for ingredient resolution
+      const nameByProductId: Record<number, string> = {};
+      for (const p of allProducts) nameByProductId[p.id] = p.name.toLowerCase().trim();
 
       const summary: Record<string, { name: string; totalQuantity: number; unit: string }> = {};
+      // Track ingredient+productName combos to avoid double-counting from duplicate products
+      const seenIngredient = new Set<string>();
       for (const ingredient of allIngredients) {
-        const productQty = productQuantities[ingredient.productId] || 0;
+        const productName = nameByProductId[ingredient.productId];
+        if (!productName) continue;
+        const dedupeKey = `${productName}|${ingredient.name}|${ingredient.unit}`;
+        if (seenIngredient.has(dedupeKey)) continue;
+        seenIngredient.add(dedupeKey);
+        const productQty = quantsByName[productName] || 0;
         if (productQty > 0) {
           const key = `${ingredient.name}_${ingredient.unit}`;
           const needed = productQty * parseFloat(ingredient.quantityPerUnit);
@@ -945,29 +952,41 @@ export async function registerRoutes(
       const allIngredients = await storage.getAllIngredients();
       const allProducts = await storage.getProducts();
 
-      // Build name→id lookup for items where productId is null
-      const productByName: Record<string, number> = {};
-      for (const p of allProducts) {
-        productByName[p.name.toLowerCase()] = p.id;
-      }
-
-      const productQuantities: Record<number, number> = {};
+      // Group quantities by product name so duplicate product IDs for the same name are merged
+      const quantsByName2: Record<string, number> = {};
       for (const item of items) {
-        const pid = item.productId ?? productByName[item.productName?.toLowerCase()] ?? null;
-        if (pid) {
-          productQuantities[pid] = (productQuantities[pid] || 0) + item.quantity;
-        }
+        const name = (item.productName || "").toLowerCase().trim();
+        if (name) quantsByName2[name] = (quantsByName2[name] || 0) + item.quantity;
       }
       for (const mq of manualQtys) {
-        productQuantities[mq.productId] = (productQuantities[mq.productId] || 0) + mq.quantity;
+        const product = allProducts.find(p => p.id === mq.productId);
+        if (product) {
+          const name = product.name.toLowerCase().trim();
+          quantsByName2[name] = (quantsByName2[name] || 0) + mq.quantity;
+        }
       }
 
-      const ingredientsByProduct: Record<number, typeof allIngredients> = {};
+      // Deduplicate products by name — keep the first occurrence per name
+      const seenProductNames = new Set<string>();
+      const uniqueProducts = allProducts.filter(p => {
+        const key = p.name.toLowerCase().trim();
+        if (seenProductNames.has(key)) return false;
+        seenProductNames.add(key);
+        return true;
+      });
+
+      // Build ingredients per unique product (deduplicated by name+unit within each product name)
+      const ingredientsByProductName: Record<string, typeof allIngredients> = {};
+      const seenIngredientKeys = new Set<string>();
       for (const ing of allIngredients) {
-        if (!ingredientsByProduct[ing.productId]) {
-          ingredientsByProduct[ing.productId] = [];
-        }
-        ingredientsByProduct[ing.productId].push(ing);
+        const product = allProducts.find(p => p.id === ing.productId);
+        if (!product) continue;
+        const productName = product.name.toLowerCase().trim();
+        const dedupe = `${productName}|${ing.name}|${ing.unit}`;
+        if (seenIngredientKeys.has(dedupe)) continue;
+        seenIngredientKeys.add(dedupe);
+        if (!ingredientsByProductName[productName]) ingredientsByProductName[productName] = [];
+        ingredientsByProductName[productName].push(ing);
       }
 
       const productBreakdowns: Array<{
@@ -984,10 +1003,11 @@ export async function registerRoutes(
 
       const grandTotals: Record<string, { name: string; totalQuantity: number; unit: string }> = {};
 
-      for (const product of allProducts) {
-        const pIngredients = ingredientsByProduct[product.id];
+      for (const product of uniqueProducts) {
+        const productNameKey = product.name.toLowerCase().trim();
+        const pIngredients = ingredientsByProductName[productNameKey];
         if (!pIngredients || pIngredients.length === 0) continue;
-        const orderedQty = productQuantities[product.id] || 0;
+        const orderedQty = quantsByName2[productNameKey] || 0;
 
         productBreakdowns.push({
           productId: product.id,
