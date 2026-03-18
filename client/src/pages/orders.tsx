@@ -565,7 +565,7 @@ export default function OrdersPage() {
                     </TableHead>
                     <TableHead className="w-[70px] text-right cursor-pointer select-none" onClick={() => handleOrderSort("spend")}>
                       <span>Spend <OrderSortIcon col="spend" /></span>
-                      <span className="block text-[10px] font-normal text-muted-foreground leading-tight">excl. delivery</span>
+                      <span className="block text-[10px] font-normal text-muted-foreground leading-tight">inc. delivery</span>
                     </TableHead>
                     <TableHead className="w-[80px] cursor-pointer select-none" onClick={() => handleOrderSort("status")}>
                       Status <OrderSortIcon col="status" />
@@ -733,7 +733,7 @@ export default function OrdersPage() {
                     <TableCell className="font-bold text-xs text-muted-foreground">Type</TableCell>
                     <TableCell className="font-bold text-xs text-muted-foreground text-right">
                       <span>Spend</span>
-                      <span className="block text-[10px] font-normal leading-tight">excl. delivery</span>
+                      <span className="block text-[10px] font-normal leading-tight">inc. delivery</span>
                     </TableCell>
                     <TableCell className="font-bold text-xs text-muted-foreground">Status</TableCell>
                     <TableCell className="font-bold text-xs text-muted-foreground">Notes / Cash</TableCell>
