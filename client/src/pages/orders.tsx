@@ -436,16 +436,32 @@ export default function OrdersPage() {
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground align-top pt-3">
                           {group.saturday
-                            ? (group.saturday.items.length === 0
-                                ? <span className="italic">No items — amend to add</span>
-                                : group.saturday.items.map(i => `${i.quantity}×${i.productName}`).join(", "))
+                            ? (() => {
+                                const actualOrders = allOrders?.filter(
+                                  o => o.isManual && !o.isTuesday && o.customerName.toLowerCase() === group.customerName.toLowerCase()
+                                );
+                                const items = actualOrders && actualOrders.length > 0
+                                  ? actualOrders.flatMap(o => o.items)
+                                  : group.saturday!.items;
+                                return items.length === 0
+                                  ? <span className="italic">No items — amend to add</span>
+                                  : <>{items.map(i => `${i.quantity}×${i.productName}`).join(", ")}{actualOrders && actualOrders.length > 0 && <span className="ml-1 text-xs text-muted-foreground/60">(actual)</span>}</>;
+                              })()
                             : <span className="text-muted-foreground/40 italic">—</span>}
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground align-top pt-3">
                           {group.tuesday
-                            ? (group.tuesday.items.length === 0
-                                ? <span className="italic">No items — amend to add</span>
-                                : group.tuesday.items.map(i => `${i.quantity}×${i.productName}`).join(", "))
+                            ? (() => {
+                                const actualOrders = allOrders?.filter(
+                                  o => o.isManual && o.isTuesday && o.customerName.toLowerCase() === group.customerName.toLowerCase()
+                                );
+                                const items = actualOrders && actualOrders.length > 0
+                                  ? actualOrders.flatMap(o => o.items)
+                                  : group.tuesday!.items;
+                                return items.length === 0
+                                  ? <span className="italic">No items — amend to add</span>
+                                  : <>{items.map(i => `${i.quantity}×${i.productName}`).join(", ")}{actualOrders && actualOrders.length > 0 && <span className="ml-1 text-xs text-muted-foreground/60">(actual)</span>}</>;
+                              })()
                             : <span className="text-muted-foreground/40 italic">—</span>}
                         </TableCell>
                         <TableCell className="align-top pt-2">
