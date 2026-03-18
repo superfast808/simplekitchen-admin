@@ -86,6 +86,7 @@ export default function SubscriptionOverviewPage() {
   const [sendingPaymentLinkId, setSendingPaymentLinkId] = useState<number | null>(null);
   const [resettingId, setResettingId] = useState<number | null>(null);
   const [confirmResetId, setConfirmResetId] = useState<number | null>(null);
+  const [receiptingId, setReceiptingId] = useState<number | null>(null);
 
   const weekRange = getCurrentWeekRange(weekOffset);
   const isCurrentWeek = weekOffset === 0;
@@ -137,6 +138,21 @@ export default function SubscriptionOverviewPage() {
     onError: (err: Error) => {
       toast({ title: "Failed to resend", description: err.message, variant: "destructive" });
       setResendingId(null);
+    },
+  });
+
+  const receiptMutation = useMutation({
+    mutationFn: async (inviteId: number) => {
+      return apiRequest("POST", `/api/subscription-invites/${inviteId}/resend-receipt`, {});
+    },
+    onSuccess: async (res) => {
+      const data = await res.json();
+      toast({ title: "Receipt sent", description: `Sent to ${data.to}` });
+      setReceiptingId(null);
+    },
+    onError: (err: Error) => {
+      toast({ title: "Failed to send receipt", description: err.message, variant: "destructive" });
+      setReceiptingId(null);
     },
   });
 
@@ -421,6 +437,22 @@ export default function SubscriptionOverviewPage() {
                           >
                             <RotateCcw className={`w-3 h-3 ${resendingId === invite.id && resendMutation.isPending ? "animate-spin" : ""}`} />
                           </Button>
+                          {isComplete && invite.addonPaid && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 text-xs px-2 border-emerald-300 text-emerald-700"
+                              title="Re-issue payment receipt"
+                              disabled={receiptingId === invite.id && receiptMutation.isPending}
+                              onClick={() => {
+                                setReceiptingId(invite.id);
+                                receiptMutation.mutate(invite.id);
+                              }}
+                              data-testid={`button-resend-receipt-${invite.id}`}
+                            >
+                              <Mail className={`w-3 h-3 ${receiptingId === invite.id && receiptMutation.isPending ? "animate-pulse" : ""}`} />
+                            </Button>
+                          )}
                           {confirmResetId === invite.id ? (
                             <div className="flex items-center gap-1">
                               <span className="text-xs text-red-600 whitespace-nowrap">Wipe choices?</span>

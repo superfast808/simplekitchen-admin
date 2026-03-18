@@ -2270,6 +2270,71 @@ export async function registerRoutes(
     }
   });
 
+  // ─── Re-issue payment receipt email ────────────────────────────────────────
+  app.post("/api/subscription-invites/:id/resend-receipt", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const invite = await storage.getSubscriptionInviteById(id);
+      if (!invite) return res.status(404).json({ message: "Invite not found" });
+      if (!invite.addonPaid) return res.status(400).json({ message: "No payment recorded for this invite" });
+      if (!invite.customerEmail) return res.status(400).json({ message: "No email address for this customer" });
+
+      const transporter = await getSmtpTransporter();
+      if (!transporter) return res.status(500).json({ message: "SMTP not configured" });
+      const fromEmail = await getSmtpFromEmail();
+      if (!fromEmail) return res.status(500).json({ message: "SMTP from address not configured" });
+
+      const selections = await storage.getSubscriptionSelections(id);
+      const firstName = invite.customerName.split(" ")[0];
+      const amountPence = invite.addonAmountPence ?? 0;
+      const amountFormatted = `£${(amountPence / 100).toFixed(2)}`;
+
+      const itemRows = selections.length > 0
+        ? selections.map(sel => `<tr>
+            <td style="padding:6px 12px;border-bottom:1px solid #eee;">${sel.productName}</td>
+            <td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:center;">${sel.quantity}</td>
+            <td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:right;">—</td>
+          </tr>`).join("")
+        : `<tr><td colspan="3" style="padding:6px 12px;">Add-on extras</td></tr>`;
+
+      const html = `
+<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;color:#333;">
+  <h2 style="color:#059669;">Payment Receipt – Simple Kitchen Prep</h2>
+  <p>Hi ${firstName},</p>
+  <p>Here is a copy of your receipt for your add-on extras this week.</p>
+  <table style="width:100%;border-collapse:collapse;margin:20px 0;">
+    <thead>
+      <tr style="background:#f3f4f6;">
+        <th style="padding:8px 12px;text-align:left;">Item</th>
+        <th style="padding:8px 12px;text-align:center;">Qty</th>
+        <th style="padding:8px 12px;text-align:right;">Amount</th>
+      </tr>
+    </thead>
+    <tbody>${itemRows}</tbody>
+    <tfoot>
+      <tr>
+        <td colspan="2" style="padding:8px 12px;font-weight:bold;text-align:right;">Total paid:</td>
+        <td style="padding:8px 12px;font-weight:bold;text-align:right;">${amountFormatted}</td>
+      </tr>
+    </tfoot>
+  </table>
+  <p style="color:#6b7280;font-size:13px;">Your meals will be ready for collection/delivery as usual this week. If you have any questions, just reply to this email.</p>
+  <p style="color:#6b7280;font-size:13px;">— Simple Kitchen Prep</p>
+</div>`;
+
+      await transporter.sendMail({
+        from: fromEmail,
+        to: invite.customerEmail,
+        subject: `Payment Receipt – ${amountFormatted} – Simple Kitchen Prep`,
+        html,
+      });
+
+      res.json({ success: true, to: invite.customerEmail });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   // ─── Reset subscription invite: wipe selections + resend email ─────────────
   app.post("/api/subscription-invites/:id/reset", async (req, res) => {
     try {
