@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from "@/components/ui/table";
-import { RefreshCw, Trash2, Plus, ShoppingCart, Download, Tag, Pencil, CalendarCheck, Banknote, MessageSquare, UserCheck, ChevronDown, ChevronUp, Stamp, Search, X, UserPlus, ArrowUpFromLine } from "lucide-react";
+import { RefreshCw, Trash2, Plus, ShoppingCart, Download, Tag, Pencil, CalendarCheck, Banknote, MessageSquare, UserCheck, ChevronDown, ChevronUp, Stamp, Search, X, UserPlus, ArrowUpFromLine, CheckCircle2, AlertCircle } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -359,7 +359,37 @@ export default function OrdersPage() {
                   <TableBody>
                     {customerGroups.map(group => (
                       <TableRow key={group.customerName} data-testid={`row-consistent-${group.customerName}`}>
-                        <TableCell className="font-medium align-top pt-3">{group.customerName}</TableCell>
+                        <TableCell className="align-top pt-3">
+                          <div className="font-medium">{group.customerName}</div>
+                          {group.saturday && group.saturday.items.length > 0 && (() => {
+                            const satStamped = allOrders?.some(
+                              o => o.isManual && !o.isTuesday && o.customerName.toLowerCase() === group.customerName.toLowerCase()
+                            );
+                            return satStamped ? (
+                              <span className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400 mt-0.5">
+                                <CheckCircle2 className="w-3 h-3" />Sat stamped
+                              </span>
+                            ) : (
+                              <span className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400 mt-0.5">
+                                <AlertCircle className="w-3 h-3" />Sat needs stamp
+                              </span>
+                            );
+                          })()}
+                          {group.tuesday && group.tuesday.items.length > 0 && (() => {
+                            const tueStamped = allOrders?.some(
+                              o => o.isManual && o.isTuesday && o.customerName.toLowerCase() === group.customerName.toLowerCase()
+                            );
+                            return tueStamped ? (
+                              <span className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400 mt-0.5">
+                                <CheckCircle2 className="w-3 h-3" />Tue stamped
+                              </span>
+                            ) : (
+                              <span className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400 mt-0.5">
+                                <AlertCircle className="w-3 h-3" />Tue needs stamp
+                              </span>
+                            );
+                          })()}
+                        </TableCell>
                         <TableCell className="align-top pt-3">
                           <div className="flex flex-col gap-2">
                             <label className="flex items-center gap-2 cursor-pointer select-none">
