@@ -757,6 +757,7 @@ function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
   const [isTuesday, setIsTuesday] = useState(false);
   const [notes, setNotes] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<"" | "cash" | "bank_transfer">("");
+  const [cashAmount, setCashAmount] = useState("");
   const [saveAsConsistent, setSaveAsConsistent] = useState(true);
   const [itemLines, setItemLines] = useState([{ productName: "", quantity: 1 }]);
 
@@ -779,6 +780,7 @@ function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
       setIsTuesday(false);
       setNotes("");
       setPaymentMethod("");
+      setCashAmount("");
       setSaveAsConsistent(true);
       setItemLines([{ productName: "", quantity: 1 }]);
     },
@@ -800,6 +802,7 @@ function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
       isTuesday,
       notes: notes || null,
       paymentMethod: paymentMethod || null,
+      cashAmount: cashAmount ? parseFloat(cashAmount) : null,
       saveAsConsistent,
       items: validItems.map(i => ({
         productName: i.productName,
@@ -873,7 +876,7 @@ function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
           </div>
           <div>
             <Label className="flex items-center gap-1"><Banknote className="w-4 h-4" />Payment Method (optional)</Label>
-            <Select value={paymentMethod || "none"} onValueChange={(v) => setPaymentMethod(v === "none" ? "" : v as "cash" | "bank_transfer")}>
+            <Select value={paymentMethod || "none"} onValueChange={(v) => { setPaymentMethod(v === "none" ? "" : v as "cash" | "bank_transfer"); if (v === "none") setCashAmount(""); }}>
               <SelectTrigger data-testid="select-manual-payment-method">
                 <SelectValue />
               </SelectTrigger>
@@ -884,6 +887,20 @@ function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
               </SelectContent>
             </Select>
           </div>
+          {paymentMethod && (
+            <div>
+              <Label>Amount received (£)</Label>
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                value={cashAmount}
+                onChange={(e) => setCashAmount(e.target.value)}
+                placeholder="0.00"
+                data-testid="input-manual-cash-amount"
+              />
+            </div>
+          )}
           <div className="space-y-2">
             <Label>Items</Label>
             {itemLines.map((line, idx) => (
@@ -962,6 +979,7 @@ function EditOrderDialog({ order, open, onOpenChange }: { order: OrderWithItems;
   const [isTuesday, setIsTuesday] = useState(order.isTuesday || false);
   const [notes, setNotes] = useState((order as any).notes || "");
   const [paymentMethod, setPaymentMethod] = useState<"" | "cash" | "bank_transfer">((order as any).paymentMethod || "");
+  const [cashAmount, setCashAmount] = useState((order as any).cashAmount != null ? String((order as any).cashAmount) : "");
   const [itemLines, setItemLines] = useState(
     order.items.map(i => ({ productName: i.productName, quantity: i.quantity }))
   );
@@ -993,6 +1011,7 @@ function EditOrderDialog({ order, open, onOpenChange }: { order: OrderWithItems;
       isTuesday,
       notes: notes || null,
       paymentMethod: paymentMethod || null,
+      cashAmount: cashAmount ? parseFloat(cashAmount) : null,
       items: validItems.map(i => ({
         productName: i.productName,
         quantity: i.quantity,
@@ -1059,7 +1078,7 @@ function EditOrderDialog({ order, open, onOpenChange }: { order: OrderWithItems;
           </div>
           <div>
             <Label className="flex items-center gap-1"><Banknote className="w-4 h-4" />Payment Method (optional)</Label>
-            <Select value={paymentMethod || "none"} onValueChange={(v) => setPaymentMethod(v === "none" ? "" : v as "cash" | "bank_transfer")}>
+            <Select value={paymentMethod || "none"} onValueChange={(v) => { setPaymentMethod(v === "none" ? "" : v as "cash" | "bank_transfer"); if (v === "none") setCashAmount(""); }}>
               <SelectTrigger data-testid="select-edit-payment-method">
                 <SelectValue />
               </SelectTrigger>
@@ -1070,6 +1089,20 @@ function EditOrderDialog({ order, open, onOpenChange }: { order: OrderWithItems;
               </SelectContent>
             </Select>
           </div>
+          {paymentMethod && (
+            <div>
+              <Label>Amount received (£)</Label>
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                value={cashAmount}
+                onChange={(e) => setCashAmount(e.target.value)}
+                placeholder="0.00"
+                data-testid="input-edit-cash-amount"
+              />
+            </div>
+          )}
           <div className="space-y-2">
             <Label>Items</Label>
             {itemLines.map((line, idx) => (
