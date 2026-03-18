@@ -426,6 +426,7 @@ async function performSync() {
         status: wo.status,
         fulfillmentType,
         isManual: false,
+        shippingTotal: String(parseFloat(wo.shipping_total || "0").toFixed(2)),
       };
 
       if (existing) {
@@ -1132,6 +1133,7 @@ export async function registerRoutes(
           status: wo.status,
           fulfillmentType,
           isManual: false,
+          shippingTotal: String(parseFloat(wo.shipping_total || "0").toFixed(2)),
         };
 
         if (existing) {
@@ -2999,15 +3001,17 @@ export async function registerRoutes(
       const subscriptionPattern = /meal\s+subscription\s*-\s*(\d+)/i;
 
       for (const order of ordersWithItems) {
+        revenue += parseFloat((order as any).shippingTotal || "0");
         for (const item of order.items) {
-          const name = item.productName.toLowerCase();
-          if (name.includes("add delivery")) continue;
           if (subscriptionPattern.test(item.productName)) continue;
-          revenue += order.isManual
+          const lineValue = order.isManual
             ? parseFloat(item.price || "0") * item.quantity
             : parseFloat(item.price || "0");
-          mealsSold += item.quantity;
-          mealCounts[item.productName] = (mealCounts[item.productName] || 0) + item.quantity;
+          revenue += lineValue;
+          if (!item.productName.toLowerCase().includes("add delivery")) {
+            mealsSold += item.quantity;
+            mealCounts[item.productName] = (mealCounts[item.productName] || 0) + item.quantity;
+          }
         }
       }
 

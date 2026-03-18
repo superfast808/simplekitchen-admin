@@ -42,6 +42,7 @@ export const orders = pgTable("orders", {
   notes: text("notes"),
   cashAmount: decimal("cash_amount", { precision: 10, scale: 2 }),
   paymentMethod: varchar("payment_method"),
+  shippingTotal: decimal("shipping_total", { precision: 10, scale: 2 }).default("0"),
 });
 
 export const orderItems = pgTable("order_items", {

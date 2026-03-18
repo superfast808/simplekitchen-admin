@@ -220,7 +220,7 @@ export default function OrdersPage() {
       let av: number | string, bv: number | string;
       if (orderSortCol === "customer") { av = a.customerName?.toLowerCase() ?? ""; bv = b.customerName?.toLowerCase() ?? ""; }
       else if (orderSortCol === "total") { av = a.items.filter(i => !i.productName.toLowerCase().includes("add delivery")).reduce((s, i) => s + i.quantity, 0); bv = b.items.filter(i => !i.productName.toLowerCase().includes("add delivery")).reduce((s, i) => s + i.quantity, 0); }
-      else if (orderSortCol === "spend") { av = a.items.reduce((s, i) => { const p = parseFloat(i.price || "0"); return s + (a.isManual ? p * i.quantity : p); }, 0); bv = b.items.reduce((s, i) => { const p = parseFloat(i.price || "0"); return s + (b.isManual ? p * i.quantity : p); }, 0); }
+      else if (orderSortCol === "spend") { av = a.items.reduce((s, i) => { const p = parseFloat(i.price || "0"); return s + (a.isManual ? p * i.quantity : p); }, 0) + parseFloat((a as any).shippingTotal || "0"); bv = b.items.reduce((s, i) => { const p = parseFloat(i.price || "0"); return s + (b.isManual ? p * i.quantity : p); }, 0) + parseFloat((b as any).shippingTotal || "0"); }
       else if (orderSortCol === "type") { av = a.fulfillmentType ?? ""; bv = b.fulfillmentType ?? ""; }
       else { av = a.status ?? ""; bv = b.status ?? ""; }
       if (av < bv) return orderSortDir === "asc" ? -1 : 1;
@@ -579,7 +579,7 @@ export default function OrdersPage() {
                     const orderSpend = order.items.reduce((sum, i) => {
                       const unitPrice = parseFloat(i.price || "0");
                       return sum + (order.isManual ? unitPrice * i.quantity : unitPrice);
-                    }, 0);
+                    }, 0) + parseFloat((order as any).shippingTotal || "0");
                     const itemSummary = order.items
                       .filter(i => !i.productName.toLowerCase().includes("add delivery"))
                       .map(i => `${i.quantity}×${i.productName}`)
@@ -755,7 +755,7 @@ export default function OrdersPage() {
                     <TableCell></TableCell>
                     <TableCell></TableCell>
                     <TableCell className="text-right font-bold text-sm" data-testid="text-total-spend">
-                      £{(orders || []).reduce((sum, o) => sum + o.items.reduce((s, i) => { const p = parseFloat(i.price || "0"); return s + (o.isManual ? p * i.quantity : p); }, 0), 0).toFixed(2)}
+                      £{(orders || []).reduce((sum, o) => sum + o.items.reduce((s, i) => { const p = parseFloat(i.price || "0"); return s + (o.isManual ? p * i.quantity : p); }, 0) + parseFloat((o as any).shippingTotal || "0"), 0).toFixed(2)}
                     </TableCell>
                     <TableCell></TableCell>
                     <TableCell className="text-sm font-medium text-green-700 dark:text-green-400" data-testid="text-total-payment-methods">
