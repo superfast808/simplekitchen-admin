@@ -2422,6 +2422,61 @@ export async function registerRoutes(
           }
         }
       }
+
+      // Sync changes to this week's already-stamped manual order (if one exists)
+      const hasFieldChanges = Object.keys(orderUpdate).length > 0;
+      const hasItemChanges = items && Array.isArray(items);
+      if (hasFieldChanges || hasItemChanges) {
+        const effectiveName = (orderUpdate.customerName || existing.customerName) as string;
+        const effectiveIsTuesday = updates.isTuesday !== undefined ? !!updates.isTuesday : !!existing.isTuesday;
+
+        // Current week: most recent Saturday → following Wednesday
+        const ukNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/London" }));
+        const dow = ukNow.getDay();
+        const daysBack = dow === 6 ? 0 : dow === 0 ? 1 : dow + 1;
+        const weekStart = new Date(ukNow);
+        weekStart.setDate(weekStart.getDate() - daysBack);
+        weekStart.setHours(0, 0, 0, 0);
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekEnd.getDate() + 4);
+        weekEnd.setHours(23, 59, 59, 999);
+
+        const weekOrders = await storage.getOrders(weekStart, weekEnd);
+        const matchingOrders = weekOrders.filter(o =>
+          o.isManual &&
+          o.customerName.toLowerCase().trim() === effectiveName.toLowerCase().trim() &&
+          (effectiveIsTuesday ? !!o.isTuesday : !o.isTuesday)
+        );
+
+        for (const order of matchingOrders) {
+          // Sync order-level fields that changed
+          const orderFieldSync: any = {};
+          if (orderUpdate.customerName !== undefined) orderFieldSync.customerName = orderUpdate.customerName;
+          if (orderUpdate.deliveryAddress !== undefined) orderFieldSync.deliveryAddress = orderUpdate.deliveryAddress;
+          if (orderUpdate.fulfillmentType !== undefined) orderFieldSync.fulfillmentType = orderUpdate.fulfillmentType;
+          if (orderUpdate.notes !== undefined) orderFieldSync.notes = orderUpdate.notes;
+          if (Object.keys(orderFieldSync).length > 0) {
+            await storage.updateOrder(order.id, orderFieldSync);
+          }
+
+          // Sync items if they changed
+          if (hasItemChanges) {
+            await storage.deleteOrderItemsByOrderId(order.id);
+            for (const item of items!) {
+              if (item.productName && item.productName.trim()) {
+                await storage.createOrderItem({
+                  orderId: order.id,
+                  productId: null,
+                  productName: item.productName,
+                  quantity: item.quantity || 1,
+                  price: "0",
+                });
+              }
+            }
+          }
+        }
+      }
+
       const orderItems = await storage.getRecurringOrderItems(id);
       res.json({ ...updated, items: orderItems });
     } catch (error: any) {
