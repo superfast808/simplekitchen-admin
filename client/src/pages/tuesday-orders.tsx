@@ -10,7 +10,7 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Plus, Pencil, Trash2, Play, CalendarCheck, ShoppingCart, CalendarDays } from "lucide-react";
+import { Plus, Pencil, Trash2, Play, CalendarCheck, ShoppingCart, CalendarDays, Copy } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useDateFilter, DateRangeLabel } from "@/components/date-filter";
 import { format } from "date-fns";
@@ -32,6 +32,11 @@ export default function TuesdayOrdersPage() {
     select: (data) => data.filter((o: any) => o.isTuesday !== false),
   });
 
+  const { data: saturdayOrders } = useQuery<RecurringOrderWithItems[]>({
+    queryKey: ["/api/recurring-orders"],
+    select: (data) => data.filter((o: any) => o.isTuesday === false),
+  });
+
   const { data: manualOrders } = useQuery<OrderWithItems[]>({
     queryKey: ["/api/orders", `?from=${from.toISOString()}&to=${to.toISOString()}`],
     select: (data) => data.filter(o => o.isManual && o.isTuesday),
@@ -50,6 +55,18 @@ export default function TuesdayOrdersPage() {
       apiRequest("PATCH", `/api/recurring-orders/${id}`, { active }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/recurring-orders"] });
+    },
+  });
+
+  const copyItemsMutation = useMutation({
+    mutationFn: ({ targetId, items }: { targetId: number; items: { productName: string; quantity: number }[] }) =>
+      apiRequest("PATCH", `/api/recurring-orders/${targetId}`, { items }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/recurring-orders"] });
+      toast({ title: "Items copied from Saturday order" });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Failed to copy items", description: err.message, variant: "destructive" });
     },
   });
 
@@ -147,9 +164,32 @@ export default function TuesdayOrdersPage() {
                               {item.quantity > 1 ? `${item.quantity}× ` : ""}{item.productName}
                             </Badge>
                           ))}
-                          {order.items.length === 0 && (
-                            <span className="text-xs text-muted-foreground">No items</span>
-                          )}
+                          {order.items.length === 0 && (() => {
+                            const saturdayMatch = saturdayOrders?.find(
+                              s => s.customerName.toLowerCase() === order.customerName.toLowerCase() && s.items.length > 0
+                            );
+                            return (
+                              <>
+                                <span className="text-xs text-muted-foreground">No items</span>
+                                {saturdayMatch && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="text-xs h-6 px-2"
+                                    disabled={copyItemsMutation.isPending}
+                                    onClick={() => copyItemsMutation.mutate({
+                                      targetId: order.id,
+                                      items: saturdayMatch.items.map(i => ({ productName: i.productName, quantity: i.quantity })),
+                                    })}
+                                    data-testid={`button-copy-from-saturday-${order.id}`}
+                                  >
+                                    <Copy className="w-3 h-3 mr-1" />
+                                    Copy from Saturday
+                                  </Button>
+                                )}
+                              </>
+                            );
+                          })()}
                         </div>
                       </TableCell>
                       <TableCell>
