@@ -3003,7 +3003,9 @@ export async function registerRoutes(
           const name = item.productName.toLowerCase();
           if (name.includes("add delivery")) continue;
           if (subscriptionPattern.test(item.productName)) continue;
-          revenue += parseFloat(item.price || "0");
+          revenue += order.isManual
+            ? parseFloat(item.price || "0") * item.quantity
+            : parseFloat(item.price || "0");
           mealsSold += item.quantity;
           mealCounts[item.productName] = (mealCounts[item.productName] || 0) + item.quantity;
         }
