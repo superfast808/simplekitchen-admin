@@ -857,26 +857,40 @@ export async function registerRoutes(
       const includeManualStock = !sourceFilter || sourceFilter.manual;
       const manualQtys = includeManualStock ? await storage.getManualQuantities(from, to) : [];
 
-      const totals: Record<string, { productName: string; productId: number | null; totalOrdered: number; manualQuantity: number }> = {};
+      type ProductTotalEntry = {
+        productName: string;
+        productId: number | null;
+        totalOrdered: number;
+        manualQuantity: number;
+        customerBreakdown: Record<string, number>;
+      };
+      const totals: Record<string, ProductTotalEntry> = {};
       for (const item of items) {
         const key = item.productName;
         if (!totals[key]) {
-          totals[key] = { productName: key, productId: item.productId, totalOrdered: 0, manualQuantity: 0 };
+          totals[key] = { productName: key, productId: item.productId, totalOrdered: 0, manualQuantity: 0, customerBreakdown: {} };
         }
         totals[key].totalOrdered += item.quantity;
+        const cName = (item.customerName || "Unknown").trim();
+        totals[key].customerBreakdown[cName] = (totals[key].customerBreakdown[cName] || 0) + item.quantity;
       }
       for (const mq of manualQtys) {
         const product = await storage.getProduct(mq.productId);
         if (product) {
           const key = product.name;
           if (!totals[key]) {
-            totals[key] = { productName: key, productId: product.id, totalOrdered: 0, manualQuantity: 0 };
+            totals[key] = { productName: key, productId: product.id, totalOrdered: 0, manualQuantity: 0, customerBreakdown: {} };
           }
           totals[key].manualQuantity += mq.quantity;
         }
       }
 
-      res.json(Object.values(totals));
+      res.json(Object.values(totals).map(({ customerBreakdown, ...rest }) => ({
+        ...rest,
+        customerBreakdown: Object.entries(customerBreakdown)
+          .map(([customerName, quantity]) => ({ customerName, quantity }))
+          .sort((a, b) => b.quantity - a.quantity),
+      })));
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }

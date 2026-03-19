@@ -38,7 +38,7 @@ export interface IStorage {
   deleteOrder(id: number): Promise<void>;
 
   getOrderItems(orderId: number): Promise<OrderItem[]>;
-  getOrderItemsByDateRange(from?: Date, to?: Date): Promise<(OrderItem & { orderId: number; isManual: boolean; isTuesday: boolean })[]>;
+  getOrderItemsByDateRange(from?: Date, to?: Date): Promise<(OrderItem & { orderId: number; isManual: boolean; isTuesday: boolean; customerName: string })[]>;
   createOrderItem(item: InsertOrderItem): Promise<OrderItem>;
   deleteOrderItemsByOrderId(orderId: number): Promise<void>;
 
@@ -204,6 +204,7 @@ export class DatabaseStorage implements IStorage {
       price: orderItems.price,
       isManual: orders.isManual,
       isTuesday: orders.isTuesday,
+      customerName: orders.customerName,
     }).from(orderItems)
       .innerJoin(orders, eq(orderItems.orderId, orders.id))
       .where(conditions.length > 0 ? and(...conditions) : undefined);

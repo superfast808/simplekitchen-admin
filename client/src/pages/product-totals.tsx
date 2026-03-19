@@ -3,15 +3,18 @@ import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { BarChart3, ChevronUp, ChevronDown, ChevronsUpDown } from "lucide-react";
+import { BarChart3, ChevronUp, ChevronDown, ChevronsUpDown, ChevronRight } from "lucide-react";
 import { DateFilter, DateRangeLabel, useDateFilter } from "@/components/date-filter";
 import { OrderSourceFilter, useOrderSourceFilter } from "@/components/order-source-filter";
+
+type CustomerBreakdown = { customerName: string; quantity: number };
 
 type ProductTotal = {
   productName: string;
   productId: number | null;
   totalOrdered: number;
   manualQuantity: number;
+  customerBreakdown: CustomerBreakdown[];
 };
 
 type SortCol = "productName" | "totalOrdered" | "manualQuantity" | "total";
@@ -30,6 +33,7 @@ export default function ProductTotalsPage() {
   const { from, to } = dateFilter;
   const [sortCol, setSortCol] = useState<SortCol>("productName");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [expandedProduct, setExpandedProduct] = useState<string | null>(null);
 
   const { data: totals, isLoading } = useQuery<ProductTotal[]>({
     queryKey: ["/api/product-totals", `?from=${from.toISOString()}&to=${to.toISOString()}&source=${sourceFilter.toQueryParam()}`],
@@ -42,6 +46,10 @@ export default function ProductTotalsPage() {
       setSortCol(col);
       setSortDir(col === "productName" ? "asc" : "desc");
     }
+  }
+
+  function toggleExpand(productName: string) {
+    setExpandedProduct(prev => prev === productName ? null : productName);
   }
 
   const sorted = totals ? [...totals].sort((a, b) => {
@@ -84,6 +92,7 @@ export default function ProductTotalsPage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-[28px]"></TableHead>
                   <TableHead className={thClass} onClick={() => handleSort("productName")} data-testid="th-product">
                     Product <SortIcon col="productName" active={sortCol} dir={sortDir} />
                   </TableHead>
@@ -99,16 +108,51 @@ export default function ProductTotalsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {sorted.map((t, idx) => (
-                  <TableRow key={idx} data-testid={`row-total-${idx}`}>
-                    <TableCell className="font-medium" data-testid={`text-total-product-${idx}`}>{t.productName}</TableCell>
-                    <TableCell className="text-right" data-testid={`text-total-online-${idx}`}>{t.totalOrdered}</TableCell>
-                    <TableCell className="text-right" data-testid={`text-total-manual-${idx}`}>{t.manualQuantity}</TableCell>
-                    <TableCell className="text-right font-semibold" data-testid={`text-total-combined-${idx}`}>
-                      {t.totalOrdered + t.manualQuantity}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {sorted.map((t, idx) => {
+                  const isExpanded = expandedProduct === t.productName;
+                  const hasBreakdown = t.customerBreakdown && t.customerBreakdown.length > 0;
+                  return (
+                    <>
+                      <TableRow
+                        key={idx}
+                        data-testid={`row-total-${idx}`}
+                        className={hasBreakdown ? "cursor-pointer" : ""}
+                        onClick={() => hasBreakdown && toggleExpand(t.productName)}
+                      >
+                        <TableCell className="pr-0 pl-3 w-[28px]">
+                          {hasBreakdown ? (
+                            <ChevronRight
+                              className={`w-4 h-4 text-muted-foreground transition-transform duration-150 ${isExpanded ? "rotate-90" : ""}`}
+                            />
+                          ) : null}
+                        </TableCell>
+                        <TableCell className="font-medium" data-testid={`text-total-product-${idx}`}>{t.productName}</TableCell>
+                        <TableCell className="text-right" data-testid={`text-total-online-${idx}`}>{t.totalOrdered}</TableCell>
+                        <TableCell className="text-right" data-testid={`text-total-manual-${idx}`}>{t.manualQuantity}</TableCell>
+                        <TableCell className="text-right font-semibold" data-testid={`text-total-combined-${idx}`}>
+                          {t.totalOrdered + t.manualQuantity}
+                        </TableCell>
+                      </TableRow>
+                      {isExpanded && hasBreakdown && (
+                        <TableRow key={`${idx}-breakdown`} className="bg-muted/40 hover:bg-muted/40">
+                          <TableCell colSpan={5} className="p-0">
+                            <div className="px-8 py-3">
+                              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Customer breakdown</p>
+                              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-x-6 gap-y-1">
+                                {t.customerBreakdown.map((c, ci) => (
+                                  <div key={ci} className="flex items-center justify-between gap-2 text-sm" data-testid={`text-breakdown-${idx}-${ci}`}>
+                                    <span className="text-foreground truncate">{c.customerName}</span>
+                                    <span className="font-semibold text-foreground shrink-0">{c.quantity}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </>
+                  );
+                })}
               </TableBody>
             </Table>
           )}
