@@ -15,7 +15,8 @@ import ProductsPage from "@/pages/products";
 import ProductTotalsPage from "@/pages/product-totals";
 import IngredientsPage from "@/pages/ingredients";
 import ManualStockPage from "@/pages/manual-stock";
-import DeliveryRoutesPage from "@/pages/delivery-routes";
+import TuesdayDeliveryRoutesPage from "@/pages/tuesday-delivery-routes";
+import SaturdayDeliveryRoutesPage from "@/pages/saturday-delivery-routes";
 import SettingsPage from "@/pages/settings";
 import HelpPage from "@/pages/help";
 import WeeklyStatsPage from "@/pages/weekly-stats";
@@ -34,7 +35,8 @@ function PageRouter() {
       <Route path="/product-totals" component={ProductTotalsPage} />
       <Route path="/ingredients" component={IngredientsPage} />
       <Route path="/manual-stock" component={ManualStockPage} />
-      <Route path="/routes" component={DeliveryRoutesPage} />
+      <Route path="/routes/tuesday" component={TuesdayDeliveryRoutesPage} />
+      <Route path="/routes/saturday" component={SaturdayDeliveryRoutesPage} />
       <Route path="/weekly-stats" component={WeeklyStatsPage} />
       <Route path="/subscriptions" component={SubscriptionOverviewPage} />
       <Route path="/tuesday" component={TuesdayOrdersPage} />

@@ -2,10 +2,9 @@ import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useState, useEffect, useRef } from "react";
 import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { MapPin, Route, Navigation, Truck, Store, Home } from "lucide-react";
+import { MapPin, Route, Truck, Store } from "lucide-react";
 import { DateFilter, DateRangeLabel, useDateFilter } from "@/components/date-filter";
 
 const DEPOT = {
@@ -25,19 +24,17 @@ type DeliveryAddress = {
   isManual: boolean;
 };
 
-export default function DeliveryRoutesPage() {
+export function DeliveryRoutesContent({ tuesday }: { tuesday: boolean }) {
   const dateFilter = useDateFilter();
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
   const [geocodedAddresses, setGeocodedAddresses] = useState<DeliveryAddress[]>([]);
   const [isGeocoding, setIsGeocoding] = useState(false);
-  const [routeView, setRouteView] = useState<"website" | "tuesday">("website");
 
   const { from, to } = dateFilter;
 
-  const tuesdayParam = routeView === "tuesday" ? "true" : "false";
   const { data: addresses, isLoading } = useQuery<DeliveryAddress[]>({
-    queryKey: ["/api/delivery-addresses", `?from=${from.toISOString()}&to=${to.toISOString()}&tuesday=${tuesdayParam}`],
+    queryKey: ["/api/delivery-addresses", `?from=${from.toISOString()}&to=${to.toISOString()}&tuesday=${tuesday ? "true" : "false"}`],
   });
 
   useEffect(() => {
@@ -182,40 +179,19 @@ export default function DeliveryRoutesPage() {
     };
   }, [routeStops]);
 
+  const title = tuesday ? "Tuesday Delivery Route" : "Saturday Delivery Route";
+  const testPrefix = tuesday ? "tuesday" : "saturday";
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight" data-testid="text-routes-title">
-            {routeView === "tuesday" ? "Tuesday Delivery Route" : "Planned Delivery Route"}
+          <h1 className="text-2xl font-semibold tracking-tight" data-testid={`text-${testPrefix}-routes-title`}>
+            {title}
           </h1>
           <DateRangeLabel from={from} to={to} />
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex rounded-md border" data-testid="toggle-route-view">
-            <Button
-              size="sm"
-              variant={routeView === "website" ? "default" : "ghost"}
-              onClick={() => setRouteView("website")}
-              className="rounded-r-none"
-              data-testid="button-view-website"
-            >
-              <Home className="w-4 h-4 mr-1" />
-              Website
-            </Button>
-            <Button
-              size="sm"
-              variant={routeView === "tuesday" ? "default" : "ghost"}
-              onClick={() => setRouteView("tuesday")}
-              className="rounded-l-none"
-              data-testid="button-view-tuesday"
-            >
-              <Truck className="w-4 h-4 mr-1" />
-              Tuesday
-            </Button>
-          </div>
-          <DateFilter {...dateFilter} testIdPrefix="route" />
-        </div>
+        <DateFilter {...dateFilter} testIdPrefix={`${testPrefix}-route`} />
       </div>
 
       <Card data-testid="card-fulfillment-breakdown">
@@ -379,4 +355,8 @@ export default function DeliveryRoutesPage() {
       </div>
     </div>
   );
+}
+
+export default function DeliveryRoutesPage() {
+  return <DeliveryRoutesContent tuesday={false} />;
 }
