@@ -208,9 +208,12 @@ function isWithinAutoSendWindow(): boolean {
 // Returns one entry per subscription item found, with the correct isTuesday flag.
 // For orders that contain both "Saturday Delivery" and "Tuesday Delivery" (dual-day orders),
 // one slot gets isTuesday=false (Saturday) and one gets isTuesday=true (Tuesday).
+// For "2 week" subscription products, one dual-day slot is returned (isDual=true).
 const SUB_PATTERN = /meal\s+subscription\s*-\s*(\d+)/i;
-function getSubscriptionSlots(order: { isTuesday: boolean; items: Array<{ productName: string }> }): Array<{ qty: number; isTuesday: boolean }> {
-  const subItems = order.items.filter(i => SUB_PATTERN.test(i.productName));
+const TWO_WEEK_PATTERN = /2\s*week/i;
+const WEEKLY_SUB_PATTERN = /weekly.*meal.*subscription|meal.*subscription.*weekly/i;
+function getSubscriptionSlots(order: { isTuesday: boolean; items: Array<{ productName: string; quantity?: number }> }): Array<{ qty: number; isTuesday: boolean; isDual: boolean }> {
+  const subItems = order.items.filter(i => SUB_PATTERN.test(i.productName) || (WEEKLY_SUB_PATTERN.test(i.productName)));
   if (subItems.length === 0) return [];
 
   const hasSatDelivery = order.items.some(i => /saturday.*delivery|delivery.*saturday/i.test(i.productName));
@@ -220,16 +223,17 @@ function getSubscriptionSlots(order: { isTuesday: boolean; items: Array<{ produc
     // Dual-day order — assign alternate days (Sat first, then Tue, then repeat)
     return subItems.map((item, idx) => {
       const m = item.productName.match(SUB_PATTERN);
-      const qty = m ? parseInt(m[1], 10) : 0;
-      return { qty, isTuesday: idx % 2 !== 0 };
+      const qty = m ? parseInt(m[1], 10) : (item.quantity || 0);
+      return { qty, isTuesday: idx % 2 !== 0, isDual: false };
     }).filter(s => s.qty > 0);
   }
 
-  // Single subscription (or same day repeated)
+  // Single subscription (or same day repeated) — check for "2 week" dual-day flag
   return subItems.map(item => {
     const m = item.productName.match(SUB_PATTERN);
-    const qty = m ? parseInt(m[1], 10) : 0;
-    return { qty, isTuesday: order.isTuesday };
+    const qty = m ? parseInt(m[1], 10) : (item.quantity || 0);
+    const isDual = TWO_WEEK_PATTERN.test(item.productName);
+    return { qty, isTuesday: isDual ? false : order.isTuesday, isDual };
   }).filter(s => s.qty > 0);
 }
 
@@ -251,11 +255,11 @@ async function autoSendSubscriptionInvites(): Promise<void> {
       ordersList.map(async (order) => ({ ...order, items: await storage.getOrderItems(order.id) }))
     );
 
-    const subOrders = ordersWithItems.filter(o => o.items.some(i => SUB_PATTERN.test(i.productName)));
+    const subOrders = ordersWithItems.filter(o => o.items.some(i => SUB_PATTERN.test(i.productName) || WEEKLY_SUB_PATTERN.test(i.productName)));
     if (subOrders.length === 0) return;
 
     const existingInvites = await storage.getSubscriptionInvites(week.from, week.to);
-    const alreadyInvitedKeys = new Set(existingInvites.map(i => `${i.orderId}-${i.isTuesday}`));
+    const alreadyInvitedKeys = new Set(existingInvites.map(i => (i as any).isDual ? `${i.orderId}-dual` : `${i.orderId}-${i.isTuesday}`));
 
     const settingsMap = await getSettingsMap();
     const emailSubject = settingsMap.subscription_email_subject || DEFAULT_EMAIL_SUBJECT;
@@ -264,7 +268,7 @@ async function autoSendSubscriptionInvites(): Promise<void> {
     for (const order of subOrders) {
       const slots = getSubscriptionSlots(order);
       for (const slot of slots) {
-        const key = `${order.id}-${slot.isTuesday}`;
+        const key = slot.isDual ? `${order.id}-dual` : `${order.id}-${slot.isTuesday}`;
         if (alreadyInvitedKeys.has(key)) continue;
 
         const token = crypto.randomBytes(32).toString("hex");
@@ -290,7 +294,8 @@ async function autoSendSubscriptionInvites(): Promise<void> {
           deliveryAddress: inviteAddress,
           fulfillmentType: inviteFulfillment,
           isTuesday: slot.isTuesday,
-        });
+          isDual: slot.isDual,
+        } as any);
         alreadyInvitedKeys.add(key);
 
         const toEmail = order.customerEmail;
@@ -298,7 +303,7 @@ async function autoSendSubscriptionInvites(): Promise<void> {
 
         const selectUrl = `${baseUrl}/subscribe/${token}`;
         const firstName = order.customerName.split(" ")[0];
-        const dayLabel = slot.isTuesday ? " (Tuesday)" : " (Saturday)";
+        const dayLabel = slot.isDual ? " (Sat + Tue)" : (slot.isTuesday ? " (Tuesday)" : " (Saturday)");
         const emailBody = emailBodyTemplate
           .replace(/\{\{firstName\}\}/g, firstName)
           .replace(/\{\{fullName\}\}/g, order.customerName)
@@ -313,10 +318,10 @@ async function autoSendSubscriptionInvites(): Promise<void> {
             subject: (emailSubject
               .replace(/\{\{firstName\}\}/g, firstName)
               .replace(/\{\{fullName\}\}/g, order.customerName)
-              .replace(/\{\{qty\}\}/g, String(slot.qty))) + (slots.length > 1 ? dayLabel : ""),
+              .replace(/\{\{qty\}\}/g, String(slot.qty))) + (slots.length > 1 || slot.isDual ? dayLabel : ""),
             html: emailHtml,
           });
-          log(`Auto-sent subscription invite to ${order.customerName} (${toEmail})${slots.length > 1 ? dayLabel : ""}`, "sync");
+          log(`Auto-sent subscription invite to ${order.customerName} (${toEmail})${slot.isDual ? " (dual Sat+Tue)" : (slots.length > 1 ? dayLabel : "")}`, "sync");
         } catch (emailErr: any) {
           log(`Auto-send subscription email failed for ${order.customerName}: ${(emailErr as Error).message}`, "sync");
         }
@@ -1697,14 +1702,14 @@ export async function registerRoutes(
         })
       );
 
-      const subOrders = ordersWithItems.filter(o => o.items.some(i => SUB_PATTERN.test(i.productName)));
+      const subOrders = ordersWithItems.filter(o => o.items.some(i => SUB_PATTERN.test(i.productName) || WEEKLY_SUB_PATTERN.test(i.productName)));
 
       if (subOrders.length === 0) {
         return res.json({ sent: 0, message: "No subscription orders found this week" });
       }
 
       const existingInvites = await storage.getSubscriptionInvites(week.from, week.to);
-      const alreadyInvitedKeys = new Set(existingInvites.map(i => `${i.orderId}-${i.isTuesday}`));
+      const alreadyInvitedKeys = new Set(existingInvites.map(i => (i as any).isDual ? `${i.orderId}-dual` : `${i.orderId}-${i.isTuesday}`));
 
       let sent = 0;
       let skipped = 0;
@@ -1716,7 +1721,7 @@ export async function registerRoutes(
       for (const order of subOrders) {
         const slots = getSubscriptionSlots(order);
         for (const slot of slots) {
-          const key = `${order.id}-${slot.isTuesday}`;
+          const key = slot.isDual ? `${order.id}-dual` : `${order.id}-${slot.isTuesday}`;
           if (alreadyInvitedKeys.has(key)) {
             skipped++;
             continue;
@@ -1744,7 +1749,8 @@ export async function registerRoutes(
             deliveryAddress: inviteAddress,
             fulfillmentType: inviteFulfillment,
             isTuesday: slot.isTuesday,
-          });
+            isDual: slot.isDual,
+          } as any);
           alreadyInvitedKeys.add(key);
 
           const toEmail = overrideEmail || order.customerEmail;
@@ -1755,7 +1761,7 @@ export async function registerRoutes(
 
           const selectUrl = `${baseUrl}/subscribe/${token}`;
           const firstName = order.customerName.split(" ")[0];
-          const dayLabel = slot.isTuesday ? " (Tuesday)" : " (Saturday)";
+          const dayLabel = slot.isDual ? " (Sat + Tue)" : (slot.isTuesday ? " (Tuesday)" : " (Saturday)");
           const emailBody = emailBodyTemplate
             .replace(/\{\{firstName\}\}/g, firstName)
             .replace(/\{\{fullName\}\}/g, order.customerName)
@@ -1770,7 +1776,7 @@ export async function registerRoutes(
               subject: (emailSubject
                 .replace(/\{\{firstName\}\}/g, firstName)
                 .replace(/\{\{fullName\}\}/g, order.customerName)
-                .replace(/\{\{qty\}\}/g, String(slot.qty))) + (slots.length > 1 ? dayLabel : ""),
+                .replace(/\{\{qty\}\}/g, String(slot.qty))) + (slots.length > 1 || slot.isDual ? dayLabel : ""),
               html: emailHtml,
             });
             sent++;
@@ -1883,6 +1889,7 @@ export async function registerRoutes(
       }
 
       const existingSelections = await storage.getSubscriptionSelections(invite.id);
+      const isDual = (invite as any).isDual === true;
 
       res.json({
         customerName: invite.customerName,
@@ -1891,11 +1898,14 @@ export async function registerRoutes(
         addonPaid: invite.addonPaid,
         addonAmountPence: invite.addonAmountPence,
         isTuesday: invite.isTuesday,
+        isDual,
         weekNumber,
         categoryName,
         availableMeals,
         availableExtras,
         selections: existingSelections,
+        satSelections: isDual ? existingSelections.filter((s: any) => (s.deliveryDay || 'sat') === 'sat') : existingSelections,
+        tueSelections: isDual ? existingSelections.filter((s: any) => s.deliveryDay === 'tue') : [],
       });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
@@ -1913,11 +1923,118 @@ export async function registerRoutes(
         return res.status(400).json({ message: "You have already submitted your meal choices" });
       }
 
-      const { email, selections, extras } = req.body;
+      const isDual = (invite as any).isDual === true;
+      const { email, selections, extras, satSelections, tueSelections, satExtras, tueExtras } = req.body;
       if (!email || typeof email !== "string" || email.toLowerCase() !== invite.customerEmail.toLowerCase()) {
         return res.status(403).json({ message: "Email does not match the subscription order" });
       }
 
+      // Look up prices for extras from products DB
+      const allProductsList = await storage.getProducts();
+      const productPriceMap: Record<string, string> = {};
+      for (const p of allProductsList) {
+        productPriceMap[p.name] = p.price || "0";
+      }
+
+      if (isDual) {
+        // ---- DUAL DAY (Saturday + Tuesday) ----
+        const satSels: any[] = Array.isArray(satSelections) ? satSelections : [];
+        const tueSels: any[] = Array.isArray(tueSelections) ? tueSelections : [];
+        if (satSels.length === 0 || tueSels.length === 0) {
+          return res.status(400).json({ message: "Please select meals for both Saturday and Tuesday deliveries" });
+        }
+        const satExtList: any[] = Array.isArray(satExtras) ? satExtras : [];
+        const tueExtList: any[] = Array.isArray(tueExtras) ? tueExtras : [];
+
+        const satTotalQty = satSels.reduce((sum: number, s: any) => sum + parseInt(s.quantity, 10), 0);
+        const tueTotalQty = tueSels.reduce((sum: number, s: any) => sum + parseInt(s.quantity, 10), 0);
+        if (satTotalQty > invite.subscriptionQuantity) {
+          return res.status(400).json({ message: `Saturday: you can select up to ${invite.subscriptionQuantity} meals` });
+        }
+        if (tueTotalQty > invite.subscriptionQuantity) {
+          return res.status(400).json({ message: `Tuesday: you can select up to ${invite.subscriptionQuantity} meals` });
+        }
+
+        // Resolve address
+        let resolvedAddress = invite.deliveryAddress || null;
+        let resolvedFulfillment = invite.fulfillmentType || "delivery";
+        if (!resolvedAddress) {
+          const pastAddr = await storage.getCustomerDeliveryAddress(invite.customerEmail || "", invite.customerName);
+          if (pastAddr?.deliveryAddress) {
+            resolvedAddress = pastAddr.deliveryAddress;
+            resolvedFulfillment = pastAddr.fulfillmentType || "delivery";
+          }
+        }
+
+        // Save all selections with deliveryDay tag
+        await storage.deleteSubscriptionSelectionsByInviteId(invite.id);
+        for (const sel of [...satSels, ...satExtList]) {
+          await storage.createSubscriptionSelection({
+            inviteId: invite.id,
+            productName: sel.productName,
+            quantity: parseInt(sel.quantity, 10),
+            deliveryDay: 'sat',
+          } as any);
+        }
+        for (const sel of [...tueSels, ...tueExtList]) {
+          await storage.createSubscriptionSelection({
+            inviteId: invite.id,
+            productName: sel.productName,
+            quantity: parseInt(sel.quantity, 10),
+            deliveryDay: 'tue',
+          } as any);
+        }
+
+        // Create Saturday order
+        const satOrder = await storage.createOrder({
+          customerName: invite.customerName,
+          customerEmail: invite.customerEmail,
+          deliveryAddress: resolvedAddress,
+          orderDate: invite.weekFrom,
+          status: "processing",
+          fulfillmentType: resolvedFulfillment as "delivery" | "collection",
+          isManual: true,
+          isTuesday: false,
+        });
+        for (const sel of satSels) {
+          await storage.createOrderItem({ orderId: satOrder.id, productId: null, productName: sel.productName, quantity: parseInt(sel.quantity, 10), price: "7.50" });
+        }
+        for (const ext of satExtList) {
+          if (!ext.productName?.trim()) continue;
+          const qty = parseInt(ext.quantity, 10) || 1;
+          const price = parseFloat(productPriceMap[ext.productName] || "0");
+          await storage.createOrderItem({ orderId: satOrder.id, productId: null, productName: ext.productName, quantity: qty, price: price > 0 ? String(price) : "0" });
+        }
+
+        // Create Tuesday order
+        const tueOrder = await storage.createOrder({
+          customerName: invite.customerName,
+          customerEmail: invite.customerEmail,
+          deliveryAddress: resolvedAddress,
+          orderDate: invite.weekFrom,
+          status: "processing",
+          fulfillmentType: resolvedFulfillment as "delivery" | "collection",
+          isManual: true,
+          isTuesday: true,
+        });
+        for (const sel of tueSels) {
+          await storage.createOrderItem({ orderId: tueOrder.id, productId: null, productName: sel.productName, quantity: parseInt(sel.quantity, 10), price: "7.50" });
+        }
+        for (const ext of tueExtList) {
+          if (!ext.productName?.trim()) continue;
+          const qty = parseInt(ext.quantity, 10) || 1;
+          const price = parseFloat(productPriceMap[ext.productName] || "0");
+          await storage.createOrderItem({ orderId: tueOrder.id, productId: null, productName: ext.productName, quantity: qty, price: price > 0 ? String(price) : "0" });
+        }
+
+        await storage.updateSubscriptionInviteStatus(invite.id, "completed");
+        await storage.setSubscriptionInviteSelectionsOrder(invite.id, satOrder.id);
+        await storage.setSubscriptionInviteTuesdayOrder(invite.id, tueOrder.id);
+
+        return res.json({ success: true, orderId: satOrder.id, tuesdayOrderId: tueOrder.id });
+      }
+
+      // ---- SINGLE DAY (original logic) ----
       if (!Array.isArray(selections) || selections.length === 0) {
         return res.status(400).json({ message: "Please select at least one meal" });
       }
@@ -1939,13 +2056,6 @@ export async function registerRoutes(
 
       const extrasList: any[] = Array.isArray(extras) ? extras : [];
 
-      // Look up prices for extras from products DB
-      const allProducts = await storage.getProducts();
-      const productPriceMap: Record<string, string> = {};
-      for (const p of allProducts) {
-        productPriceMap[p.name] = p.price || "0";
-      }
-
       // Calculate addon cost: sum of extra items at their WooCommerce price
       let addonAmountPence = 0;
       const addonLineItems: Array<{ name: string; pricePence: number; quantity: number }> = [];
@@ -1966,7 +2076,8 @@ export async function registerRoutes(
           inviteId: invite.id,
           productName: sel.productName,
           quantity: parseInt(sel.quantity, 10),
-        });
+          deliveryDay: invite.isTuesday ? 'tue' : 'sat',
+        } as any);
       }
 
       // Resolve address: use invite address, or fall back to customer's order history
@@ -2125,14 +2236,20 @@ export async function registerRoutes(
       }
 
       const existingSelections = await storage.getSubscriptionSelections(invite.id);
+      const isDual = (invite as any).isDual === true;
       res.json({
         customerName: invite.customerName,
         subscriptionQuantity: invite.subscriptionQuantity,
+        isTuesday: invite.isTuesday,
+        isDual,
         weekNumber,
         categoryName,
         availableMeals,
         availableExtras,
         selections: existingSelections,
+        satSelections: isDual ? existingSelections.filter((s: any) => (s.deliveryDay || 'sat') === 'sat') : existingSelections,
+        tueSelections: isDual ? existingSelections.filter((s: any) => s.deliveryDay === 'tue') : [],
+        tuesdaySelectionsOrderId: (invite as any).tuesdaySelectionsOrderId || null,
       });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
@@ -2145,17 +2262,83 @@ export async function registerRoutes(
       const invite = await storage.getSubscriptionInviteById(id);
       if (!invite) return res.status(404).json({ message: "Invite not found" });
 
-      const { selections, extras, subscriptionQuantity } = req.body;
-      if (!Array.isArray(selections) || selections.length === 0) {
-        return res.status(400).json({ message: "Please select at least one meal" });
-      }
+      const { selections, extras, subscriptionQuantity, satSelections, tueSelections, satExtras, tueExtras } = req.body;
+      const isDualInvite = (invite as any).isDual === true;
 
       const effectiveMax = subscriptionQuantity && Number.isInteger(subscriptionQuantity) && subscriptionQuantity > 0
         ? subscriptionQuantity
         : invite.subscriptionQuantity;
-
       if (effectiveMax !== invite.subscriptionQuantity) {
         await storage.updateSubscriptionInviteQuantity(id, effectiveMax);
+      }
+
+      // Backfill address from order history if the invite was created without one
+      let resolvedAddress = invite.deliveryAddress || null;
+      let resolvedFulfillment = invite.fulfillmentType || "delivery";
+      if (!resolvedAddress) {
+        const pastAddr = await storage.getCustomerDeliveryAddress(invite.customerEmail || "", invite.customerName);
+        if (pastAddr?.deliveryAddress) {
+          resolvedAddress = pastAddr.deliveryAddress;
+          resolvedFulfillment = pastAddr.fulfillmentType || "delivery";
+        }
+      }
+
+      if (isDualInvite) {
+        // ---- DUAL: handle satSelections + tueSelections ----
+        const satSels: any[] = Array.isArray(satSelections) ? satSelections : (Array.isArray(selections) ? selections : []);
+        const tueSels: any[] = Array.isArray(tueSelections) ? tueSelections : [];
+        const satExtList: any[] = Array.isArray(satExtras) ? satExtras : (Array.isArray(extras) ? extras : []);
+        const tueExtList: any[] = Array.isArray(tueExtras) ? tueExtras : [];
+
+        if (satSels.length === 0 || tueSels.length === 0) {
+          return res.status(400).json({ message: "Please select meals for both Saturday and Tuesday deliveries" });
+        }
+
+        await storage.deleteSubscriptionSelectionsByInviteId(id);
+        for (const sel of [...satSels, ...satExtList]) {
+          if (!sel.productName?.trim()) continue;
+          await storage.createSubscriptionSelection({ inviteId: id, productName: sel.productName, quantity: parseInt(sel.quantity, 10) || 1, deliveryDay: 'sat' } as any);
+        }
+        for (const sel of [...tueSels, ...tueExtList]) {
+          if (!sel.productName?.trim()) continue;
+          await storage.createSubscriptionSelection({ inviteId: id, productName: sel.productName, quantity: parseInt(sel.quantity, 10) || 1, deliveryDay: 'tue' } as any);
+        }
+
+        // Update or create Saturday order
+        if (invite.selectionsOrderId) {
+          await storage.updateOrder(invite.selectionsOrderId, { orderDate: invite.weekFrom, deliveryAddress: resolvedAddress, fulfillmentType: resolvedFulfillment as "delivery" | "collection" });
+          await storage.deleteOrderItemsByOrderId(invite.selectionsOrderId);
+          for (const sel of satSels) { if (!sel.productName?.trim()) continue; await storage.createOrderItem({ orderId: invite.selectionsOrderId!, productId: null, productName: sel.productName, quantity: parseInt(sel.quantity, 10) || 1, price: "7.50" }); }
+          for (const ext of satExtList) { if (!ext.productName?.trim()) continue; await storage.createOrderItem({ orderId: invite.selectionsOrderId!, productId: null, productName: ext.productName, quantity: parseInt(ext.quantity, 10) || 1, price: "0" }); }
+        } else {
+          const satOrder = await storage.createOrder({ customerName: invite.customerName, customerEmail: invite.customerEmail, deliveryAddress: resolvedAddress, orderDate: invite.weekFrom, status: "processing", fulfillmentType: resolvedFulfillment as "delivery" | "collection", isManual: true, isTuesday: false });
+          for (const sel of satSels) { if (!sel.productName?.trim()) continue; await storage.createOrderItem({ orderId: satOrder.id, productId: null, productName: sel.productName, quantity: parseInt(sel.quantity, 10) || 1, price: "7.50" }); }
+          for (const ext of satExtList) { if (!ext.productName?.trim()) continue; await storage.createOrderItem({ orderId: satOrder.id, productId: null, productName: ext.productName, quantity: parseInt(ext.quantity, 10) || 1, price: "0" }); }
+          await storage.setSubscriptionInviteSelectionsOrder(id, satOrder.id);
+        }
+
+        // Update or create Tuesday order
+        const tueOrderId = (invite as any).tuesdaySelectionsOrderId as number | null;
+        if (tueOrderId) {
+          await storage.updateOrder(tueOrderId, { orderDate: invite.weekFrom, deliveryAddress: resolvedAddress, fulfillmentType: resolvedFulfillment as "delivery" | "collection" });
+          await storage.deleteOrderItemsByOrderId(tueOrderId);
+          for (const sel of tueSels) { if (!sel.productName?.trim()) continue; await storage.createOrderItem({ orderId: tueOrderId, productId: null, productName: sel.productName, quantity: parseInt(sel.quantity, 10) || 1, price: "7.50" }); }
+          for (const ext of tueExtList) { if (!ext.productName?.trim()) continue; await storage.createOrderItem({ orderId: tueOrderId, productId: null, productName: ext.productName, quantity: parseInt(ext.quantity, 10) || 1, price: "0" }); }
+        } else {
+          const tueOrder = await storage.createOrder({ customerName: invite.customerName, customerEmail: invite.customerEmail, deliveryAddress: resolvedAddress, orderDate: invite.weekFrom, status: "processing", fulfillmentType: resolvedFulfillment as "delivery" | "collection", isManual: true, isTuesday: true });
+          for (const sel of tueSels) { if (!sel.productName?.trim()) continue; await storage.createOrderItem({ orderId: tueOrder.id, productId: null, productName: sel.productName, quantity: parseInt(sel.quantity, 10) || 1, price: "7.50" }); }
+          for (const ext of tueExtList) { if (!ext.productName?.trim()) continue; await storage.createOrderItem({ orderId: tueOrder.id, productId: null, productName: ext.productName, quantity: parseInt(ext.quantity, 10) || 1, price: "0" }); }
+          await storage.setSubscriptionInviteTuesdayOrder(id, tueOrder.id);
+        }
+
+        await storage.updateSubscriptionInviteStatus(id, "completed");
+        const updatedSelections = await storage.getSubscriptionSelections(id);
+        return res.json({ success: true, selections: updatedSelections });
+      }
+
+      // ---- SINGLE DAY ----
+      if (!Array.isArray(selections) || selections.length === 0) {
+        return res.status(400).json({ message: "Please select at least one meal" });
       }
 
       // Only meal selections count against the quota; extras are free
@@ -2174,21 +2357,8 @@ export async function registerRoutes(
           inviteId: id,
           productName: sel.productName,
           quantity: parseInt(sel.quantity, 10) || 1,
-        });
-      }
-
-      // Backfill address from order history if the invite was created without one
-      let resolvedAddress = invite.deliveryAddress || null;
-      let resolvedFulfillment = invite.fulfillmentType || "delivery";
-      if (!resolvedAddress) {
-        const pastAddr = await storage.getCustomerDeliveryAddress(
-          invite.customerEmail || "",
-          invite.customerName
-        );
-        if (pastAddr?.deliveryAddress) {
-          resolvedAddress = pastAddr.deliveryAddress;
-          resolvedFulfillment = pastAddr.fulfillmentType || "delivery";
-        }
+          deliveryDay: invite.isTuesday ? 'tue' : 'sat',
+        } as any);
       }
 
       if (invite.selectionsOrderId) {

@@ -18,6 +18,7 @@ type Selection = {
   inviteId: number;
   productName: string;
   quantity: number;
+  deliveryDay?: string;
 };
 
 type Invite = {
@@ -38,16 +39,22 @@ type Invite = {
   addonPaymentToken?: string;
   stripePaymentIntentId?: string;
   isTuesday?: boolean;
+  isDual?: boolean;
 };
 
 type MealData = {
   customerName: string;
   subscriptionQuantity: number;
+  isTuesday?: boolean;
+  isDual?: boolean;
   weekNumber?: number;
   categoryName?: string;
   availableMeals: Array<{ name: string; popularity: number }>;
   availableExtras: Array<{ name: string; popularity: number }>;
-  selections: Array<{ productName: string; quantity: number }>;
+  selections: Array<{ productName: string; quantity: number; deliveryDay?: string }>;
+  satSelections?: Array<{ productName: string; quantity: number }>;
+  tueSelections?: Array<{ productName: string; quantity: number }>;
+  tuesdaySelectionsOrderId?: number | null;
 };
 
 function getCurrentWeekRange(offsetWeeks: number = 0): { from: Date; to: Date } {
@@ -359,7 +366,11 @@ export default function SubscriptionOverviewPage() {
                       <TableCell className="font-medium">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           {invite.customerName}
-                          {invite.isTuesday !== undefined && (
+                          {invite.isDual ? (
+                            <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
+                              Sat+Tue
+                            </span>
+                          ) : invite.isTuesday !== undefined && (
                             <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${invite.isTuesday ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300" : "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300"}`}>
                               {invite.isTuesday ? "Tue" : "Sat"}
                             </span>
@@ -539,6 +550,87 @@ export default function SubscriptionOverviewPage() {
   );
 }
 
+function MealRows({ meals, selections, maxMeals, onAdd, onRemove, onAddExtra, onRemoveExtra, prefix }: {
+  meals: Array<{ name: string; popularity: number }>;
+  selections: Record<string, number>;
+  maxMeals: number;
+  onAdd: (n: string) => void;
+  onRemove: (n: string) => void;
+  onAddExtra: (n: string) => void;
+  onRemoveExtra: (n: string) => void;
+  prefix: string;
+}) {
+  const totalSelected = Object.values(selections).reduce((s, q) => s + q, 0);
+  const remaining = maxMeals - totalSelected;
+  return (
+    <div className="space-y-1.5">
+      {meals.map((meal) => {
+        const qty = selections[meal.name] || 0;
+        const isSelected = qty > 0;
+        return (
+          <div key={meal.name}
+            className={`flex items-center justify-between p-3 rounded-lg border transition-all ${isSelected ? "border-emerald-400 bg-emerald-50/50 dark:bg-emerald-950/20" : "border-border"}`}
+            data-testid={`meal-row-${prefix}-${meal.name.replace(/\s+/g, "-").toLowerCase()}`}>
+            <p className="font-medium text-sm flex-1 min-w-0 truncate pr-2">{meal.name}</p>
+            <div className="flex items-center gap-1 shrink-0">
+              {isSelected ? (
+                <>
+                  <Button size="icon" variant="outline" className="h-7 w-7 rounded-full" onClick={() => onRemove(meal.name)} data-testid={`button-admin-remove-${prefix}-${meal.name.replace(/\s+/g, "-").toLowerCase()}`}><Minus className="w-3 h-3" /></Button>
+                  <span className="w-6 text-center font-bold text-sm">{qty}</span>
+                  <Button size="icon" variant="outline" className="h-7 w-7 rounded-full" onClick={() => onAdd(meal.name)} disabled={remaining <= 0} data-testid={`button-admin-add-${prefix}-${meal.name.replace(/\s+/g, "-").toLowerCase()}`}><Plus className="w-3 h-3" /></Button>
+                </>
+              ) : (
+                <Button size="sm" variant="outline" onClick={() => onAdd(meal.name)} disabled={remaining <= 0} className="h-7 text-xs text-emerald-600 border-emerald-300" data-testid={`button-admin-select-${prefix}-${meal.name.replace(/\s+/g, "-").toLowerCase()}`}><Plus className="w-3 h-3 mr-1" />Add</Button>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ExtraRows({ extras: extrasData, extras, onAdd, onRemove, prefix }: {
+  extrasData: Array<{ name: string; popularity: number }>;
+  extras: Record<string, number>;
+  onAdd: (n: string) => void;
+  onRemove: (n: string) => void;
+  prefix: string;
+}) {
+  if (extrasData.length === 0) return null;
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center gap-2 pt-1">
+        <div className="flex-1 border-t" />
+        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide shrink-0">Add-ons</p>
+        <div className="flex-1 border-t" />
+      </div>
+      {extrasData.map((extra) => {
+        const qty = extras[extra.name] || 0;
+        const isSelected = qty > 0;
+        return (
+          <div key={extra.name}
+            className={`flex items-center justify-between p-3 rounded-lg border transition-all ${isSelected ? "border-blue-400 bg-blue-50/50 dark:bg-blue-950/20" : "border-border"}`}
+            data-testid={`extra-row-${prefix}-${extra.name.replace(/\s+/g, "-").toLowerCase()}`}>
+            <p className="font-medium text-sm flex-1 min-w-0 truncate pr-2">{extra.name}</p>
+            <div className="flex items-center gap-1 shrink-0">
+              {isSelected ? (
+                <>
+                  <Button size="icon" variant="outline" className="h-7 w-7 rounded-full" onClick={() => onRemove(extra.name)} data-testid={`button-admin-remove-extra-${prefix}-${extra.name.replace(/\s+/g, "-").toLowerCase()}`}><Minus className="w-3 h-3" /></Button>
+                  <span className="w-6 text-center font-bold text-sm">{qty}</span>
+                  <Button size="icon" variant="outline" className="h-7 w-7 rounded-full" onClick={() => onAdd(extra.name)} data-testid={`button-admin-add-extra-${prefix}-${extra.name.replace(/\s+/g, "-").toLowerCase()}`}><Plus className="w-3 h-3" /></Button>
+                </>
+              ) : (
+                <Button size="sm" variant="outline" onClick={() => onAdd(extra.name)} className="h-7 text-xs text-blue-600 border-blue-300" data-testid={`button-admin-select-extra-${prefix}-${extra.name.replace(/\s+/g, "-").toLowerCase()}`}><Plus className="w-3 h-3 mr-1" />Add</Button>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function AdminSelectionDialog({ invite, open, onOpenChange }: {
   invite: Invite;
   open: boolean;
@@ -546,8 +638,16 @@ function AdminSelectionDialog({ invite, open, onOpenChange }: {
 }) {
   const { toast } = useToast();
   const [localMax, setLocalMax] = useState(invite.subscriptionQuantity);
+
+  // Single-day state
   const [selections, setSelections] = useState<Record<string, number>>({});
   const [extras, setExtras] = useState<Record<string, number>>({});
+
+  // Dual-day state
+  const [satSelections, setSatSelections] = useState<Record<string, number>>({});
+  const [satExtras, setSatExtras] = useState<Record<string, number>>({});
+  const [tueSelections, setTueSelections] = useState<Record<string, number>>({});
+  const [tueExtras, setTueExtras] = useState<Record<string, number>>({});
 
   const { data: mealData, isLoading } = useQuery<MealData>({
     queryKey: ["/api/subscription-invites", invite.id, "meals"],
@@ -559,26 +659,37 @@ function AdminSelectionDialog({ invite, open, onOpenChange }: {
     staleTime: 30000,
   });
 
-  // Split existing selections: only put in extras if explicitly a confirmed extra product
   useEffect(() => {
     if (!mealData) return;
     const extraSet = new Set((mealData.availableExtras || []).map(e => e.name));
-    const mealSels: Record<string, number> = {};
-    const extraSels: Record<string, number> = {};
-    for (const sel of invite.selections) {
-      if (extraSet.has(sel.productName)) {
-        extraSels[sel.productName] = sel.quantity;
-      } else {
-        mealSels[sel.productName] = sel.quantity;
+
+    if (mealData.isDual) {
+      const toMap = (arr: Array<{ productName: string; quantity: number }>, isExtra: boolean) => {
+        const m: Record<string, number> = {};
+        for (const s of arr || []) {
+          if (isExtra ? extraSet.has(s.productName) : !extraSet.has(s.productName)) m[s.productName] = s.quantity;
+        }
+        return m;
+      };
+      setSatSelections(toMap(mealData.satSelections || [], false));
+      setSatExtras(toMap(mealData.satSelections || [], true));
+      setTueSelections(toMap(mealData.tueSelections || [], false));
+      setTueExtras(toMap(mealData.tueSelections || [], true));
+    } else {
+      const mealSels: Record<string, number> = {};
+      const extraSels: Record<string, number> = {};
+      for (const sel of invite.selections) {
+        if (extraSet.has(sel.productName)) extraSels[sel.productName] = sel.quantity;
+        else mealSels[sel.productName] = sel.quantity;
       }
+      setSelections(mealSels);
+      setExtras(extraSels);
     }
-    setSelections(mealSels);
-    setExtras(extraSels);
   }, [mealData]);
 
   const saveMutation = useMutation({
-    mutationFn: ({ sels, extSels }: { sels: Array<{ productName: string; quantity: number }>; extSels: Array<{ productName: string; quantity: number }> }) =>
-      apiRequest("PATCH", `/api/subscription-invites/${invite.id}/selections`, { selections: sels, extras: extSels, subscriptionQuantity: localMax }),
+    mutationFn: (body: Record<string, unknown>) =>
+      apiRequest("PATCH", `/api/subscription-invites/${invite.id}/selections`, { ...body, subscriptionQuantity: localMax }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/subscription-invites"] });
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
@@ -590,55 +701,54 @@ function AdminSelectionDialog({ invite, open, onOpenChange }: {
     },
   });
 
+  const isDual = mealData?.isDual === true;
+
   const totalSelected = Object.values(selections).reduce((sum, q) => sum + q, 0);
   const remaining = localMax - totalSelected;
+  const totalExtras = Object.values(extras).reduce((sum, q) => sum + q, 0);
 
-  const addMeal = (name: string) => {
-    if (remaining <= 0) return;
-    setSelections(prev => ({ ...prev, [name]: (prev[name] || 0) + 1 }));
-  };
+  const satTotal = Object.values(satSelections).reduce((s, q) => s + q, 0);
+  const tueTotal = Object.values(tueSelections).reduce((s, q) => s + q, 0);
 
-  const removeMeal = (name: string) => {
-    setSelections(prev => {
-      const current = prev[name] || 0;
-      if (current <= 1) { const { [name]: _, ...rest } = prev; return rest; }
-      return { ...prev, [name]: current - 1 };
-    });
-  };
-
-  const addExtra = (name: string) => {
-    setExtras(prev => ({ ...prev, [name]: (prev[name] || 0) + 1 }));
-  };
-
-  const removeExtra = (name: string) => {
-    setExtras(prev => {
-      const current = prev[name] || 0;
-      if (current <= 1) { const { [name]: _, ...rest } = prev; return rest; }
-      return { ...prev, [name]: current - 1 };
-    });
-  };
+  const makeAdd = (setter: React.Dispatch<React.SetStateAction<Record<string, number>>>, total: number) =>
+    (name: string) => { if (total >= localMax) return; setter(prev => ({ ...prev, [name]: (prev[name] || 0) + 1 })); };
+  const makeRemove = (setter: React.Dispatch<React.SetStateAction<Record<string, number>>>) =>
+    (name: string) => setter(prev => { const c = prev[name] || 0; if (c <= 1) { const { [name]: _, ...r } = prev; return r; } return { ...prev, [name]: c - 1 }; });
+  const makeExtraAdd = (setter: React.Dispatch<React.SetStateAction<Record<string, number>>>) =>
+    (name: string) => setter(prev => ({ ...prev, [name]: (prev[name] || 0) + 1 }));
+  const makeExtraRemove = (setter: React.Dispatch<React.SetStateAction<Record<string, number>>>) =>
+    (name: string) => setter(prev => { const c = prev[name] || 0; if (c <= 1) { const { [name]: _, ...r } = prev; return r; } return { ...prev, [name]: c - 1 }; });
 
   const handleSave = () => {
-    const sels = Object.entries(selections).filter(([_, q]) => q > 0).map(([productName, quantity]) => ({ productName, quantity }));
-    const extSels = Object.entries(extras).filter(([_, q]) => q > 0).map(([productName, quantity]) => ({ productName, quantity }));
-    if (sels.length === 0) {
-      toast({ title: "Select at least one meal", variant: "destructive" });
-      return;
+    if (isDual) {
+      const satSels = Object.entries(satSelections).filter(([_, q]) => q > 0).map(([productName, quantity]) => ({ productName, quantity }));
+      const tueSels = Object.entries(tueSelections).filter(([_, q]) => q > 0).map(([productName, quantity]) => ({ productName, quantity }));
+      const satExtList = Object.entries(satExtras).filter(([_, q]) => q > 0).map(([productName, quantity]) => ({ productName, quantity }));
+      const tueExtList = Object.entries(tueExtras).filter(([_, q]) => q > 0).map(([productName, quantity]) => ({ productName, quantity }));
+      if (satSels.length === 0 || tueSels.length === 0) {
+        toast({ title: "Select meals for both Saturday and Tuesday", variant: "destructive" });
+        return;
+      }
+      saveMutation.mutate({ satSelections: satSels, tueSelections: tueSels, satExtras: satExtList, tueExtras: tueExtList });
+    } else {
+      const sels = Object.entries(selections).filter(([_, q]) => q > 0).map(([productName, quantity]) => ({ productName, quantity }));
+      const extSels = Object.entries(extras).filter(([_, q]) => q > 0).map(([productName, quantity]) => ({ productName, quantity }));
+      if (sels.length === 0) { toast({ title: "Select at least one meal", variant: "destructive" }); return; }
+      saveMutation.mutate({ selections: sels, extras: extSels });
     }
-    saveMutation.mutate({ sels, extSels });
   };
 
   const availableMeals = mealData?.availableMeals || [];
   const availableExtras = mealData?.availableExtras || [];
-  const totalExtras = Object.values(extras).reduce((sum, q) => sum + q, 0);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
+          <DialogTitle className="flex items-center gap-2 flex-wrap">
             <UtensilsCrossed className="w-4 h-4" />
             {invite.customerName}'s Meals
+            {isDual && <Badge className="bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300 text-xs">Sat + Tue</Badge>}
             {mealData?.categoryName && (
               <span className="text-sm font-normal text-muted-foreground ml-1">— {mealData.categoryName}</span>
             )}
@@ -647,47 +757,26 @@ function AdminSelectionDialog({ invite, open, onOpenChange }: {
 
         <div className="flex items-center justify-between rounded-lg border p-3 bg-muted/30">
           <div>
-            <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Total meals</p>
+            <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Meals per delivery</p>
             <p className="text-xs text-muted-foreground mt-0.5">Adjust if extra added off-record</p>
           </div>
           <div className="flex items-center gap-2">
-            <Button
-              size="icon"
-              variant="outline"
-              className="h-8 w-8 rounded-full"
+            <Button size="icon" variant="outline" className="h-8 w-8 rounded-full"
               onClick={() => setLocalMax(m => Math.max(1, m - 1))}
-              disabled={localMax <= totalSelected}
-              data-testid="button-decrease-max"
-            >
+              disabled={isDual ? (localMax <= satTotal || localMax <= tueTotal) : localMax <= totalSelected}
+              data-testid="button-decrease-max">
               <Minus className="w-3 h-3" />
             </Button>
             <span className="w-8 text-center font-bold text-lg" data-testid="text-local-max">{localMax}</span>
-            <Button
-              size="icon"
-              variant="outline"
-              className="h-8 w-8 rounded-full"
-              onClick={() => setLocalMax(m => m + 1)}
-              data-testid="button-increase-max"
-            >
+            <Button size="icon" variant="outline" className="h-8 w-8 rounded-full" onClick={() => setLocalMax(m => m + 1)} data-testid="button-increase-max">
               <Plus className="w-3 h-3" />
             </Button>
           </div>
         </div>
 
-        <div className="flex items-center justify-center">
-          <Badge
-            className={`text-sm px-3 py-1 ${remaining === 0 ? "bg-emerald-500 text-white" : "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300"}`}
-            data-testid="badge-admin-remaining"
-          >
-            {remaining === 0 ? `All ${localMax} chosen` : `${remaining} of ${localMax} remaining`}
-          </Badge>
-        </div>
-
         {isLoading ? (
           <div className="space-y-2">
-            {[1, 2, 3].map(i => (
-              <div key={i} className="h-14 bg-muted animate-pulse rounded-lg" />
-            ))}
+            {[1, 2, 3].map(i => <div key={i} className="h-14 bg-muted animate-pulse rounded-lg" />)}
           </div>
         ) : availableMeals.length === 0 ? (
           <div className="text-center py-8 text-muted-foreground">
@@ -695,131 +784,77 @@ function AdminSelectionDialog({ invite, open, onOpenChange }: {
             <p className="text-sm">No meals available for this week yet.</p>
             <p className="text-xs mt-1">Meals appear once orders are synced from WooCommerce.</p>
           </div>
+        ) : isDual ? (
+          <div className="space-y-4">
+            {/* Saturday */}
+            <div className="rounded-xl border border-orange-200 bg-orange-50/30 dark:bg-orange-950/10 p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold text-orange-700 dark:text-orange-300">Saturday Delivery</span>
+                <Badge className={`text-xs ${satTotal >= localMax ? "bg-emerald-500 text-white" : "bg-orange-100 text-orange-800"}`}>{satTotal}/{localMax}</Badge>
+              </div>
+              <MealRows meals={availableMeals} selections={satSelections} maxMeals={localMax}
+                onAdd={makeAdd(setSatSelections, satTotal)} onRemove={makeRemove(setSatSelections)}
+                onAddExtra={makeExtraAdd(setSatExtras)} onRemoveExtra={makeExtraRemove(setSatExtras)} prefix="sat" />
+              <ExtraRows extrasData={availableExtras} extras={satExtras}
+                onAdd={makeExtraAdd(setSatExtras)} onRemove={makeExtraRemove(setSatExtras)} prefix="sat-extra" />
+            </div>
+
+            {/* Tuesday */}
+            <div className="rounded-xl border border-blue-200 bg-blue-50/30 dark:bg-blue-950/10 p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold text-blue-700 dark:text-blue-300">Tuesday Delivery</span>
+                <Badge className={`text-xs ${tueTotal >= localMax ? "bg-emerald-500 text-white" : "bg-blue-100 text-blue-800"}`}>{tueTotal}/{localMax}</Badge>
+              </div>
+              <MealRows meals={availableMeals} selections={tueSelections} maxMeals={localMax}
+                onAdd={makeAdd(setTueSelections, tueTotal)} onRemove={makeRemove(setTueSelections)}
+                onAddExtra={makeExtraAdd(setTueExtras)} onRemoveExtra={makeExtraRemove(setTueExtras)} prefix="tue" />
+              <ExtraRows extrasData={availableExtras} extras={tueExtras}
+                onAdd={makeExtraAdd(setTueExtras)} onRemove={makeExtraRemove(setTueExtras)} prefix="tue-extra" />
+            </div>
+          </div>
         ) : (
-          <div className="space-y-2">
-            {availableMeals.map((meal) => {
-              const qty = selections[meal.name] || 0;
-              const isSelected = qty > 0;
-              return (
-                <div
-                  key={meal.name}
-                  className={`flex items-center justify-between p-3 rounded-lg border transition-all ${isSelected ? "border-emerald-400 bg-emerald-50/50 dark:bg-emerald-950/20" : "border-border"}`}
-                  data-testid={`meal-row-${meal.name.replace(/\s+/g, "-").toLowerCase()}`}
-                >
-                  <p className="font-medium text-sm flex-1 min-w-0 truncate pr-2">{meal.name}</p>
-                  <div className="flex items-center gap-1 shrink-0">
-                    {isSelected ? (
-                      <>
-                        <Button
-                          size="icon"
-                          variant="outline"
-                          className="h-7 w-7 rounded-full"
-                          onClick={() => removeMeal(meal.name)}
-                          data-testid={`button-admin-remove-${meal.name.replace(/\s+/g, "-").toLowerCase()}`}
-                        >
-                          <Minus className="w-3 h-3" />
-                        </Button>
-                        <span className="w-6 text-center font-bold text-sm" data-testid={`text-admin-qty-${meal.name.replace(/\s+/g, "-").toLowerCase()}`}>
-                          {qty}
-                        </span>
-                        <Button
-                          size="icon"
-                          variant="outline"
-                          className="h-7 w-7 rounded-full"
-                          onClick={() => addMeal(meal.name)}
-                          disabled={remaining <= 0}
-                          data-testid={`button-admin-add-${meal.name.replace(/\s+/g, "-").toLowerCase()}`}
-                        >
-                          <Plus className="w-3 h-3" />
-                        </Button>
-                      </>
-                    ) : (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => addMeal(meal.name)}
-                        disabled={remaining <= 0}
-                        className="h-7 text-xs text-emerald-600 border-emerald-300"
-                        data-testid={`button-admin-select-${meal.name.replace(/\s+/g, "-").toLowerCase()}`}
-                      >
-                        <Plus className="w-3 h-3 mr-1" />
-                        Add
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {availableExtras.length > 0 && (
-          <div className="space-y-2">
-            <div className="flex items-center gap-2 pt-1">
-              <div className="flex-1 border-t" />
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide shrink-0">Add-ons (optional)</p>
-              <div className="flex-1 border-t" />
+          <>
+            <div className="flex items-center justify-center">
+              <Badge className={`text-sm px-3 py-1 ${remaining === 0 ? "bg-emerald-500 text-white" : "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300"}`} data-testid="badge-admin-remaining">
+                {remaining === 0 ? `All ${localMax} chosen` : `${remaining} of ${localMax} remaining`}
+              </Badge>
             </div>
-            {availableExtras.map((extra) => {
-              const qty = extras[extra.name] || 0;
-              const isSelected = qty > 0;
-              return (
-                <div
-                  key={extra.name}
-                  className={`flex items-center justify-between p-3 rounded-lg border transition-all ${isSelected ? "border-blue-400 bg-blue-50/50 dark:bg-blue-950/20" : "border-border"}`}
-                  data-testid={`extra-row-${extra.name.replace(/\s+/g, "-").toLowerCase()}`}
-                >
-                  <p className="font-medium text-sm flex-1 min-w-0 truncate pr-2">{extra.name}</p>
-                  <div className="flex items-center gap-1 shrink-0">
-                    {isSelected ? (
-                      <>
-                        <Button size="icon" variant="outline" className="h-7 w-7 rounded-full"
-                          onClick={() => removeExtra(extra.name)}
-                          data-testid={`button-admin-remove-extra-${extra.name.replace(/\s+/g, "-").toLowerCase()}`}>
-                          <Minus className="w-3 h-3" />
-                        </Button>
-                        <span className="w-6 text-center font-bold text-sm" data-testid={`text-admin-extra-qty-${extra.name.replace(/\s+/g, "-").toLowerCase()}`}>{qty}</span>
-                        <Button size="icon" variant="outline" className="h-7 w-7 rounded-full"
-                          onClick={() => addExtra(extra.name)}
-                          data-testid={`button-admin-add-extra-${extra.name.replace(/\s+/g, "-").toLowerCase()}`}>
-                          <Plus className="w-3 h-3" />
-                        </Button>
-                      </>
-                    ) : (
-                      <Button size="sm" variant="outline" onClick={() => addExtra(extra.name)}
-                        className="h-7 text-xs text-blue-600 border-blue-300"
-                        data-testid={`button-admin-select-extra-${extra.name.replace(/\s+/g, "-").toLowerCase()}`}>
-                        <Plus className="w-3 h-3 mr-1" />
-                        Add
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+            <MealRows meals={availableMeals} selections={selections} maxMeals={localMax}
+              onAdd={(name) => { if (remaining <= 0) return; setSelections(prev => ({ ...prev, [name]: (prev[name] || 0) + 1 })); }}
+              onRemove={(name) => setSelections(prev => { const c = prev[name] || 0; if (c <= 1) { const { [name]: _, ...r } = prev; return r; } return { ...prev, [name]: c - 1 }; })}
+              onAddExtra={(name) => setExtras(prev => ({ ...prev, [name]: (prev[name] || 0) + 1 }))}
+              onRemoveExtra={(name) => setExtras(prev => { const c = prev[name] || 0; if (c <= 1) { const { [name]: _, ...r } = prev; return r; } return { ...prev, [name]: c - 1 }; })}
+              prefix="single" />
+            <ExtraRows extrasData={availableExtras} extras={extras}
+              onAdd={(name) => setExtras(prev => ({ ...prev, [name]: (prev[name] || 0) + 1 }))}
+              onRemove={(name) => setExtras(prev => { const c = prev[name] || 0; if (c <= 1) { const { [name]: _, ...r } = prev; return r; } return { ...prev, [name]: c - 1 }; })}
+              prefix="single-extra" />
+          </>
         )}
 
-        {(totalSelected > 0 || totalExtras > 0) && (
-          <div className="border-t pt-3 mt-2">
+        <div className="border-t pt-3 mt-2">
+          {isDual ? (
+            <div className="flex flex-wrap gap-1 mb-3 text-xs text-muted-foreground">
+              <span className="text-orange-600 font-medium">Sat ({satTotal}):</span>
+              {Object.entries(satSelections).filter(([_, q]) => q > 0).map(([n, q]) => <Badge key={n} variant="secondary" className="text-xs">{n} ×{q}</Badge>)}
+              <span className="text-blue-600 font-medium ml-2">Tue ({tueTotal}):</span>
+              {Object.entries(tueSelections).filter(([_, q]) => q > 0).map(([n, q]) => <Badge key={n} className="text-xs bg-blue-100 text-blue-800">{n} ×{q}</Badge>)}
+            </div>
+          ) : (totalSelected > 0 || totalExtras > 0) && (
             <div className="flex flex-wrap gap-1 mb-3">
-              {Object.entries(selections).filter(([_, q]) => q > 0).map(([name, qty]) => (
-                <Badge key={name} variant="secondary" className="text-xs">{name} ×{qty}</Badge>
-              ))}
-              {Object.entries(extras).filter(([_, q]) => q > 0).map(([name, qty]) => (
-                <Badge key={name} className="text-xs bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">{name} ×{qty}</Badge>
-              ))}
+              {Object.entries(selections).filter(([_, q]) => q > 0).map(([n, q]) => <Badge key={n} variant="secondary" className="text-xs">{n} ×{q}</Badge>)}
+              {Object.entries(extras).filter(([_, q]) => q > 0).map(([n, q]) => <Badge key={n} className="text-xs bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">{n} ×{q}</Badge>)}
             </div>
-            <Button
-              className="w-full bg-emerald-600 hover:bg-emerald-700 text-white"
-              onClick={handleSave}
-              disabled={saveMutation.isPending || totalSelected === 0}
-              data-testid="button-save-admin-selections"
-            >
-              {saveMutation.isPending ? "Saving..." : `Save for ${invite.customerName}${totalExtras > 0 ? ` + ${totalExtras} add-on${totalExtras !== 1 ? "s" : ""}` : ""}`}
-            </Button>
-          </div>
-        )}
+          )}
+          <Button className="w-full bg-emerald-600 hover:bg-emerald-700 text-white"
+            onClick={handleSave}
+            disabled={saveMutation.isPending || (isDual ? (satTotal === 0 || tueTotal === 0) : totalSelected === 0)}
+            data-testid="button-save-admin-selections">
+            {saveMutation.isPending ? "Saving..." : isDual
+              ? `Save Both Deliveries (${satTotal} Sat + ${tueTotal} Tue)`
+              : `Save for ${invite.customerName}${totalExtras > 0 ? ` + ${totalExtras} add-on${totalExtras !== 1 ? "s" : ""}` : ""}`}
+          </Button>
+        </div>
       </DialogContent>
     </Dialog>
   );

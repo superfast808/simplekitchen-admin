@@ -18,7 +18,7 @@ A partner portal for managing food orders from a WooCommerce store. It imports o
 6. **Manual Stock** - Input quantities for items sold in local shops or non-website orders
 7. **Delivery Routes** - Planned delivery route starting from G45 9EE depot; shows delivery customers (including manual orders with address, even when fulfillmentType is null); nearest-neighbor optimization; delivery/collection breakdown
 8. **Weekly Stats** - Dashboard-style page with 8 stat cards: meals sold, revenue, avg order value, delivery stops, new/returning customers, top/worst sellers. Week navigation with chevrons
-9. **Subscriptions** - Send weekly meal preference emails to subscription customers; customers use a public link to select meals; selections auto-create orders; admin overview shows who's chosen/waiting; override email for testing
+9. **Subscriptions** - Send weekly meal preference emails to subscription customers; customers use a public link to select meals; selections auto-create orders; admin overview shows who's chosen/waiting; override email for testing. **Dual-day ("2 week") subscriptions** create two separate orders (Saturday + Tuesday) from a single invite — detected by `TWO_WEEK_PATTERN` on WooCommerce product names; invite has `isDual=true`, shows purple "Sat+Tue" badge in admin overview; subscribe page shows two `MealSelectorPanel` sections; admin dialog shows separate Sat/Tue panels for selection editing
 10. **Settings** - Configurable auto-sync interval, sync enable/disable, order window, logo upload, user management, week rotation, **editable subscription email template** (subject + HTML body with {{firstName}}/{{fullName}}/{{qty}}/{{url}} placeholders)
 
 ## Data Model

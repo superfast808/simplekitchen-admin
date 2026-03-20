@@ -87,6 +87,8 @@ export const subscriptionInvites = pgTable("subscription_invites", {
   addonPaid: boolean("addon_paid").notNull().default(false),
   addonPaymentToken: text("addon_payment_token"),
   isTuesday: boolean("is_tuesday").notNull().default(false),
+  isDual: boolean("is_dual").notNull().default(false),
+  tuesdaySelectionsOrderId: integer("tuesday_selections_order_id"),
 });
 
 export const subscriptionSelections = pgTable("subscription_selections", {
@@ -94,6 +96,7 @@ export const subscriptionSelections = pgTable("subscription_selections", {
   inviteId: integer("invite_id").notNull(),
   productName: text("product_name").notNull(),
   quantity: integer("quantity").notNull().default(1),
+  deliveryDay: text("delivery_day").notNull().default("sat"),
 });
 
 export const recurringOrders = pgTable("recurring_orders", {

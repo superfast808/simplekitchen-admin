@@ -5,13 +5,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { UtensilsCrossed, ChefHat, Check, Minus, Plus, ArrowRight, PartyPopper } from "lucide-react";
+import { UtensilsCrossed, ChefHat, Check, Minus, Plus, ArrowRight, PartyPopper, CalendarDays } from "lucide-react";
 
 type AvailableMeal = {
   name: string;
   popularity: number;
   price?: string;
 };
+
+type SelectionMap = Record<string, number>;
 
 type InviteData = {
   customerName: string;
@@ -20,11 +22,14 @@ type InviteData = {
   addonPaid?: boolean;
   addonAmountPence?: number;
   isTuesday?: boolean;
+  isDual?: boolean;
   weekNumber?: number;
   categoryName?: string;
   availableMeals: AvailableMeal[];
   availableExtras: AvailableMeal[];
-  selections: Array<{ productName: string; quantity: number }>;
+  selections: Array<{ productName: string; quantity: number; deliveryDay?: string }>;
+  satSelections?: Array<{ productName: string; quantity: number }>;
+  tueSelections?: Array<{ productName: string; quantity: number }>;
 };
 
 function BrandLogo({ size = "lg" }: { size?: "lg" | "sm" }) {
@@ -57,13 +62,185 @@ function BrandLogo({ size = "lg" }: { size?: "lg" | "sm" }) {
   );
 }
 
+// Reusable single-day meal selector panel
+function MealSelectorPanel({
+  label,
+  colorScheme,
+  availableMeals,
+  availableExtras,
+  selections,
+  extras,
+  maxMeals,
+  onAddMeal,
+  onRemoveMeal,
+  onAddExtra,
+  onRemoveExtra,
+  testPrefix,
+}: {
+  label: string;
+  colorScheme: "emerald" | "blue";
+  availableMeals: AvailableMeal[];
+  availableExtras: AvailableMeal[];
+  selections: SelectionMap;
+  extras: SelectionMap;
+  maxMeals: number;
+  onAddMeal: (name: string) => void;
+  onRemoveMeal: (name: string) => void;
+  onAddExtra: (name: string) => void;
+  onRemoveExtra: (name: string) => void;
+  testPrefix: string;
+}) {
+  const totalSelected = Object.values(selections).reduce((s, q) => s + q, 0);
+  const remaining = maxMeals - totalSelected;
+  const totalExtras = Object.values(extras).reduce((s, q) => s + q, 0);
+
+  const borderColor = colorScheme === "emerald" ? "border-emerald-400" : "border-blue-400";
+  const bgColor = colorScheme === "emerald" ? "bg-emerald-50/50 dark:bg-emerald-950/20" : "bg-blue-50/50 dark:bg-blue-950/20";
+  const badgeActive = colorScheme === "emerald" ? "bg-emerald-500 text-white" : "bg-blue-500 text-white";
+  const badgePending = colorScheme === "emerald" ? "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300" : "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300";
+  const btnColor = colorScheme === "emerald" ? "text-emerald-600 border-emerald-300" : "text-blue-600 border-blue-300";
+  const headerBg = colorScheme === "emerald" ? "bg-orange-50 dark:bg-orange-950/10 border-orange-200" : "bg-blue-50 dark:bg-blue-950/10 border-blue-200";
+  const headerText = colorScheme === "emerald" ? "text-orange-700 dark:text-orange-300" : "text-blue-700 dark:text-blue-300";
+
+  return (
+    <div className="space-y-2">
+      <div className={`flex items-center justify-between px-4 py-3 rounded-xl border ${headerBg}`}>
+        <div className="flex items-center gap-2">
+          <CalendarDays className={`w-4 h-4 ${headerText}`} />
+          <span className={`font-semibold text-sm ${headerText}`}>{label}</span>
+        </div>
+        <Badge
+          className={`text-xs px-2 py-0.5 ${remaining === 0 ? badgeActive : badgePending}`}
+          data-testid={`badge-remaining-${testPrefix}`}
+        >
+          {remaining === 0 ? `All ${maxMeals} chosen` : `${remaining} of ${maxMeals} remaining`}
+        </Badge>
+      </div>
+
+      {availableMeals.map((meal) => {
+        const qty = selections[meal.name] || 0;
+        const isSelected = qty > 0;
+        return (
+          <Card
+            key={meal.name}
+            className={`transition-all ${isSelected ? `${borderColor} ${bgColor} shadow-sm` : ""}`}
+            data-testid={`card-meal-${testPrefix}-${meal.name.replace(/\s+/g, "-").toLowerCase()}`}
+          >
+            <CardContent className="p-4 flex items-center justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <p className="font-medium text-sm truncate">{meal.name}</p>
+                <p className="text-xs text-muted-foreground">£7.50</p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {isSelected ? (
+                  <div className="flex items-center gap-1">
+                    <Button size="icon" variant="outline" className="h-8 w-8 rounded-full"
+                      onClick={() => onRemoveMeal(meal.name)}
+                      data-testid={`button-remove-${testPrefix}-${meal.name.replace(/\s+/g, "-").toLowerCase()}`}>
+                      <Minus className="w-3 h-3" />
+                    </Button>
+                    <span className="w-6 text-center font-bold text-sm">{qty}</span>
+                    <Button size="icon" variant="outline" className="h-8 w-8 rounded-full"
+                      onClick={() => onAddMeal(meal.name)}
+                      disabled={remaining <= 0}
+                      data-testid={`button-add-${testPrefix}-${meal.name.replace(/\s+/g, "-").toLowerCase()}`}>
+                      <Plus className="w-3 h-3" />
+                    </Button>
+                  </div>
+                ) : (
+                  <Button size="sm" variant="outline" onClick={() => onAddMeal(meal.name)}
+                    disabled={remaining <= 0}
+                    className={btnColor}
+                    data-testid={`button-select-${testPrefix}-${meal.name.replace(/\s+/g, "-").toLowerCase()}`}>
+                    <Plus className="w-3 h-3 mr-1" />
+                    Add
+                  </Button>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })}
+
+      {availableMeals.length === 0 && (
+        <Card>
+          <CardContent className="p-6 text-center text-muted-foreground">
+            <UtensilsCrossed className="w-8 h-8 mx-auto mb-2 opacity-40" />
+            <p className="text-sm">No meals available yet this week.</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {(availableExtras || []).length > 0 && (
+        <div className="space-y-2 pt-1">
+          <div className="flex items-center gap-2">
+            <div className="flex-1 border-t" />
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide shrink-0">Add-ons (optional)</p>
+            <div className="flex-1 border-t" />
+          </div>
+          {(availableExtras || []).map((extra) => {
+            const qty = extras[extra.name] || 0;
+            const isSelected = qty > 0;
+            const unitPrice = extra.price ? parseFloat(extra.price) : 0;
+            return (
+              <Card key={extra.name}
+                className={`transition-all ${isSelected ? "border-blue-400 bg-blue-50/50 dark:bg-blue-950/20 shadow-sm" : ""}`}
+                data-testid={`card-extra-${testPrefix}-${extra.name.replace(/\s+/g, "-").toLowerCase()}`}>
+                <CardContent className="p-4 flex items-center justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-sm truncate">{extra.name}</p>
+                    {unitPrice > 0 && <p className="text-xs text-muted-foreground">£{unitPrice.toFixed(2)}</p>}
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {isSelected ? (
+                      <div className="flex items-center gap-1">
+                        <Button size="icon" variant="outline" className="h-8 w-8 rounded-full"
+                          onClick={() => onRemoveExtra(extra.name)}
+                          data-testid={`button-remove-extra-${testPrefix}-${extra.name.replace(/\s+/g, "-").toLowerCase()}`}>
+                          <Minus className="w-3 h-3" />
+                        </Button>
+                        <span className="w-6 text-center font-bold text-sm">{qty}</span>
+                        <Button size="icon" variant="outline" className="h-8 w-8 rounded-full"
+                          onClick={() => onAddExtra(extra.name)}
+                          data-testid={`button-add-extra-${testPrefix}-${extra.name.replace(/\s+/g, "-").toLowerCase()}`}>
+                          <Plus className="w-3 h-3" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <Button size="sm" variant="outline" onClick={() => onAddExtra(extra.name)}
+                        className="text-blue-600 border-blue-300"
+                        data-testid={`button-select-extra-${testPrefix}-${extra.name.replace(/\s+/g, "-").toLowerCase()}`}>
+                        <Plus className="w-3 h-3 mr-1" />
+                        Add
+                      </Button>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function SubscribePage({ params }: { params: { token: string } }) {
   const token = params.token;
   const [email, setEmail] = useState("");
   const [emailVerified, setEmailVerified] = useState(false);
   const [emailError, setEmailError] = useState("");
-  const [selections, setSelections] = useState<Record<string, number>>({});
-  const [extras, setExtras] = useState<Record<string, number>>({});
+
+  // Single-day state
+  const [selections, setSelections] = useState<SelectionMap>({});
+  const [extras, setExtras] = useState<SelectionMap>({});
+
+  // Dual-day state
+  const [satSelections, setSatSelections] = useState<SelectionMap>({});
+  const [satExtras, setSatExtras] = useState<SelectionMap>({});
+  const [tueSelections, setTueSelections] = useState<SelectionMap>({});
+  const [tueExtras, setTueExtras] = useState<SelectionMap>({});
+
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
@@ -80,78 +257,88 @@ export default function SubscribePage({ params }: { params: { token: string } })
     },
   });
 
-  // Pre-fill selections: only classify as extra if it's a confirmed non-7.50 product
-  // Everything else (including unrecognised products) defaults to meal
+  // Pre-fill selections from server data
   useEffect(() => {
     if (!data) return;
     const extraSet = new Set((data.availableExtras || []).map(e => e.name));
-    const mealSels: Record<string, number> = {};
-    const extSels: Record<string, number> = {};
-    for (const sel of data.selections || []) {
-      if (extraSet.has(sel.productName)) {
-        extSels[sel.productName] = sel.quantity;
-      } else {
-        mealSels[sel.productName] = sel.quantity;
+
+    if (data.isDual) {
+      const satMeals: SelectionMap = {};
+      const satExt: SelectionMap = {};
+      const tueMeals: SelectionMap = {};
+      const tueExt: SelectionMap = {};
+      for (const sel of data.satSelections || []) {
+        if (extraSet.has(sel.productName)) satExt[sel.productName] = sel.quantity;
+        else satMeals[sel.productName] = sel.quantity;
       }
+      for (const sel of data.tueSelections || []) {
+        if (extraSet.has(sel.productName)) tueExt[sel.productName] = sel.quantity;
+        else tueMeals[sel.productName] = sel.quantity;
+      }
+      if (Object.keys(satMeals).length) setSatSelections(satMeals);
+      if (Object.keys(satExt).length) setSatExtras(satExt);
+      if (Object.keys(tueMeals).length) setTueSelections(tueMeals);
+      if (Object.keys(tueExt).length) setTueExtras(tueExt);
+    } else {
+      const mealSels: SelectionMap = {};
+      const extSels: SelectionMap = {};
+      for (const sel of data.selections || []) {
+        if (extraSet.has(sel.productName)) extSels[sel.productName] = sel.quantity;
+        else mealSels[sel.productName] = sel.quantity;
+      }
+      if (Object.keys(mealSels).length) setSelections(mealSels);
+      if (Object.keys(extSels).length) setExtras(extSels);
     }
-    if (Object.keys(mealSels).length) setSelections(mealSels);
-    if (Object.keys(extSels).length) setExtras(extSels);
   }, [data]);
 
-  const totalSelected = Object.values(selections).reduce((sum, q) => sum + q, 0);
-  const totalExtras = Object.values(extras).reduce((sum, q) => sum + q, 0);
   const maxMeals = data?.subscriptionQuantity || 0;
+  const totalSelected = Object.values(selections).reduce((s, q) => s + q, 0);
+  const totalExtras = Object.values(extras).reduce((s, q) => s + q, 0);
   const remaining = maxMeals - totalSelected;
+
+  const satTotal = Object.values(satSelections).reduce((s, q) => s + q, 0);
+  const tueTotal = Object.values(tueSelections).reduce((s, q) => s + q, 0);
+
+  const makeAdder = (setter: React.Dispatch<React.SetStateAction<SelectionMap>>, total: number) =>
+    (name: string) => { if (total >= maxMeals) return; setter(prev => ({ ...prev, [name]: (prev[name] || 0) + 1 })); };
+
+  const makeRemover = (setter: React.Dispatch<React.SetStateAction<SelectionMap>>) =>
+    (name: string) => setter(prev => { const c = prev[name] || 0; if (c <= 1) { const { [name]: _, ...rest } = prev; return rest; } return { ...prev, [name]: c - 1 }; });
+
+  const makeExtraAdder = (setter: React.Dispatch<React.SetStateAction<SelectionMap>>) =>
+    (name: string) => setter(prev => ({ ...prev, [name]: (prev[name] || 0) + 1 }));
+
+  const makeExtraRemover = (setter: React.Dispatch<React.SetStateAction<SelectionMap>>) =>
+    (name: string) => setter(prev => { const c = prev[name] || 0; if (c <= 1) { const { [name]: _, ...rest } = prev; return rest; } return { ...prev, [name]: c - 1 }; });
 
   const handleVerifyEmail = () => {
     setEmailError("");
-    if (!email.trim()) {
-      setEmailError("Please enter your email address");
-      return;
-    }
+    if (!email.trim()) { setEmailError("Please enter your email address"); return; }
     setEmailVerified(true);
-  };
-
-  const addMeal = (name: string) => {
-    if (remaining <= 0) return;
-    setSelections(prev => ({ ...prev, [name]: (prev[name] || 0) + 1 }));
-  };
-
-  const removeMeal = (name: string) => {
-    setSelections(prev => {
-      const current = prev[name] || 0;
-      if (current <= 1) { const { [name]: _, ...rest } = prev; return rest; }
-      return { ...prev, [name]: current - 1 };
-    });
-  };
-
-  const addExtra = (name: string) => {
-    setExtras(prev => ({ ...prev, [name]: (prev[name] || 0) + 1 }));
-  };
-
-  const removeExtra = (name: string) => {
-    setExtras(prev => {
-      const current = prev[name] || 0;
-      if (current <= 1) { const { [name]: _, ...rest } = prev; return rest; }
-      return { ...prev, [name]: current - 1 };
-    });
   };
 
   const handleSubmit = async () => {
     setSubmitError("");
     setSubmitting(true);
     try {
-      const sels = Object.entries(selections)
-        .filter(([_, q]) => q > 0)
-        .map(([productName, quantity]) => ({ productName, quantity }));
-      const extSels = Object.entries(extras)
-        .filter(([_, q]) => q > 0)
-        .map(([productName, quantity]) => ({ productName, quantity }));
+      let body: Record<string, unknown>;
+
+      if (data?.isDual) {
+        const satSels = Object.entries(satSelections).filter(([_, q]) => q > 0).map(([productName, quantity]) => ({ productName, quantity }));
+        const tueSels = Object.entries(tueSelections).filter(([_, q]) => q > 0).map(([productName, quantity]) => ({ productName, quantity }));
+        const satExt = Object.entries(satExtras).filter(([_, q]) => q > 0).map(([productName, quantity]) => ({ productName, quantity }));
+        const tueExt = Object.entries(tueExtras).filter(([_, q]) => q > 0).map(([productName, quantity]) => ({ productName, quantity }));
+        body = { email, satSelections: satSels, tueSelections: tueSels, satExtras: satExt, tueExtras: tueExt };
+      } else {
+        const sels = Object.entries(selections).filter(([_, q]) => q > 0).map(([productName, quantity]) => ({ productName, quantity }));
+        const extSels = Object.entries(extras).filter(([_, q]) => q > 0).map(([productName, quantity]) => ({ productName, quantity }));
+        body = { email, selections: sels, extras: extSels };
+      }
 
       const res = await fetch(`/api/subscribe/${token}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, selections: sels, extras: extSels }),
+        body: JSON.stringify(body),
       });
 
       if (!res.ok) {
@@ -166,13 +353,7 @@ export default function SubscribePage({ params }: { params: { token: string } })
       }
 
       const result = await res.json();
-
-      // If the server returned a Stripe checkout URL, redirect to it
-      if (result.checkoutUrl) {
-        window.location.href = result.checkoutUrl;
-        return;
-      }
-
+      if (result.checkoutUrl) { window.location.href = result.checkoutUrl; return; }
       setSubmitted(true);
     } catch {
       setSubmitError("Could not connect to server. Please try again.");
@@ -196,9 +377,7 @@ export default function SubscribePage({ params }: { params: { token: string } })
           <CardContent className="p-8">
             <UtensilsCrossed className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
             <h2 className="text-xl font-bold mb-2">Link Not Found</h2>
-            <p className="text-muted-foreground">
-              This meal selection link may have expired or is no longer valid. Please contact us if you need assistance.
-            </p>
+            <p className="text-muted-foreground">This meal selection link may have expired or is no longer valid. Please contact us if you need assistance.</p>
           </CardContent>
         </Card>
       </div>
@@ -212,9 +391,7 @@ export default function SubscribePage({ params }: { params: { token: string } })
           <CardContent className="p-8">
             <Check className="w-12 h-12 mx-auto text-emerald-500 mb-4" />
             <h2 className="text-xl font-bold mb-2">Already Submitted</h2>
-            <p className="text-muted-foreground">
-              You've already chosen your meals for this week. If you need to make changes, please get in touch.
-            </p>
+            <p className="text-muted-foreground">You've already chosen your meals for this week. If you need to make changes, please get in touch.</p>
           </CardContent>
         </Card>
       </div>
@@ -228,17 +405,34 @@ export default function SubscribePage({ params }: { params: { token: string } })
           <CardContent className="p-8 space-y-4">
             <PartyPopper className="w-14 h-14 mx-auto text-emerald-500" />
             <h2 className="text-2xl font-bold">You're all set!</h2>
-            <p className="text-muted-foreground">
-              Your meal choices have been saved. We'll have them ready for you this week.
-            </p>
-            <div className="pt-4 space-y-2">
-              {Object.entries(selections).map(([name, qty]) => (
-                <div key={name} className="flex items-center justify-between px-4 py-2 bg-emerald-50 dark:bg-emerald-950/20 rounded-lg">
-                  <span className="font-medium text-sm">{name}</span>
-                  <Badge className="bg-emerald-500 text-white">×{qty}</Badge>
-                </div>
-              ))}
-            </div>
+            <p className="text-muted-foreground">Your meal choices have been saved. We'll have them ready for you this week.</p>
+            {data.isDual ? (
+              <div className="pt-2 space-y-3 text-left">
+                <p className="text-xs font-semibold text-orange-600 uppercase tracking-wide">Saturday</p>
+                {Object.entries(satSelections).map(([name, qty]) => (
+                  <div key={name} className="flex items-center justify-between px-3 py-2 bg-orange-50 dark:bg-orange-950/20 rounded-lg">
+                    <span className="font-medium text-sm">{name}</span>
+                    <Badge className="bg-orange-500 text-white">×{qty}</Badge>
+                  </div>
+                ))}
+                <p className="text-xs font-semibold text-blue-600 uppercase tracking-wide mt-2">Tuesday</p>
+                {Object.entries(tueSelections).map(([name, qty]) => (
+                  <div key={name} className="flex items-center justify-between px-3 py-2 bg-blue-50 dark:bg-blue-950/20 rounded-lg">
+                    <span className="font-medium text-sm">{name}</span>
+                    <Badge className="bg-blue-500 text-white">×{qty}</Badge>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="pt-4 space-y-2">
+                {Object.entries(selections).map(([name, qty]) => (
+                  <div key={name} className="flex items-center justify-between px-4 py-2 bg-emerald-50 dark:bg-emerald-950/20 rounded-lg">
+                    <span className="font-medium text-sm">{name}</span>
+                    <Badge className="bg-emerald-500 text-white">×{qty}</Badge>
+                  </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -254,7 +448,7 @@ export default function SubscribePage({ params }: { params: { token: string } })
             <div>
               <CardTitle className="text-xl">Simple Kitchen Prep</CardTitle>
               <CardDescription className="mt-1">
-                Hi{data.customerName ? ` ${data.customerName.split(" ")[0]}` : ""}! Enter your email to choose your {maxMeals} meals for this week.
+                Hi{data.customerName ? ` ${data.customerName.split(" ")[0]}` : ""}! Enter your email to choose your {maxMeals} meals for this week{data.isDual ? " (Saturday + Tuesday)" : ""}.
               </CardDescription>
             </div>
           </CardHeader>
@@ -270,13 +464,10 @@ export default function SubscribePage({ params }: { params: { token: string } })
                 onKeyDown={e => e.key === "Enter" && handleVerifyEmail()}
                 data-testid="input-subscribe-email"
               />
-              {emailError && (
-                <p className="text-sm text-red-500" data-testid="text-email-error">{emailError}</p>
-              )}
+              {emailError && <p className="text-sm text-red-500" data-testid="text-email-error">{emailError}</p>}
             </div>
             <Button className="w-full bg-emerald-600" onClick={handleVerifyEmail} data-testid="button-verify-email">
-              Continue
-              <ArrowRight className="w-4 h-4 ml-2" />
+              Continue <ArrowRight className="w-4 h-4 ml-2" />
             </Button>
           </CardContent>
         </Card>
@@ -284,16 +475,99 @@ export default function SubscribePage({ params }: { params: { token: string } })
     );
   }
 
+  // ---- DUAL DAY ----
+  if (data.isDual) {
+    const canSubmit = satTotal > 0 && tueTotal > 0;
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-orange-50 dark:from-gray-900 dark:via-gray-900 dark:to-gray-900">
+        <div className="max-w-lg mx-auto p-4 pb-36">
+          <div className="text-center py-6">
+            <div className="mb-3"><BrandLogo size="sm" /></div>
+            <h1 className="text-xl font-bold" data-testid="text-subscribe-title">Choose Your Meals</h1>
+            <p className="text-sm text-muted-foreground mt-1">
+              {maxMeals} meals per delivery — Saturday <span className="font-semibold text-orange-600">+</span> Tuesday
+            </p>
+            <Badge className="mt-2 bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300 text-xs">
+              2-week subscription (Sat + Tue)
+            </Badge>
+          </div>
+
+          <div className="space-y-6">
+            <MealSelectorPanel
+              label="Saturday Delivery"
+              colorScheme="emerald"
+              availableMeals={data.availableMeals}
+              availableExtras={data.availableExtras}
+              selections={satSelections}
+              extras={satExtras}
+              maxMeals={maxMeals}
+              onAddMeal={makeAdder(setSatSelections, satTotal)}
+              onRemoveMeal={makeRemover(setSatSelections)}
+              onAddExtra={makeExtraAdder(setSatExtras)}
+              onRemoveExtra={makeExtraRemover(setSatExtras)}
+              testPrefix="sat"
+            />
+
+            <div className="flex items-center gap-3">
+              <div className="flex-1 border-t border-dashed" />
+              <span className="text-xs text-muted-foreground font-medium uppercase tracking-wide shrink-0">Tuesday Delivery</span>
+              <div className="flex-1 border-t border-dashed" />
+            </div>
+
+            <MealSelectorPanel
+              label="Tuesday Delivery"
+              colorScheme="blue"
+              availableMeals={data.availableMeals}
+              availableExtras={data.availableExtras}
+              selections={tueSelections}
+              extras={tueExtras}
+              maxMeals={maxMeals}
+              onAddMeal={makeAdder(setTueSelections, tueTotal)}
+              onRemoveMeal={makeRemover(setTueSelections)}
+              onAddExtra={makeExtraAdder(setTueExtras)}
+              onRemoveExtra={makeExtraRemover(setTueExtras)}
+              testPrefix="tue"
+            />
+          </div>
+
+          {submitError && <p className="text-sm text-red-500 text-center mt-3" data-testid="text-submit-error">{submitError}</p>}
+        </div>
+
+        <div className="fixed bottom-0 left-0 right-0 bg-white/95 dark:bg-gray-900/95 backdrop-blur border-t p-4 shadow-lg">
+          <div className="max-w-lg mx-auto">
+            <div className="flex items-center gap-4 mb-2 text-xs text-muted-foreground">
+              <span className="text-orange-600 font-medium">Sat: {satTotal}/{maxMeals}</span>
+              <span className="text-blue-600 font-medium">Tue: {tueTotal}/{maxMeals}</span>
+            </div>
+            {!canSubmit && (
+              <p className="text-xs text-muted-foreground mb-2">
+                {satTotal === 0 && tueTotal === 0 ? "Select meals for both deliveries to continue" :
+                  satTotal === 0 ? "Select your Saturday meals to continue" :
+                    "Select your Tuesday meals to continue"}
+              </p>
+            )}
+            <Button
+              className="w-full bg-emerald-600 hover:bg-emerald-700 text-white"
+              size="lg"
+              onClick={handleSubmit}
+              disabled={submitting || !canSubmit}
+              data-testid="button-submit-selections"
+            >
+              {submitting ? "Processing..." : `Confirm Both Deliveries (${satTotal} Sat + ${tueTotal} Tue)`}
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ---- SINGLE DAY ----
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-orange-50 dark:from-gray-900 dark:via-gray-900 dark:to-gray-900">
       <div className="max-w-lg mx-auto p-4 pb-32">
         <div className="text-center py-6">
-          <div className="mb-3">
-            <BrandLogo size="sm" />
-          </div>
-          <h1 className="text-xl font-bold" data-testid="text-subscribe-title">
-            Choose Your Meals
-          </h1>
+          <div className="mb-3"><BrandLogo size="sm" /></div>
+          <h1 className="text-xl font-bold" data-testid="text-subscribe-title">Choose Your Meals</h1>
           <p className="text-sm text-muted-foreground mt-1">
             Select {maxMeals} meals for this week{data.categoryName ? ` (${data.categoryName})` : ""}
             {data.isTuesday !== undefined && (
@@ -318,11 +592,9 @@ export default function SubscribePage({ params }: { params: { token: string } })
             const qty = selections[meal.name] || 0;
             const isSelected = qty > 0;
             return (
-              <Card
-                key={meal.name}
+              <Card key={meal.name}
                 className={`transition-all ${isSelected ? "border-emerald-400 bg-emerald-50/50 dark:bg-emerald-950/20 shadow-sm" : ""}`}
-                data-testid={`card-meal-${meal.name.replace(/\s+/g, "-").toLowerCase()}`}
-              >
+                data-testid={`card-meal-${meal.name.replace(/\s+/g, "-").toLowerCase()}`}>
                 <CardContent className="p-4 flex items-center justify-between gap-3">
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-sm truncate">{meal.name}</p>
@@ -331,38 +603,25 @@ export default function SubscribePage({ params }: { params: { token: string } })
                   <div className="flex items-center gap-2 shrink-0">
                     {isSelected ? (
                       <div className="flex items-center gap-1">
-                        <Button
-                          size="icon"
-                          variant="outline"
-                          className="h-8 w-8 rounded-full"
-                          onClick={() => removeMeal(meal.name)}
-                          data-testid={`button-remove-${meal.name.replace(/\s+/g, "-").toLowerCase()}`}
-                        >
+                        <Button size="icon" variant="outline" className="h-8 w-8 rounded-full"
+                          onClick={() => makeRemover(setSelections)(meal.name)}
+                          data-testid={`button-remove-${meal.name.replace(/\s+/g, "-").toLowerCase()}`}>
                           <Minus className="w-3 h-3" />
                         </Button>
-                        <span className="w-6 text-center font-bold text-sm" data-testid={`text-qty-${meal.name.replace(/\s+/g, "-").toLowerCase()}`}>
-                          {qty}
-                        </span>
-                        <Button
-                          size="icon"
-                          variant="outline"
-                          className="h-8 w-8 rounded-full"
-                          onClick={() => addMeal(meal.name)}
+                        <span className="w-6 text-center font-bold text-sm" data-testid={`text-qty-${meal.name.replace(/\s+/g, "-").toLowerCase()}`}>{qty}</span>
+                        <Button size="icon" variant="outline" className="h-8 w-8 rounded-full"
+                          onClick={() => makeAdder(setSelections, totalSelected)(meal.name)}
                           disabled={remaining <= 0}
-                          data-testid={`button-add-${meal.name.replace(/\s+/g, "-").toLowerCase()}`}
-                        >
+                          data-testid={`button-add-${meal.name.replace(/\s+/g, "-").toLowerCase()}`}>
                           <Plus className="w-3 h-3" />
                         </Button>
                       </div>
                     ) : (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => addMeal(meal.name)}
+                      <Button size="sm" variant="outline"
+                        onClick={() => makeAdder(setSelections, totalSelected)(meal.name)}
                         disabled={remaining <= 0}
                         className="text-emerald-600 border-emerald-300"
-                        data-testid={`button-select-${meal.name.replace(/\s+/g, "-").toLowerCase()}`}
-                      >
+                        data-testid={`button-select-${meal.name.replace(/\s+/g, "-").toLowerCase()}`}>
                         <Plus className="w-3 h-3 mr-1" />
                         Add
                       </Button>
@@ -383,7 +642,6 @@ export default function SubscribePage({ params }: { params: { token: string } })
           </Card>
         )}
 
-        {/* Extras / Add-ons section */}
         {(data.availableExtras || []).length > 0 && (
           <div className="mt-6 space-y-2">
             <div className="flex items-center gap-2">
@@ -396,35 +654,31 @@ export default function SubscribePage({ params }: { params: { token: string } })
               const isSelected = qty > 0;
               const unitPrice = extra.price ? parseFloat(extra.price) : 0;
               return (
-                <Card
-                  key={extra.name}
+                <Card key={extra.name}
                   className={`transition-all ${isSelected ? "border-blue-400 bg-blue-50/50 dark:bg-blue-950/20 shadow-sm" : ""}`}
-                  data-testid={`card-extra-${extra.name.replace(/\s+/g, "-").toLowerCase()}`}
-                >
+                  data-testid={`card-extra-${extra.name.replace(/\s+/g, "-").toLowerCase()}`}>
                   <CardContent className="p-4 flex items-center justify-between gap-3">
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-sm truncate">{extra.name}</p>
-                      {unitPrice > 0 && (
-                        <p className="text-xs text-muted-foreground">£{unitPrice.toFixed(2)}</p>
-                      )}
+                      {unitPrice > 0 && <p className="text-xs text-muted-foreground">£{unitPrice.toFixed(2)}</p>}
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       {isSelected ? (
                         <div className="flex items-center gap-1">
                           <Button size="icon" variant="outline" className="h-8 w-8 rounded-full"
-                            onClick={() => removeExtra(extra.name)}
+                            onClick={() => makeExtraRemover(setExtras)(extra.name)}
                             data-testid={`button-remove-extra-${extra.name.replace(/\s+/g, "-").toLowerCase()}`}>
                             <Minus className="w-3 h-3" />
                           </Button>
-                          <span className="w-6 text-center font-bold text-sm" data-testid={`text-extra-qty-${extra.name.replace(/\s+/g, "-").toLowerCase()}`}>{qty}</span>
+                          <span className="w-6 text-center font-bold text-sm">{qty}</span>
                           <Button size="icon" variant="outline" className="h-8 w-8 rounded-full"
-                            onClick={() => addExtra(extra.name)}
+                            onClick={() => makeExtraAdder(setExtras)(extra.name)}
                             data-testid={`button-add-extra-${extra.name.replace(/\s+/g, "-").toLowerCase()}`}>
                             <Plus className="w-3 h-3" />
                           </Button>
                         </div>
                       ) : (
-                        <Button size="sm" variant="outline" onClick={() => addExtra(extra.name)}
+                        <Button size="sm" variant="outline" onClick={() => makeExtraAdder(setExtras)(extra.name)}
                           className="text-blue-600 border-blue-300"
                           data-testid={`button-select-extra-${extra.name.replace(/\s+/g, "-").toLowerCase()}`}>
                           <Plus className="w-3 h-3 mr-1" />
@@ -463,8 +717,8 @@ export default function SubscribePage({ params }: { params: { token: string } })
             </div>
             {totalExtras > 0 && (() => {
               const addonTotal = Object.entries(extras).reduce((sum, [name, qty]) => {
-                const extraProduct = data.availableExtras.find(e => e.name === name);
-                const price = extraProduct?.price ? parseFloat(extraProduct.price) : 0;
+                const ep = data.availableExtras.find(e => e.name === name);
+                const price = ep?.price ? parseFloat(ep.price) : 0;
                 return sum + price * qty;
               }, 0);
               return addonTotal > 0 ? (
