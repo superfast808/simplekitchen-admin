@@ -2591,6 +2591,43 @@ export async function registerRoutes(
     }
   });
 
+  // Returns the most recent website (WooCommerce) order + items for each recurring customer,
+  // keyed by recurringOrder.id. Used to preview "last order" in the templates table.
+  app.get("/api/recurring-orders/previous-orders", async (req, res) => {
+    try {
+      const currentWeek = getWeekRange(0);
+      const recurringList = await storage.getRecurringOrders();
+
+      // All non-manual orders before this week, sorted newest-first
+      const allOrders = await storage.getOrders(undefined, currentWeek.from);
+      const sorted = [...allOrders]
+        .filter(o => !o.isManual)
+        .sort((a, b) => new Date(b.orderDate).getTime() - new Date(a.orderDate).getTime());
+
+      // Map customerName (lowercase) → most recent order
+      const byCustomer = new Map<string, typeof sorted[0]>();
+      for (const o of sorted) {
+        const key = o.customerName.toLowerCase().trim();
+        if (!byCustomer.has(key)) byCustomer.set(key, o);
+      }
+
+      const result: Record<number, { items: { productName: string; quantity: number }[]; orderDate: string }> = {};
+      for (const ro of recurringList) {
+        const last = byCustomer.get(ro.customerName.toLowerCase().trim());
+        if (last) {
+          const items = await storage.getOrderItems(last.id);
+          result[ro.id] = {
+            items: items.map(i => ({ productName: i.productName, quantity: i.quantity })),
+            orderDate: last.orderDate instanceof Date ? last.orderDate.toISOString() : String(last.orderDate),
+          };
+        }
+      }
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
   app.get("/api/recurring-orders", async (req, res) => {
     try {
       const recurringOrdersList = await storage.getRecurringOrders();

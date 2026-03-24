@@ -19,6 +19,7 @@ import type { RecurringOrder, RecurringOrderItem, Order, OrderItem } from "@shar
 
 type RecurringOrderWithItems = RecurringOrder & { items: RecurringOrderItem[] };
 type OrderWithItems = Order & { items: OrderItem[] };
+type PreviousOrderMap = Record<number, { items: { productName: string; quantity: number }[]; orderDate: string }>;
 
 export default function TuesdayOrdersPage() {
   const { toast } = useToast();
@@ -37,6 +38,10 @@ export default function TuesdayOrdersPage() {
   const { data: saturdayOrders } = useQuery<RecurringOrderWithItems[]>({
     queryKey: ["/api/recurring-orders"],
     select: (data) => data.filter((o: any) => o.isTuesday === false),
+  });
+
+  const { data: previousOrders } = useQuery<PreviousOrderMap>({
+    queryKey: ["/api/recurring-orders/previous-orders"],
   });
 
   const { data: manualOrders } = useQuery<OrderWithItems[]>({
@@ -190,7 +195,14 @@ export default function TuesdayOrdersPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {orders.map((order) => (
+                  {orders.map((order) => {
+                    const isStamped = manualOrders?.some(
+                      m => m.customerName.toLowerCase() === order.customerName.toLowerCase()
+                    );
+                    const prevEntry = previousOrders?.[order.id];
+                    const showPrevItems = !isStamped && prevEntry && prevEntry.items.length > 0;
+                    const displayItems = showPrevItems ? prevEntry!.items : order.items;
+                    return (
                     <TableRow key={order.id} className={!order.active ? "opacity-50" : ""} data-testid={`row-recurring-${order.id}`}>
                       <TableCell>
                         <Switch
@@ -201,10 +213,7 @@ export default function TuesdayOrdersPage() {
                       </TableCell>
                       <TableCell data-testid={`text-customer-${order.id}`}>
                         <div className="font-medium">{order.customerName}</div>
-                        {order.active && order.items.length > 0 && (() => {
-                          const isStamped = manualOrders?.some(
-                            m => m.customerName.toLowerCase() === order.customerName.toLowerCase()
-                          );
+                        {order.active && (() => {
                           return isStamped ? (
                             <span className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400 mt-0.5" data-testid={`status-stamped-${order.id}`}>
                               <CheckCircle2 className="w-3 h-3" />Stamped
@@ -217,13 +226,13 @@ export default function TuesdayOrdersPage() {
                         })()}
                       </TableCell>
                       <TableCell>
-                        <div className="flex flex-wrap gap-1">
-                          {order.items.map((item, i) => (
+                        <div className="flex flex-wrap gap-1 items-center">
+                          {displayItems.map((item, i) => (
                             <Badge key={i} variant="secondary" className="text-xs" data-testid={`badge-item-${order.id}-${i}`}>
                               {item.quantity > 1 ? `${item.quantity}× ` : ""}{item.productName}
                             </Badge>
                           ))}
-                          {order.items.length === 0 && (() => {
+                          {displayItems.length === 0 && (() => {
                             const saturdayMatch = saturdayOrders?.find(
                               s => s.customerName.toLowerCase() === order.customerName.toLowerCase() && s.items.length > 0
                             );
@@ -249,6 +258,11 @@ export default function TuesdayOrdersPage() {
                               </>
                             );
                           })()}
+                          {showPrevItems && (
+                            <span className="text-xs text-muted-foreground ml-1 w-full mt-0.5" data-testid={`text-prev-order-date-${order.id}`}>
+                              Last order: {format(new Date(prevEntry!.orderDate), "d MMM")}
+                            </span>
+                          )}
                         </div>
                       </TableCell>
                       <TableCell>
@@ -285,7 +299,8 @@ export default function TuesdayOrdersPage() {
                         </div>
                       </TableCell>
                     </TableRow>
-                  ))}
+                  );
+                  })}
                 </TableBody>
               </Table>
             </div>
