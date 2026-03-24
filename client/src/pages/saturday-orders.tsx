@@ -7,10 +7,11 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from "@/components/ui/table";
-import { Plus, Pencil, Trash2, Play, CalendarDays, ShoppingCart, Globe, Copy, CheckCircle2, AlertCircle } from "lucide-react";
+import { Plus, Pencil, Trash2, Play, CalendarDays, ShoppingCart, Globe, Copy, CheckCircle2, AlertCircle, Banknote } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useDateFilter, DateFilter, DateRangeLabel, getDeliveryDatesForWindow } from "@/components/date-filter";
 import { format } from "date-fns";
@@ -110,6 +111,14 @@ export default function SaturdayOrdersPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/recurring-orders/previous-orders"] });
       toast({ title: "Manual order removed" });
     },
+  });
+
+  const [editingAmounts, setEditingAmounts] = useState<Record<number, string>>({});
+
+  const packingMutation = useMutation({
+    mutationFn: ({ id, data }: { id: number; data: any }) => apiRequest("PATCH", `/api/orders/${id}/packing`, data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/orders"] }),
+    onError: (err: Error) => toast({ title: "Save failed", description: err.message, variant: "destructive" }),
   });
 
   const generateMutation = useMutation({
@@ -346,6 +355,8 @@ export default function SaturdayOrdersPage() {
                       <TableHead className="w-[90px]">Type</TableHead>
                       <TableHead className="w-[80px]">Date</TableHead>
                       <TableHead className="w-[50px] text-right">Qty</TableHead>
+                      <TableHead className="w-[130px]">Payment</TableHead>
+                      <TableHead className="w-[60px] text-center">Pack</TableHead>
                       <TableHead className="w-[100px]"></TableHead>
                     </TableRow>
                   </TableHeader>
@@ -384,6 +395,48 @@ export default function SaturdayOrdersPage() {
                         </TableCell>
                         <TableCell className="text-right font-semibold tabular-nums" data-testid={`text-manual-qty-${order.id}`}>
                           {order.items.reduce((s, i) => s + i.quantity, 0)}
+                        </TableCell>
+                        <TableCell>
+                          <div className="space-y-1">
+                            <Select
+                              value={(order as any).paymentMethod || "none"}
+                              onValueChange={(v) => packingMutation.mutate({ id: order.id, data: { paymentMethod: v === "none" ? null : v } })}
+                            >
+                              <SelectTrigger className="h-7 text-xs px-2" data-testid={`select-payment-${order.id}`}>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="none">—</SelectItem>
+                                <SelectItem value="cash">Cash</SelectItem>
+                                <SelectItem value="bank_transfer">Bank</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            {(order as any).paymentMethod && (order as any).paymentMethod !== "none" && (
+                              <Input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={editingAmounts[order.id] ?? ((order as any).cashAmount != null ? String((order as any).cashAmount) : "")}
+                                onChange={(e) => setEditingAmounts(prev => ({ ...prev, [order.id]: e.target.value }))}
+                                onBlur={(e) => {
+                                  const val = e.target.value;
+                                  const orig = (order as any).cashAmount != null ? String((order as any).cashAmount) : "";
+                                  if (val !== orig) packingMutation.mutate({ id: order.id, data: { cashAmount: val ? parseFloat(val) : null } });
+                                  setEditingAmounts(prev => { const n = { ...prev }; delete n[order.id]; return n; });
+                                }}
+                                className="h-7 text-xs px-2"
+                                placeholder="£0.00"
+                                data-testid={`input-cash-amount-${order.id}`}
+                              />
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <Checkbox
+                            checked={(order as any).readyToPack === true}
+                            onCheckedChange={(checked) => packingMutation.mutate({ id: order.id, data: { readyToPack: !!checked } })}
+                            data-testid={`checkbox-pack-${order.id}`}
+                          />
                         </TableCell>
                         <TableCell>
                           <div className="flex gap-1">
@@ -451,6 +504,8 @@ export default function SaturdayOrdersPage() {
                       <TableHead className="w-[80px]">Date</TableHead>
                       <TableHead className="w-[50px] text-right">Qty</TableHead>
                       <TableHead className="w-[90px] text-right">Total</TableHead>
+                      <TableHead className="w-[130px]">Payment</TableHead>
+                      <TableHead className="w-[60px] text-center">Pack</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -495,6 +550,48 @@ export default function SaturdayOrdersPage() {
                           <TableCell className="text-right font-medium" data-testid={`text-website-total-${order.id}`}>
                             £{orderTotal.toFixed(2)}
                           </TableCell>
+                          <TableCell>
+                            <div className="space-y-1">
+                              <Select
+                                value={(order as any).paymentMethod || "none"}
+                                onValueChange={(v) => packingMutation.mutate({ id: order.id, data: { paymentMethod: v === "none" ? null : v } })}
+                              >
+                                <SelectTrigger className="h-7 text-xs px-2" data-testid={`select-payment-website-${order.id}`}>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="none">—</SelectItem>
+                                  <SelectItem value="cash">Cash</SelectItem>
+                                  <SelectItem value="bank_transfer">Bank</SelectItem>
+                                </SelectContent>
+                              </Select>
+                              {(order as any).paymentMethod && (order as any).paymentMethod !== "none" && (
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  value={editingAmounts[order.id] ?? ((order as any).cashAmount != null ? String((order as any).cashAmount) : "")}
+                                  onChange={(e) => setEditingAmounts(prev => ({ ...prev, [order.id]: e.target.value }))}
+                                  onBlur={(e) => {
+                                    const val = e.target.value;
+                                    const orig = (order as any).cashAmount != null ? String((order as any).cashAmount) : "";
+                                    if (val !== orig) packingMutation.mutate({ id: order.id, data: { cashAmount: val ? parseFloat(val) : null } });
+                                    setEditingAmounts(prev => { const n = { ...prev }; delete n[order.id]; return n; });
+                                  }}
+                                  className="h-7 text-xs px-2"
+                                  placeholder="£0.00"
+                                  data-testid={`input-cash-amount-website-${order.id}`}
+                                />
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <Checkbox
+                              checked={(order as any).readyToPack === true}
+                              onCheckedChange={(checked) => packingMutation.mutate({ id: order.id, data: { readyToPack: !!checked } })}
+                              data-testid={`checkbox-pack-website-${order.id}`}
+                            />
+                          </TableCell>
                         </TableRow>
                       );
                     })}
@@ -514,6 +611,7 @@ export default function SaturdayOrdersPage() {
                       <TableCell className="text-right text-base" data-testid="text-grand-total-revenue">
                         £{grandTotals.revenue.toFixed(2)}
                       </TableCell>
+                      <TableCell colSpan={2} />
                     </TableRow>
                   </TableFooter>
                 </Table>

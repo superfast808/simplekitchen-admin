@@ -159,6 +159,14 @@ export default function OrdersPage() {
     },
   });
 
+  const [editingAmounts, setEditingAmounts] = useState<Record<number, string>>({});
+
+  const packingMutation = useMutation({
+    mutationFn: ({ id, data }: { id: number; data: any }) => apiRequest("PATCH", `/api/orders/${id}/packing`, data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/orders"] }),
+    onError: (err: Error) => toast({ title: "Save failed", description: err.message, variant: "destructive" }),
+  });
+
   const orders = allOrders?.filter(o => {
     if (dayFilter === "saturday" && o.isTuesday) return false;
     if (dayFilter === "tuesday" && !o.isTuesday) return false;
@@ -592,6 +600,14 @@ export default function OrdersPage() {
                           {order.isManual && (
                             <Badge variant="outline" className="text-xs">Manual</Badge>
                           )}
+                          {!order.isTuesday && (() => {
+                            const delivDate = getDeliveryDateForOrder(order.orderDate, false);
+                            return (
+                              <Badge variant="outline" className="text-xs border-green-500 text-green-700 dark:text-green-400" data-testid={`badge-saturday-${order.id}`}>
+                                <CalendarCheck className="w-3 h-3 mr-0.5" />Sat {format(delivDate, "do MMM")}
+                              </Badge>
+                            );
+                          })()}
                           {order.isTuesday && (() => {
                             const delivDate = getDeliveryDateForOrder(order.orderDate, true);
                             return (
@@ -664,9 +680,29 @@ export default function OrdersPage() {
                             </TooltipProvider>
                           )}
                           {(order as any).paymentMethod && (order as any).paymentMethod !== "none" && (
-                            <div className="flex items-center gap-1 text-xs text-green-700 dark:text-green-400 font-medium" data-testid={`text-payment-${order.id}`}>
-                              <Banknote className="w-3 h-3 flex-shrink-0" />
-                              {(order as any).paymentMethod === "cash" ? "Cash" : "Bank Transfer"}
+                            <div className="space-y-0.5" data-testid={`text-payment-${order.id}`}>
+                              <div className="flex items-center gap-1 text-xs text-green-700 dark:text-green-400 font-medium">
+                                <Banknote className="w-3 h-3 flex-shrink-0" />
+                                {(order as any).paymentMethod === "cash" ? "Cash" : "Bank Transfer"}
+                              </div>
+                              <Input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={editingAmounts[order.id] ?? ((order as any).cashAmount != null ? String((order as any).cashAmount) : "")}
+                                onChange={(e) => setEditingAmounts(prev => ({ ...prev, [order.id]: e.target.value }))}
+                                onBlur={(e) => {
+                                  const val = e.target.value;
+                                  const orig = (order as any).cashAmount != null ? String((order as any).cashAmount) : "";
+                                  if (val !== orig) {
+                                    packingMutation.mutate({ id: order.id, data: { cashAmount: val ? parseFloat(val) : null } });
+                                  }
+                                  setEditingAmounts(prev => { const n = { ...prev }; delete n[order.id]; return n; });
+                                }}
+                                className="h-6 text-xs w-20 px-1"
+                                placeholder="£0.00"
+                                data-testid={`input-cash-amount-${order.id}`}
+                              />
                             </div>
                           )}
                         </div>

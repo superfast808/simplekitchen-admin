@@ -830,6 +830,22 @@ export async function registerRoutes(
     }
   });
 
+  app.patch("/api/orders/:id/packing", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const existing = await storage.getOrder(id);
+      if (!existing) return res.status(404).json({ message: "Order not found" });
+      const updates: any = {};
+      if (req.body.readyToPack !== undefined) updates.readyToPack = req.body.readyToPack;
+      if (req.body.paymentMethod !== undefined) updates.paymentMethod = req.body.paymentMethod;
+      if (req.body.cashAmount !== undefined) updates.cashAmount = req.body.cashAmount;
+      const updated = await storage.updateOrder(id, updates);
+      res.json(updated);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   app.delete("/api/orders/:id", async (req, res) => {
     try {
       await storage.deleteOrder(parseInt(req.params.id));
