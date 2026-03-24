@@ -200,8 +200,7 @@ export default function TuesdayOrdersPage() {
                       m => m.customerName.toLowerCase() === order.customerName.toLowerCase()
                     );
                     const prevEntry = previousOrders?.[order.id];
-                    const showPrevItems = !isStamped && prevEntry && prevEntry.items.length > 0;
-                    const displayItems = showPrevItems ? prevEntry!.items : order.items;
+                    const displayItems = prevEntry && prevEntry.items.length > 0 ? prevEntry.items : order.items;
                     return (
                     <TableRow key={order.id} className={!order.active ? "opacity-50" : ""} data-testid={`row-recurring-${order.id}`}>
                       <TableCell>
@@ -258,9 +257,9 @@ export default function TuesdayOrdersPage() {
                               </>
                             );
                           })()}
-                          {showPrevItems && (
+                          {prevEntry && (
                             <span className="text-xs text-muted-foreground ml-1 w-full mt-0.5" data-testid={`text-prev-order-date-${order.id}`}>
-                              Last order: {format(new Date(prevEntry!.orderDate), "d MMM")}
+                              Last order: {format(new Date(prevEntry.orderDate), "d MMM")}
                             </span>
                           )}
                         </div>

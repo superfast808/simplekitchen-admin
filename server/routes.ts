@@ -2595,13 +2595,11 @@ export async function registerRoutes(
   // keyed by recurringOrder.id. Used to preview "last order" in the templates table.
   app.get("/api/recurring-orders/previous-orders", async (req, res) => {
     try {
-      const currentWeek = getWeekRange(0);
       const recurringList = await storage.getRecurringOrders();
 
-      // All non-manual orders before this week, sorted newest-first
-      const allOrders = await storage.getOrders(undefined, currentWeek.from);
+      // All orders (including manual stamps), newest-first
+      const allOrders = await storage.getOrders();
       const sorted = [...allOrders]
-        .filter(o => !o.isManual)
         .sort((a, b) => new Date(b.orderDate).getTime() - new Date(a.orderDate).getTime());
 
       // Map customerName (lowercase) → most recent order
