@@ -659,36 +659,40 @@ export default function OrdersPage() {
                           <div className="text-right">
                             {orderSpend > 0 ? `£${orderSpend.toFixed(2)}` : <span className="text-muted-foreground/30">—</span>}
                           </div>
-                          <Select
-                            value={(order as any).paymentMethod || "none"}
-                            onValueChange={(v) => packingMutation.mutate({ id: order.id, data: { paymentMethod: v === "none" ? null : v } })}
-                          >
-                            <SelectTrigger className="h-6 text-xs px-1" data-testid={`select-payment-${order.id}`}>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="none">—</SelectItem>
-                              <SelectItem value="cash">Cash</SelectItem>
-                              <SelectItem value="bank_transfer">Bank</SelectItem>
-                            </SelectContent>
-                          </Select>
-                          {(order as any).paymentMethod && (order as any).paymentMethod !== "none" && (
-                            <Input
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              value={editingAmounts[order.id] ?? ((order as any).cashAmount != null ? String((order as any).cashAmount) : "")}
-                              onChange={(e) => setEditingAmounts(prev => ({ ...prev, [order.id]: e.target.value }))}
-                              onBlur={(e) => {
-                                const val = e.target.value;
-                                const orig = (order as any).cashAmount != null ? String((order as any).cashAmount) : "";
-                                if (val !== orig) packingMutation.mutate({ id: order.id, data: { cashAmount: val ? parseFloat(val) : null } });
-                                setEditingAmounts(prev => { const n = { ...prev }; delete n[order.id]; return n; });
-                              }}
-                              className="h-6 text-xs px-1"
-                              placeholder="£0.00"
-                              data-testid={`input-cash-amount-${order.id}`}
-                            />
+                          {order.isManual && (
+                            <>
+                              <Select
+                                value={(order as any).paymentMethod || "none"}
+                                onValueChange={(v) => packingMutation.mutate({ id: order.id, data: { paymentMethod: v === "none" ? null : v } })}
+                              >
+                                <SelectTrigger className="h-6 text-xs px-1" data-testid={`select-payment-${order.id}`}>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="none">—</SelectItem>
+                                  <SelectItem value="cash">Cash</SelectItem>
+                                  <SelectItem value="bank_transfer">Bank</SelectItem>
+                                </SelectContent>
+                              </Select>
+                              {(order as any).paymentMethod && (order as any).paymentMethod !== "none" && (
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  value={editingAmounts[order.id] ?? ((order as any).cashAmount != null ? String((order as any).cashAmount) : "")}
+                                  onChange={(e) => setEditingAmounts(prev => ({ ...prev, [order.id]: e.target.value }))}
+                                  onBlur={(e) => {
+                                    const val = e.target.value;
+                                    const orig = (order as any).cashAmount != null ? String((order as any).cashAmount) : "";
+                                    if (val !== orig) packingMutation.mutate({ id: order.id, data: { cashAmount: val ? parseFloat(val) : null } });
+                                    setEditingAmounts(prev => { const n = { ...prev }; delete n[order.id]; return n; });
+                                  }}
+                                  className="h-6 text-xs px-1"
+                                  placeholder="£0.00"
+                                  data-testid={`input-cash-amount-${order.id}`}
+                                />
+                              )}
+                            </>
                           )}
                         </div>
                       </TableCell>
