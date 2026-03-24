@@ -502,7 +502,7 @@ export default function SaturdayOrdersPage() {
                       <TableHead className="w-[90px]">Type</TableHead>
                       <TableHead className="w-[80px]">Date</TableHead>
                       <TableHead className="w-[50px] text-right">Qty</TableHead>
-                      <TableHead className="w-[150px] text-right">Total / Spend</TableHead>
+                      <TableHead className="w-[90px] text-right">Total</TableHead>
                       <TableHead className="w-[60px] text-center">Pack</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -545,41 +545,8 @@ export default function SaturdayOrdersPage() {
                           <TableCell className="text-right font-semibold tabular-nums" data-testid={`text-website-qty-${order.id}`}>
                             {orderQty}
                           </TableCell>
-                          <TableCell data-testid={`text-website-total-${order.id}`}>
-                            <div className="space-y-1">
-                              <div className="text-right font-medium">£{orderTotal.toFixed(2)}</div>
-                              <Select
-                                value={(order as any).paymentMethod || "none"}
-                                onValueChange={(v) => packingMutation.mutate({ id: order.id, data: { paymentMethod: v === "none" ? null : v } })}
-                              >
-                                <SelectTrigger className="h-7 text-xs px-2" data-testid={`select-payment-website-${order.id}`}>
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="none">—</SelectItem>
-                                  <SelectItem value="cash">Cash</SelectItem>
-                                  <SelectItem value="bank_transfer">Bank</SelectItem>
-                                </SelectContent>
-                              </Select>
-                              {(order as any).paymentMethod && (order as any).paymentMethod !== "none" && (
-                                <Input
-                                  type="number"
-                                  min="0"
-                                  step="0.01"
-                                  value={editingAmounts[order.id] ?? ((order as any).cashAmount != null ? String((order as any).cashAmount) : "")}
-                                  onChange={(e) => setEditingAmounts(prev => ({ ...prev, [order.id]: e.target.value }))}
-                                  onBlur={(e) => {
-                                    const val = e.target.value;
-                                    const orig = (order as any).cashAmount != null ? String((order as any).cashAmount) : "";
-                                    if (val !== orig) packingMutation.mutate({ id: order.id, data: { cashAmount: val ? parseFloat(val) : null } });
-                                    setEditingAmounts(prev => { const n = { ...prev }; delete n[order.id]; return n; });
-                                  }}
-                                  className="h-7 text-xs px-2"
-                                  placeholder="£0.00"
-                                  data-testid={`input-cash-amount-website-${order.id}`}
-                                />
-                              )}
-                            </div>
+                          <TableCell className="text-right font-medium" data-testid={`text-website-total-${order.id}`}>
+                            £{orderTotal.toFixed(2)}
                           </TableCell>
                           <TableCell className="text-center">
                             <Checkbox
