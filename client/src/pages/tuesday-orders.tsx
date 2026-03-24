@@ -327,6 +327,7 @@ export default function TuesdayOrdersPage() {
                       <TableHead className="min-w-[200px]">Address</TableHead>
                       <TableHead className="w-[90px]">Type</TableHead>
                       <TableHead className="w-[80px]">Date</TableHead>
+                      <TableHead className="w-[50px] text-right">Qty</TableHead>
                       <TableHead className="w-[100px]"></TableHead>
                     </TableRow>
                   </TableHeader>
@@ -362,6 +363,9 @@ export default function TuesdayOrdersPage() {
                           <span className="text-xs text-muted-foreground">
                             {format(new Date(order.orderDate), "EEE d")}
                           </span>
+                        </TableCell>
+                        <TableCell className="text-right font-semibold tabular-nums" data-testid={`text-manual-qty-${order.id}`}>
+                          {order.items.reduce((s, i) => s + i.quantity, 0)}
                         </TableCell>
                         <TableCell>
                           <div className="flex gap-1">
@@ -427,12 +431,14 @@ export default function TuesdayOrdersPage() {
                       <TableHead className="min-w-[180px]">Address</TableHead>
                       <TableHead className="w-[90px]">Type</TableHead>
                       <TableHead className="w-[80px]">Date</TableHead>
+                      <TableHead className="w-[50px] text-right">Qty</TableHead>
                       <TableHead className="w-[90px] text-right">Total</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {tuesdayWebOrders.map((order) => {
                       const orderTotal = order.items.reduce((sum, i) => sum + (parseFloat(i.price) || 0), 0);
+                      const orderQty = order.items.reduce((s, i) => s + i.quantity, 0);
                       return (
                         <TableRow key={order.id} data-testid={`row-tue-website-${order.id}`}>
                           <TableCell className="font-medium" data-testid={`text-tue-website-customer-${order.id}`}>
@@ -465,6 +471,9 @@ export default function TuesdayOrdersPage() {
                               {format(new Date(order.orderDate), "EEE d")}
                             </span>
                           </TableCell>
+                          <TableCell className="text-right font-semibold tabular-nums" data-testid={`text-tue-website-qty-${order.id}`}>
+                            {orderQty}
+                          </TableCell>
                           <TableCell className="text-right font-medium" data-testid={`text-tue-website-total-${order.id}`}>
                             £{orderTotal.toFixed(2)}
                           </TableCell>
@@ -481,6 +490,9 @@ export default function TuesdayOrdersPage() {
                         </span>
                       </TableCell>
                       <TableCell colSpan={3} />
+                      <TableCell className="text-right tabular-nums" data-testid="text-tue-grand-total-qty">
+                        {tuesdayWebTotals.items}
+                      </TableCell>
                       <TableCell className="text-right text-base" data-testid="text-tue-grand-total-revenue">
                         £{tuesdayWebTotals.revenue.toFixed(2)}
                       </TableCell>

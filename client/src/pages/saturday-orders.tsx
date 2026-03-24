@@ -329,6 +329,7 @@ export default function SaturdayOrdersPage() {
                       <TableHead className="min-w-[200px]">Address</TableHead>
                       <TableHead className="w-[90px]">Type</TableHead>
                       <TableHead className="w-[80px]">Date</TableHead>
+                      <TableHead className="w-[50px] text-right">Qty</TableHead>
                       <TableHead className="w-[100px]"></TableHead>
                     </TableRow>
                   </TableHeader>
@@ -364,6 +365,9 @@ export default function SaturdayOrdersPage() {
                           <span className="text-xs text-muted-foreground">
                             {format(new Date(order.orderDate), "EEE d")}
                           </span>
+                        </TableCell>
+                        <TableCell className="text-right font-semibold tabular-nums" data-testid={`text-manual-qty-${order.id}`}>
+                          {order.items.reduce((s, i) => s + i.quantity, 0)}
                         </TableCell>
                         <TableCell>
                           <div className="flex gap-1">
@@ -429,12 +433,14 @@ export default function SaturdayOrdersPage() {
                       <TableHead className="min-w-[180px]">Address</TableHead>
                       <TableHead className="w-[90px]">Type</TableHead>
                       <TableHead className="w-[80px]">Date</TableHead>
+                      <TableHead className="w-[50px] text-right">Qty</TableHead>
                       <TableHead className="w-[90px] text-right">Total</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {websiteOrders.map((order) => {
                       const orderTotal = order.items.reduce((sum, i) => sum + (parseFloat(i.price) || 0), 0);
+                      const orderQty = order.items.reduce((s, i) => s + i.quantity, 0);
                       return (
                         <TableRow key={order.id} data-testid={`row-website-${order.id}`}>
                           <TableCell className="font-medium" data-testid={`text-website-customer-${order.id}`}>
@@ -467,6 +473,9 @@ export default function SaturdayOrdersPage() {
                               {format(new Date(order.orderDate), "EEE d")}
                             </span>
                           </TableCell>
+                          <TableCell className="text-right font-semibold tabular-nums" data-testid={`text-website-qty-${order.id}`}>
+                            {orderQty}
+                          </TableCell>
                           <TableCell className="text-right font-medium" data-testid={`text-website-total-${order.id}`}>
                             £{orderTotal.toFixed(2)}
                           </TableCell>
@@ -483,6 +492,9 @@ export default function SaturdayOrdersPage() {
                         </span>
                       </TableCell>
                       <TableCell colSpan={3} />
+                      <TableCell className="text-right tabular-nums" data-testid="text-grand-total-qty">
+                        {grandTotals.items}
+                      </TableCell>
                       <TableCell className="text-right text-base" data-testid="text-grand-total-revenue">
                         £{grandTotals.revenue.toFixed(2)}
                       </TableCell>
