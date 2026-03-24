@@ -11,7 +11,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from "@/components/ui/table";
-import { Plus, Pencil, Trash2, Play, CalendarCheck, ShoppingCart, CalendarDays, Copy, CheckCircle2, AlertCircle, Globe, Banknote } from "lucide-react";
+import { Plus, Pencil, Trash2, Play, CalendarCheck, ShoppingCart, CalendarDays, Copy, CheckCircle2, AlertCircle, Globe } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useDateFilter, DateFilter, DateRangeLabel, getDeliveryDatesForWindow } from "@/components/date-filter";
 import { format } from "date-fns";
@@ -352,8 +352,7 @@ export default function TuesdayOrdersPage() {
                       <TableHead className="min-w-[200px]">Address</TableHead>
                       <TableHead className="w-[90px]">Type</TableHead>
                       <TableHead className="w-[80px]">Date</TableHead>
-                      <TableHead className="w-[50px] text-right">Qty</TableHead>
-                      <TableHead className="w-[130px]">Payment</TableHead>
+                      <TableHead className="w-[130px]">Qty / Spend</TableHead>
                       <TableHead className="w-[60px] text-center">Pack</TableHead>
                       <TableHead className="w-[100px]"></TableHead>
                     </TableRow>
@@ -391,11 +390,11 @@ export default function TuesdayOrdersPage() {
                             {format(new Date(order.orderDate), "EEE d")}
                           </span>
                         </TableCell>
-                        <TableCell className="text-right font-semibold tabular-nums" data-testid={`text-manual-qty-${order.id}`}>
-                          {order.items.reduce((s, i) => s + i.quantity, 0)}
-                        </TableCell>
-                        <TableCell>
+                        <TableCell data-testid={`text-manual-qty-${order.id}`}>
                           <div className="space-y-1">
+                            <div className="font-semibold tabular-nums text-right">
+                              {order.items.reduce((s, i) => s + i.quantity, 0)}
+                            </div>
                             <Select
                               value={(order as any).paymentMethod || "none"}
                               onValueChange={(v) => packingMutation.mutate({ id: order.id, data: { paymentMethod: v === "none" ? null : v } })}
@@ -501,8 +500,7 @@ export default function TuesdayOrdersPage() {
                       <TableHead className="w-[90px]">Type</TableHead>
                       <TableHead className="w-[80px]">Date</TableHead>
                       <TableHead className="w-[50px] text-right">Qty</TableHead>
-                      <TableHead className="w-[90px] text-right">Total</TableHead>
-                      <TableHead className="w-[130px]">Payment</TableHead>
+                      <TableHead className="w-[150px] text-right">Total / Spend</TableHead>
                       <TableHead className="w-[60px] text-center">Pack</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -545,11 +543,9 @@ export default function TuesdayOrdersPage() {
                           <TableCell className="text-right font-semibold tabular-nums" data-testid={`text-tue-website-qty-${order.id}`}>
                             {orderQty}
                           </TableCell>
-                          <TableCell className="text-right font-medium" data-testid={`text-tue-website-total-${order.id}`}>
-                            £{orderTotal.toFixed(2)}
-                          </TableCell>
-                          <TableCell>
+                          <TableCell data-testid={`text-tue-website-total-${order.id}`}>
                             <div className="space-y-1">
+                              <div className="text-right font-medium">£{orderTotal.toFixed(2)}</div>
                               <Select
                                 value={(order as any).paymentMethod || "none"}
                                 onValueChange={(v) => packingMutation.mutate({ id: order.id, data: { paymentMethod: v === "none" ? null : v } })}
@@ -609,7 +605,7 @@ export default function TuesdayOrdersPage() {
                       <TableCell className="text-right text-base" data-testid="text-tue-grand-total-revenue">
                         £{tuesdayWebTotals.revenue.toFixed(2)}
                       </TableCell>
-                      <TableCell colSpan={2} />
+                      <TableCell />
                     </TableRow>
                   </TableFooter>
                 </Table>

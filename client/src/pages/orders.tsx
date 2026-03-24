@@ -571,14 +571,14 @@ export default function OrdersPage() {
                     <TableHead className="w-[100px] cursor-pointer select-none" onClick={() => handleOrderSort("type")}>
                       Type <OrderSortIcon col="type" />
                     </TableHead>
-                    <TableHead className="w-[70px] text-right cursor-pointer select-none" onClick={() => handleOrderSort("spend")}>
+                    <TableHead className="w-[130px] cursor-pointer select-none" onClick={() => handleOrderSort("spend")}>
                       <span>Spend <OrderSortIcon col="spend" /></span>
                       <span className="block text-[10px] font-normal text-muted-foreground leading-tight">inc. delivery</span>
                     </TableHead>
                     <TableHead className="w-[80px] cursor-pointer select-none" onClick={() => handleOrderSort("status")}>
                       Status <OrderSortIcon col="status" />
                     </TableHead>
-                    <TableHead className="min-w-[120px]">Notes / Cash</TableHead>
+                    <TableHead className="min-w-[100px]">Notes</TableHead>
                     <TableHead className="w-[50px]"></TableHead>
                   </TableRow>
                 </TableHeader>
@@ -654,8 +654,43 @@ export default function OrdersPage() {
                           {order.fulfillmentType === "delivery" ? "Delivery" : "Collection"}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-right font-medium text-sm" data-testid={`text-spend-${order.id}`}>
-                        {orderSpend > 0 ? `£${orderSpend.toFixed(2)}` : <span className="text-muted-foreground/30">—</span>}
+                      <TableCell className="font-medium text-sm" data-testid={`text-spend-${order.id}`}>
+                        <div className="space-y-1">
+                          <div className="text-right">
+                            {orderSpend > 0 ? `£${orderSpend.toFixed(2)}` : <span className="text-muted-foreground/30">—</span>}
+                          </div>
+                          <Select
+                            value={(order as any).paymentMethod || "none"}
+                            onValueChange={(v) => packingMutation.mutate({ id: order.id, data: { paymentMethod: v === "none" ? null : v } })}
+                          >
+                            <SelectTrigger className="h-6 text-xs px-1" data-testid={`select-payment-${order.id}`}>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">—</SelectItem>
+                              <SelectItem value="cash">Cash</SelectItem>
+                              <SelectItem value="bank_transfer">Bank</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          {(order as any).paymentMethod && (order as any).paymentMethod !== "none" && (
+                            <Input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={editingAmounts[order.id] ?? ((order as any).cashAmount != null ? String((order as any).cashAmount) : "")}
+                              onChange={(e) => setEditingAmounts(prev => ({ ...prev, [order.id]: e.target.value }))}
+                              onBlur={(e) => {
+                                const val = e.target.value;
+                                const orig = (order as any).cashAmount != null ? String((order as any).cashAmount) : "";
+                                if (val !== orig) packingMutation.mutate({ id: order.id, data: { cashAmount: val ? parseFloat(val) : null } });
+                                setEditingAmounts(prev => { const n = { ...prev }; delete n[order.id]; return n; });
+                              }}
+                              className="h-6 text-xs px-1"
+                              placeholder="£0.00"
+                              data-testid={`input-cash-amount-${order.id}`}
+                            />
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell>
                         <Badge variant={statusColor(order.status)} data-testid={`badge-status-${order.id}`}>
@@ -663,49 +698,21 @@ export default function OrdersPage() {
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        <div className="space-y-1">
-                          {(order as any).notes && (
-                            <TooltipProvider>
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <div className="flex items-center gap-1 text-xs text-muted-foreground cursor-default" data-testid={`text-notes-${order.id}`}>
-                                    <MessageSquare className="w-3 h-3 flex-shrink-0" />
-                                    <span className="truncate max-w-[90px]">{(order as any).notes}</span>
-                                  </div>
-                                </TooltipTrigger>
-                                <TooltipContent side="left" className="max-w-[200px]">
-                                  {(order as any).notes}
-                                </TooltipContent>
-                              </Tooltip>
-                            </TooltipProvider>
-                          )}
-                          {(order as any).paymentMethod && (order as any).paymentMethod !== "none" && (
-                            <div className="space-y-0.5" data-testid={`text-payment-${order.id}`}>
-                              <div className="flex items-center gap-1 text-xs text-green-700 dark:text-green-400 font-medium">
-                                <Banknote className="w-3 h-3 flex-shrink-0" />
-                                {(order as any).paymentMethod === "cash" ? "Cash" : "Bank Transfer"}
-                              </div>
-                              <Input
-                                type="number"
-                                min="0"
-                                step="0.01"
-                                value={editingAmounts[order.id] ?? ((order as any).cashAmount != null ? String((order as any).cashAmount) : "")}
-                                onChange={(e) => setEditingAmounts(prev => ({ ...prev, [order.id]: e.target.value }))}
-                                onBlur={(e) => {
-                                  const val = e.target.value;
-                                  const orig = (order as any).cashAmount != null ? String((order as any).cashAmount) : "";
-                                  if (val !== orig) {
-                                    packingMutation.mutate({ id: order.id, data: { cashAmount: val ? parseFloat(val) : null } });
-                                  }
-                                  setEditingAmounts(prev => { const n = { ...prev }; delete n[order.id]; return n; });
-                                }}
-                                className="h-6 text-xs w-20 px-1"
-                                placeholder="£0.00"
-                                data-testid={`input-cash-amount-${order.id}`}
-                              />
-                            </div>
-                          )}
-                        </div>
+                        {(order as any).notes ? (
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <div className="flex items-center gap-1 text-xs text-muted-foreground cursor-default" data-testid={`text-notes-${order.id}`}>
+                                  <MessageSquare className="w-3 h-3 flex-shrink-0" />
+                                  <span className="truncate max-w-[90px]">{(order as any).notes}</span>
+                                </div>
+                              </TooltipTrigger>
+                              <TooltipContent side="left" className="max-w-[200px]">
+                                {(order as any).notes}
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        ) : null}
                       </TableCell>
                       <TableCell>
                         <div className="flex gap-1">
