@@ -159,7 +159,14 @@ export default function TuesdayOrdersPage() {
         <DateFilter {...dateFilter} testIdPrefix="tue" />
       </div>
 
-      <Card>
+      <div>
+        <div className="mb-3">
+          <h2 className="text-lg font-semibold" data-testid="text-recurring-heading">Recurring Customer Templates</h2>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            Saved Tuesday customer profiles — not actual orders. Hit <span className="font-medium text-foreground">Generate This Week</span> to create this week's orders from active ones. See the sections below for the actual orders to prepare for delivery.
+          </p>
+        </div>
+        <Card>
         <CardContent className="p-0">
           {isLoading ? (
             <div className="p-12 text-center text-muted-foreground">Loading...</div>
@@ -284,7 +291,8 @@ export default function TuesdayOrdersPage() {
             </div>
           )}
         </CardContent>
-      </Card>
+        </Card>
+      </div>
 
       <div>
         <div className="flex items-center justify-between mb-3">

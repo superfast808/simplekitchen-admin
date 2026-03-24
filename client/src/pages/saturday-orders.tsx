@@ -161,7 +161,14 @@ export default function SaturdayOrdersPage() {
         <DateFilter {...dateFilter} testIdPrefix="sat" />
       </div>
 
-      <Card>
+      <div>
+        <div className="mb-3">
+          <h2 className="text-lg font-semibold" data-testid="text-recurring-heading">Recurring Customer Templates</h2>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            These are saved customer profiles — not orders. Hit <span className="font-medium text-foreground">Generate This Week</span> to create this week's manual orders from the active ones. Scroll down for the actual orders to prepare for delivery.
+          </p>
+        </div>
+        <Card>
         <CardContent className="p-0">
           {isLoading ? (
             <div className="p-12 text-center text-muted-foreground">Loading...</div>
@@ -286,7 +293,8 @@ export default function SaturdayOrdersPage() {
             </div>
           )}
         </CardContent>
-      </Card>
+        </Card>
+      </div>
 
       <div>
         <div className="flex items-center justify-between mb-3">
