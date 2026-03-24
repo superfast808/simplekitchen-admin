@@ -105,6 +105,7 @@ export default function TuesdayOrdersPage() {
     mutationFn: (id: number) => apiRequest("DELETE", `/api/orders/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/recurring-orders/previous-orders"] });
       toast({ title: "Manual order removed" });
     },
   });
@@ -114,6 +115,7 @@ export default function TuesdayOrdersPage() {
     onSuccess: async (res) => {
       const data = await res.json();
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/recurring-orders/previous-orders"] });
       toast({
         title: "Orders generated",
         description: `${data.created} order${data.created !== 1 ? "s" : ""} created from your recurring list.`,
