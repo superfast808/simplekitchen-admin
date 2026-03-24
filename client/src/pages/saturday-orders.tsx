@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from "@/components/ui/table";
 import { Plus, Pencil, Trash2, Play, CalendarDays, ShoppingCart, Globe, Copy, CheckCircle2, AlertCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { useDateFilter, DateRangeLabel } from "@/components/date-filter";
+import { useDateFilter, DateFilter, DateRangeLabel, getDeliveryDatesForWindow } from "@/components/date-filter";
 import { format } from "date-fns";
 import type { RecurringOrder, RecurringOrderItem, Order, OrderItem } from "@shared/schema";
 
@@ -25,7 +25,8 @@ export default function SaturdayOrdersPage() {
   const [editingOrder, setEditingOrder] = useState<RecurringOrderWithItems | null>(null);
   const [editingManualOrder, setEditingManualOrder] = useState<OrderWithItems | null>(null);
   const dateFilter = useDateFilter();
-  const { from, to } = dateFilter;
+  const { from, to, mode } = dateFilter;
+  const deliverySat = mode === "window" ? getDeliveryDatesForWindow(from).saturday : null;
 
   const { data: orders, isLoading } = useQuery<RecurringOrderWithItems[]>({
     queryKey: ["/api/recurring-orders"],
@@ -46,6 +47,7 @@ export default function SaturdayOrdersPage() {
     queryKey: ["/api/orders", `?from=${from.toISOString()}&to=${to.toISOString()}`],
     select: (data) => data.filter(o => {
       if (o.isManual) return false;
+      if (o.isTuesday) return false;
       if (o.items.length > 0 && o.items.every(i => /add\s+delivery/i.test(i.productName))) return false;
       return true;
     }),
@@ -125,9 +127,17 @@ export default function SaturdayOrdersPage() {
     <div className="p-6 space-y-6 max-w-full">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight" data-testid="text-page-title">Saturday Orders</h1>
+          <div className="flex items-center gap-2 flex-wrap">
+            <h1 className="text-2xl font-semibold tracking-tight" data-testid="text-page-title">Saturday Orders</h1>
+            {deliverySat && (
+              <Badge className="bg-green-600 text-white text-sm px-2.5 py-0.5" data-testid="badge-delivery-date">
+                <CalendarDays className="w-3.5 h-3.5 mr-1" />
+                Delivering {format(deliverySat, "EEEE do MMMM")}
+              </Badge>
+            )}
+          </div>
           <p className="text-sm text-muted-foreground mt-1">
-            Recurring Saturday orders — set them once, generate each week
+            Recurring Saturday customers + website orders — website orders filtered to Saturday delivery only
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -145,6 +155,10 @@ export default function SaturdayOrdersPage() {
             Add Customer
           </Button>
         </div>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <DateFilter {...dateFilter} testIdPrefix="sat" />
       </div>
 
       <Card>
@@ -277,7 +291,14 @@ export default function SaturdayOrdersPage() {
       <div>
         <div className="flex items-center justify-between mb-3">
           <div>
-            <h2 className="text-lg font-semibold" data-testid="text-manual-orders-heading">This Week's Manual Saturday Orders</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-semibold" data-testid="text-manual-orders-heading">Manual Saturday Orders</h2>
+              {deliverySat && (
+                <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300 text-xs">
+                  {format(deliverySat, "EEE do MMM")}
+                </Badge>
+              )}
+            </div>
             <DateRangeLabel from={from} to={to} />
           </div>
         </div>
@@ -370,7 +391,14 @@ export default function SaturdayOrdersPage() {
         <div className="flex items-center gap-2 mb-3">
           <Globe className="w-5 h-5 text-muted-foreground" />
           <div>
-            <h2 className="text-lg font-semibold" data-testid="text-website-orders-heading">This Week's Website Orders</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-semibold" data-testid="text-website-orders-heading">Website Orders — Saturday Delivery</h2>
+              {deliverySat && (
+                <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300 text-xs">
+                  {format(deliverySat, "EEE do MMM")}
+                </Badge>
+              )}
+            </div>
             <DateRangeLabel from={from} to={to} />
           </div>
         </div>

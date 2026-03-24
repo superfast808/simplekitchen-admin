@@ -17,7 +17,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { DateFilter, DateRangeLabel, useDateFilter } from "@/components/date-filter";
+import { DateFilter, DateRangeLabel, useDateFilter, getDeliveryDateForOrder } from "@/components/date-filter";
 import { OrderSourceFilter, useOrderSourceFilter } from "@/components/order-source-filter";
 import type { Order, OrderItem, RecurringOrder, RecurringOrderItem } from "@shared/schema";
 
@@ -592,11 +592,14 @@ export default function OrdersPage() {
                           {order.isManual && (
                             <Badge variant="outline" className="text-xs">Manual</Badge>
                           )}
-                          {order.isTuesday && (
-                            <Badge variant="outline" className="text-xs border-amber-400 text-amber-600 dark:text-amber-400" data-testid={`badge-tuesday-${order.id}`}>
-                              <CalendarCheck className="w-3 h-3 mr-0.5" />Tue
-                            </Badge>
-                          )}
+                          {order.isTuesday && (() => {
+                            const delivDate = getDeliveryDateForOrder(order.orderDate, true);
+                            return (
+                              <Badge variant="outline" className="text-xs border-amber-400 text-amber-600 dark:text-amber-400" data-testid={`badge-tuesday-${order.id}`}>
+                                <CalendarCheck className="w-3 h-3 mr-0.5" />Tue {format(delivDate, "do MMM")}
+                              </Badge>
+                            );
+                          })()}
                         </div>
                         <span className="text-xs text-muted-foreground">
                           {format(new Date(order.orderDate), "EEE, MMM d")}

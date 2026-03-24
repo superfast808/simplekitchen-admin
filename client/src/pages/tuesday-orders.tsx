@@ -9,11 +9,12 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Plus, Pencil, Trash2, Play, CalendarCheck, ShoppingCart, CalendarDays, Copy, CheckCircle2, AlertCircle } from "lucide-react";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from "@/components/ui/table";
+import { Plus, Pencil, Trash2, Play, CalendarCheck, ShoppingCart, CalendarDays, Copy, CheckCircle2, AlertCircle, Globe } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { useDateFilter, DateRangeLabel } from "@/components/date-filter";
+import { useDateFilter, DateFilter, DateRangeLabel, getDeliveryDatesForWindow } from "@/components/date-filter";
 import { format } from "date-fns";
+import { useMemo } from "react";
 import type { RecurringOrder, RecurringOrderItem, Order, OrderItem } from "@shared/schema";
 
 type RecurringOrderWithItems = RecurringOrder & { items: RecurringOrderItem[] };
@@ -25,7 +26,8 @@ export default function TuesdayOrdersPage() {
   const [editingOrder, setEditingOrder] = useState<RecurringOrderWithItems | null>(null);
   const [editingManualOrder, setEditingManualOrder] = useState<OrderWithItems | null>(null);
   const dateFilter = useDateFilter();
-  const { from, to } = dateFilter;
+  const { from, to, mode } = dateFilter;
+  const deliveryTue = mode === "window" ? getDeliveryDatesForWindow(from).tuesday : null;
 
   const { data: orders, isLoading } = useQuery<RecurringOrderWithItems[]>({
     queryKey: ["/api/recurring-orders"],
@@ -41,6 +43,30 @@ export default function TuesdayOrdersPage() {
     queryKey: ["/api/orders", `?from=${from.toISOString()}&to=${to.toISOString()}`],
     select: (data) => data.filter(o => o.isManual && o.isTuesday),
   });
+
+  const { data: tuesdayWebOrders } = useQuery<OrderWithItems[]>({
+    queryKey: ["/api/orders", `?from=${from.toISOString()}&to=${to.toISOString()}`],
+    select: (data) => data.filter(o => {
+      if (o.isManual) return false;
+      if (!o.isTuesday) return false;
+      if (o.items.length > 0 && o.items.every(i => /add\s+delivery/i.test(i.productName))) return false;
+      return true;
+    }),
+  });
+
+  const tuesdayWebTotals = useMemo(() => {
+    if (!tuesdayWebOrders) return { orders: 0, delivery: 0, collection: 0, revenue: 0, items: 0 };
+    let revenue = 0, items = 0, delivery = 0, collection = 0;
+    for (const order of tuesdayWebOrders) {
+      if (order.fulfillmentType === "delivery") delivery++;
+      else collection++;
+      for (const item of order.items) {
+        revenue += parseFloat(item.price) || 0;
+        items += item.quantity;
+      }
+    }
+    return { orders: tuesdayWebOrders.length, delivery, collection, revenue, items };
+  }, [tuesdayWebOrders]);
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => apiRequest("DELETE", `/api/recurring-orders/${id}`),
@@ -99,9 +125,17 @@ export default function TuesdayOrdersPage() {
     <div className="p-6 space-y-6 max-w-full">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight" data-testid="text-page-title">Tuesday Orders</h1>
+          <div className="flex items-center gap-2 flex-wrap">
+            <h1 className="text-2xl font-semibold tracking-tight" data-testid="text-page-title">Tuesday Orders</h1>
+            {deliveryTue && (
+              <Badge className="bg-amber-500 text-white text-sm px-2.5 py-0.5" data-testid="badge-delivery-date">
+                <CalendarCheck className="w-3.5 h-3.5 mr-1" />
+                Delivering {format(deliveryTue, "EEEE do MMMM")}
+              </Badge>
+            )}
+          </div>
           <p className="text-sm text-muted-foreground mt-1">
-            Recurring weekly orders — set them once, generate each week
+            Recurring Tuesday customers + two-week subscription orders — use prev/next to change week
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -119,6 +153,10 @@ export default function TuesdayOrdersPage() {
             Add Customer
           </Button>
         </div>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <DateFilter {...dateFilter} testIdPrefix="tue" />
       </div>
 
       <Card>
@@ -251,7 +289,14 @@ export default function TuesdayOrdersPage() {
       <div>
         <div className="flex items-center justify-between mb-3">
           <div>
-            <h2 className="text-lg font-semibold" data-testid="text-manual-orders-heading">This Week's Manual Orders</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-semibold" data-testid="text-manual-orders-heading">Manual Tuesday Orders</h2>
+              {deliveryTue && (
+                <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 text-xs">
+                  {format(deliveryTue, "EEE do MMM")}
+                </Badge>
+              )}
+            </div>
             <DateRangeLabel from={from} to={to} />
           </div>
         </div>
@@ -333,6 +378,106 @@ export default function TuesdayOrdersPage() {
                       </TableRow>
                     ))}
                   </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      <div>
+        <div className="flex items-center gap-2 mb-3">
+          <Globe className="w-5 h-5 text-muted-foreground" />
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-semibold" data-testid="text-tue-website-orders-heading">Website Orders — Tuesday Delivery</h2>
+              {deliveryTue && (
+                <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 text-xs">
+                  {format(deliveryTue, "EEE do MMM")}
+                </Badge>
+              )}
+            </div>
+            <DateRangeLabel from={from} to={to} />
+          </div>
+        </div>
+        <Card>
+          <CardContent className="p-0">
+            {!tuesdayWebOrders || tuesdayWebOrders.length === 0 ? (
+              <div className="p-8 text-center">
+                <Globe className="w-10 h-10 mx-auto text-muted-foreground/40 mb-2" />
+                <p className="text-sm text-muted-foreground" data-testid="text-no-tue-website-orders">
+                  No Tuesday website orders this week (two-week subscription orders will appear here)
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="min-w-[140px]">Customer</TableHead>
+                      <TableHead className="min-w-[220px]">Items</TableHead>
+                      <TableHead className="min-w-[180px]">Address</TableHead>
+                      <TableHead className="w-[90px]">Type</TableHead>
+                      <TableHead className="w-[80px]">Date</TableHead>
+                      <TableHead className="w-[90px] text-right">Total</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {tuesdayWebOrders.map((order) => {
+                      const orderTotal = order.items.reduce((sum, i) => sum + (parseFloat(i.price) || 0), 0);
+                      return (
+                        <TableRow key={order.id} data-testid={`row-tue-website-${order.id}`}>
+                          <TableCell className="font-medium" data-testid={`text-tue-website-customer-${order.id}`}>
+                            {order.customerName}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex flex-wrap gap-1">
+                              {order.items.map((item, i) => (
+                                <Badge key={i} variant="secondary" className="text-xs" data-testid={`badge-tue-website-item-${order.id}-${i}`}>
+                                  {item.quantity > 1 ? `${item.quantity}× ` : ""}{item.productName}
+                                </Badge>
+                              ))}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <span className="text-sm text-muted-foreground" data-testid={`text-tue-website-address-${order.id}`}>
+                              {order.deliveryAddress || "—"}
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              variant={order.fulfillmentType === "delivery" ? "default" : "outline"}
+                              data-testid={`badge-tue-website-fulfillment-${order.id}`}
+                            >
+                              {order.fulfillmentType === "delivery" ? "Delivery" : "Collection"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <span className="text-xs text-muted-foreground">
+                              {format(new Date(order.orderDate), "EEE d")}
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-right font-medium" data-testid={`text-tue-website-total-${order.id}`}>
+                            £{orderTotal.toFixed(2)}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                  <TableFooter>
+                    <TableRow className="bg-muted/50 font-semibold" data-testid="row-tue-grand-totals">
+                      <TableCell colSpan={2}>
+                        Grand Total — {tuesdayWebTotals.orders} order{tuesdayWebTotals.orders !== 1 ? "s" : ""}
+                        <span className="text-muted-foreground font-normal ml-2 text-xs">
+                          ({tuesdayWebTotals.delivery} delivery · {tuesdayWebTotals.collection} collection · {tuesdayWebTotals.items} items)
+                        </span>
+                      </TableCell>
+                      <TableCell colSpan={3} />
+                      <TableCell className="text-right text-base" data-testid="text-tue-grand-total-revenue">
+                        £{tuesdayWebTotals.revenue.toFixed(2)}
+                      </TableCell>
+                    </TableRow>
+                  </TableFooter>
                 </Table>
               </div>
             )}

@@ -7,7 +7,7 @@ import { ChevronLeft, ChevronRight, Calendar } from "lucide-react";
 
 export type DateRange = { from: Date; to: Date };
 
-function getOrderWindow(offset: number): { from: Date; to: Date } {
+export function getOrderWindow(offset: number): { from: Date; to: Date } {
   const now = new Date();
   const ukNow = new Date(now.toLocaleString("en-US", { timeZone: "Europe/London" }));
   const dayOfWeek = ukNow.getDay();
@@ -32,6 +32,23 @@ function getOrderWindow(offset: number): { from: Date; to: Date } {
   to.setHours(23, 59, 59, 999);
 
   return { from, to };
+}
+
+export function getDeliveryDatesForWindow(windowFrom: Date): { saturday: Date; tuesday: Date } {
+  return {
+    saturday: addDays(windowFrom, 7),
+    tuesday: addDays(windowFrom, 10),
+  };
+}
+
+export function getDeliveryDateForOrder(orderDate: Date | string, isTuesday: boolean): Date {
+  const d = new Date(orderDate);
+  const dayOfWeek = d.getDay();
+  const daysBack = dayOfWeek === 6 ? 0 : dayOfWeek === 0 ? 1 : dayOfWeek + 1;
+  const windowSat = new Date(d);
+  windowSat.setDate(d.getDate() - daysBack);
+  windowSat.setHours(0, 0, 0, 0);
+  return isTuesday ? addDays(windowSat, 10) : addDays(windowSat, 7);
 }
 
 export function useDateFilter() {
