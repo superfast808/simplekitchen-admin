@@ -215,7 +215,11 @@ export default function OrdersPage() {
     },
   });
 
-  const allProductNames = Array.from(new Set((orders || []).flatMap(o => o.items.map(i => i.productName)))).sort();
+  const allProductNames = Array.from(new Set((orders || []).flatMap(o => o.items.map(i => i.productName))))
+    .sort((a, b) => {
+      const pa = itemSortPriority(a), pb = itemSortPriority(b);
+      return pa !== pb ? pa - pb : a.localeCompare(b);
+    });
 
   const productTotals: Record<string, number> = {};
   for (const name of allProductNames) {
