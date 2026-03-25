@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ChefHat, ChevronDown, ChevronRight } from "lucide-react";
 import { DateFilter, DateRangeLabel, useDateFilter } from "@/components/date-filter";
 import { OrderSourceFilter, useOrderSourceFilter } from "@/components/order-source-filter";
@@ -201,6 +201,22 @@ export default function IngredientsPage() {
                         </TableRow>
                       ))}
                   </TableBody>
+                  {(() => {
+                    const visibleItems = data.grandTotals.filter(item => showZeroIngredients || item.totalQuantity > 0);
+                    const grandTotal = visibleItems.reduce((sum, item) => item.totalCost != null ? sum + item.totalCost : sum, 0);
+                    const anyCosted = visibleItems.some(item => item.totalCost != null);
+                    if (!anyCosted) return null;
+                    return (
+                      <TableFooter>
+                        <TableRow className="font-bold" data-testid="row-grand-cost-total">
+                          <TableCell colSpan={3}>Total Ingredient Cost</TableCell>
+                          <TableCell className="text-right tabular-nums" data-testid="text-grand-cost-total">
+                            £{grandTotal.toFixed(2)}
+                          </TableCell>
+                        </TableRow>
+                      </TableFooter>
+                    );
+                  })()}
                 </Table>
               </CardContent>
             </Card>
