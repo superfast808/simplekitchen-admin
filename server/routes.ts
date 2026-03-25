@@ -3004,11 +3004,16 @@ export async function registerRoutes(
       // This week's manual orders (for dedup check)
       const thisWeekOrders = await storage.getOrders(week.from, week.to);
 
-      // Last week's orders with items
-      const lastWeekOrders = await storage.getOrders(prevWeek.from, prevWeek.to);
-      const lastWeekWithItems = await Promise.all(
-        lastWeekOrders.map(async o => ({ ...o, items: await storage.getOrderItems(o.id) }))
+      // Search back up to 3 weeks to find the most recent order per customer.
+      // This handles: isTuesday null vs false boundary issues, week-boundary edge cases,
+      // and customers who may have missed a week.
+      const threeWeeksAgo = getWeekRange(-3);
+      const recentOrders = await storage.getOrders(threeWeeksAgo.from, prevWeek.to);
+      const recentWithItems = await Promise.all(
+        recentOrders.map(async o => ({ ...o, items: await storage.getOrderItems(o.id) }))
       );
+      // Sort newest-first so .find() picks the most recent match
+      recentWithItems.sort((a, b) => new Date(b.orderDate).getTime() - new Date(a.orderDate).getTime());
 
       // Detect the primary protein / ingredient category of a meal by its name.
       // Returns a stable category key used for matching across weeks.
@@ -3148,7 +3153,7 @@ export async function registerRoutes(
         // Dedup: skip if a manual order for this customer+day already exists this week
         const alreadyExists = thisWeekOrders.some(
           o => o.customerName.toLowerCase().trim() === ro.customerName.toLowerCase().trim()
-            && o.isTuesday === ro.isTuesday && o.isManual
+            && !!o.isTuesday === !!ro.isTuesday && o.isManual
         );
         if (alreadyExists) {
           skipped++;
@@ -3156,10 +3161,10 @@ export async function registerRoutes(
           continue;
         }
 
-        // Find last week's order for this customer + day
-        const lastOrder = lastWeekWithItems.find(
+        // Find most recent order for this customer + day (up to 3 weeks back), newest-first
+        const lastOrder = recentWithItems.find(
           o => o.customerName.toLowerCase().trim() === ro.customerName.toLowerCase().trim()
-            && o.isTuesday === ro.isTuesday
+            && !!o.isTuesday === !!ro.isTuesday
         );
 
         let newItems: ReturnType<typeof resolveItems>;
@@ -3170,7 +3175,8 @@ export async function registerRoutes(
             menuMeals,
             menuExtras,
           );
-          details.push(`${ro.customerName} (${ro.isTuesday ? "Tue" : "Sat"}): based on last week's order`);
+          const daysAgo = Math.round((Date.now() - new Date(lastOrder.orderDate).getTime()) / 86400000);
+          details.push(`${ro.customerName} (${ro.isTuesday ? "Tue" : "Sat"}): based on order from ${daysAgo}d ago (${new Date(lastOrder.orderDate).toLocaleDateString("en-GB")})`);
         } else {
           // Fall back to stored template — treat all template items as £7.50 meals
           const templateItems = await storage.getRecurringOrderItems(ro.id);
