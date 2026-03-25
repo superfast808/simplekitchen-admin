@@ -1229,7 +1229,7 @@ export async function registerRoutes(
 
   app.post("/api/woo/sync-products", async (_req, res) => {
     try {
-      const wooProducts = await fetchWooProducts({ status: "publish" });
+      const wooProducts = await fetchWooProducts({ status: "any" });
       let imported = 0;
       let updated = 0;
 
