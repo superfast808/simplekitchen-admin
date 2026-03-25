@@ -419,8 +419,12 @@ export default function TuesdayOrdersPage() {
                               </SelectTrigger>
                               <SelectContent>
                                 <SelectItem value="none">—</SelectItem>
-                                <SelectItem value="cash">Cash</SelectItem>
-                                <SelectItem value="bank_transfer">Bank</SelectItem>
+                                {!order.items.some(i => /subscription/i.test(i.productName)) && (
+                                  <SelectItem value="cash">Cash</SelectItem>
+                                )}
+                                {!order.items.some(i => /subscription/i.test(i.productName)) && (
+                                  <SelectItem value="bank_transfer">Bank</SelectItem>
+                                )}
                               </SelectContent>
                             </Select>
                             {(order as any).paymentMethod && (order as any).paymentMethod !== "none" && (
