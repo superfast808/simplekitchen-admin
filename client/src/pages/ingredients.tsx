@@ -16,6 +16,8 @@ type ProductBreakdown = {
     quantityPerUnit: string;
     unit: string;
     totalNeeded: number;
+    costPerG: string | null;
+    totalCost: number | null;
   }>;
 };
 
@@ -69,6 +71,8 @@ function ProductAccordion({ product }: { product: ProductBreakdown }) {
                 <TableHead className="text-right w-[100px]">Orders</TableHead>
                 <TableHead className="text-right w-[120px]">Total Needed</TableHead>
                 <TableHead className="w-[60px]">Unit</TableHead>
+                <TableHead className="text-right w-[80px]">£/g</TableHead>
+                <TableHead className="text-right w-[90px]">Total Cost</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -79,6 +83,12 @@ function ProductAccordion({ product }: { product: ProductBreakdown }) {
                   <TableCell className="text-right tabular-nums text-sm">{product.orderedQuantity}</TableCell>
                   <TableCell className="text-right tabular-nums font-semibold text-sm">{formatQty(ing.totalNeeded)}</TableCell>
                   <TableCell className="text-muted-foreground text-sm">{ing.unit}</TableCell>
+                  <TableCell className="text-right tabular-nums text-sm text-muted-foreground">
+                    {ing.costPerG != null ? parseFloat(ing.costPerG).toFixed(4) : <span className="text-muted-foreground/30">—</span>}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums text-sm font-medium">
+                    {ing.totalCost != null ? `£${ing.totalCost.toFixed(2)}` : <span className="text-muted-foreground/30">—</span>}
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>

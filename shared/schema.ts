@@ -24,6 +24,7 @@ export const ingredients = pgTable("ingredients", {
   name: text("name").notNull(),
   quantityPerUnit: decimal("quantity_per_unit", { precision: 10, scale: 3 }).notNull(),
   unit: text("unit").notNull(),
+  costPerG: decimal("cost_per_g", { precision: 10, scale: 6 }),
 });
 
 export const orders = pgTable("orders", {

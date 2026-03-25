@@ -691,7 +691,7 @@ export async function registerRoutes(
   app.post("/api/products/:id/ingredients", async (req, res) => {
     try {
       const productId = parseInt(req.params.id);
-      const ingredientsList = req.body.ingredients as Array<{ name: string; quantityPerUnit: string; unit: string }>;
+      const ingredientsList = req.body.ingredients as Array<{ name: string; quantityPerUnit: string; unit: string; costPerG?: string }>;
       await storage.deleteIngredientsByProductId(productId);
       const created = [];
       for (const ing of ingredientsList) {
@@ -700,6 +700,7 @@ export async function registerRoutes(
           name: ing.name,
           quantityPerUnit: ing.quantityPerUnit,
           unit: ing.unit,
+          costPerG: ing.costPerG || null,
         });
         created.push(result);
       }
@@ -1034,6 +1035,8 @@ export async function registerRoutes(
           quantityPerUnit: string;
           unit: string;
           totalNeeded: number;
+          costPerG: string | null;
+          totalCost: number | null;
         }>;
       }> = [];
 
@@ -1056,11 +1059,15 @@ export async function registerRoutes(
               grandTotals[key] = { name: ing.name, totalQuantity: 0, unit: ing.unit };
             }
             grandTotals[key].totalQuantity += totalNeeded;
+            const costPerG = (ing as any).costPerG != null ? String((ing as any).costPerG) : null;
+            const totalCost = costPerG != null ? totalNeeded * parseFloat(costPerG) : null;
             return {
               name: ing.name,
               quantityPerUnit: ing.quantityPerUnit,
               unit: ing.unit,
               totalNeeded,
+              costPerG,
+              totalCost,
             };
           }),
         });

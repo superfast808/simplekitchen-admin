@@ -212,7 +212,7 @@ function IngredientsDialog({ product, open, onOpenChange }: { product: Product; 
     enabled: open,
   });
 
-  const [ingredientLines, setIngredientLines] = useState<Array<{ name: string; quantityPerUnit: string; unit: string }>>([]);
+  const [ingredientLines, setIngredientLines] = useState<Array<{ name: string; quantityPerUnit: string; unit: string; costPerG: string }>>([]);
   const [initialized, setInitialized] = useState(false);
 
   if (existingIngredients && !initialized) {
@@ -221,9 +221,10 @@ function IngredientsDialog({ product, open, onOpenChange }: { product: Product; 
         name: i.name,
         quantityPerUnit: i.quantityPerUnit,
         unit: i.unit,
+        costPerG: (i as any).costPerG != null ? String((i as any).costPerG) : "",
       })));
     } else {
-      setIngredientLines([{ name: "", quantityPerUnit: "", unit: "g" }]);
+      setIngredientLines([{ name: "", quantityPerUnit: "", unit: "g", costPerG: "" }]);
     }
     setInitialized(true);
   }
@@ -247,11 +248,11 @@ function IngredientsDialog({ product, open, onOpenChange }: { product: Product; 
     saveMutation.mutate({ ingredients: valid });
   };
 
-  const addLine = () => setIngredientLines([...ingredientLines, { name: "", quantityPerUnit: "", unit: "g" }]);
+  const addLine = () => setIngredientLines([...ingredientLines, { name: "", quantityPerUnit: "", unit: "g", costPerG: "" }]);
 
   const removeLine = (idx: number) => {
     const newLines = ingredientLines.filter((_, i) => i !== idx);
-    setIngredientLines(newLines.length > 0 ? newLines : [{ name: "", quantityPerUnit: "", unit: "g" }]);
+    setIngredientLines(newLines.length > 0 ? newLines : [{ name: "", quantityPerUnit: "", unit: "g", costPerG: "" }]);
   };
 
   const updateLine = (idx: number, field: string, value: string) => {
@@ -282,13 +283,13 @@ function IngredientsDialog({ product, open, onOpenChange }: { product: Product; 
               Start typing to see suggestions from existing ingredients.
             </p>
             {ingredientLines.map((line, idx) => (
-              <div key={idx} className="flex gap-2 items-center">
+              <div key={idx} className="flex gap-2 items-center flex-wrap">
                 <AutocompleteInput
                   value={line.name}
                   onChange={(v) => updateLine(idx, "name", v)}
                   suggestions={knownIngredients?.names || []}
                   placeholder="Ingredient name"
-                  className="flex-1"
+                  className="flex-1 min-w-[140px]"
                   data-testid={`input-ingredient-name-${idx}`}
                 />
                 <Input
@@ -308,6 +309,19 @@ function IngredientsDialog({ product, open, onOpenChange }: { product: Product; 
                   className="w-20"
                   data-testid={`input-ingredient-unit-${idx}`}
                 />
+                <div className="relative w-24">
+                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">£/g</span>
+                  <Input
+                    type="number"
+                    value={line.costPerG}
+                    onChange={(e) => updateLine(idx, "costPerG", e.target.value)}
+                    placeholder="0.000"
+                    className="pl-7 w-full"
+                    step="0.000001"
+                    min="0"
+                    data-testid={`input-ingredient-cost-${idx}`}
+                  />
+                </div>
                 <Button size="icon" variant="ghost" onClick={() => removeLine(idx)} data-testid={`button-remove-ingredient-${idx}`}>
                   <X className="w-4 h-4" />
                 </Button>
