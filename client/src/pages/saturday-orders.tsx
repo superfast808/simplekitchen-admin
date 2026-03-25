@@ -238,20 +238,23 @@ export default function SaturdayOrdersPage() {
                         })()}
                       </TableCell>
                       <TableCell>
-                        <div className="flex flex-wrap gap-1 items-center">
-                          {displayItems.map((item, i) => (
-                            <Badge key={i} variant="secondary" className="text-xs" data-testid={`badge-item-${order.id}-${i}`}>
-                              {item.quantity > 1 ? `${item.quantity}× ` : ""}{item.productName}
-                            </Badge>
-                          ))}
-                          {displayItems.length === 0 && (() => {
-                            const tuesdayMatch = tuesdayOrders?.find(
-                              t => t.customerName.toLowerCase() === order.customerName.toLowerCase() && t.items.length > 0
-                            );
-                            return (
-                              <>
-                                <span className="text-xs text-muted-foreground">No items</span>
-                                {tuesdayMatch && (
+                        <div className="space-y-0.5">
+                          {displayItems.length > 0 && (
+                            <div className="text-sm leading-snug" data-testid={`text-items-${order.id}`}>
+                              {displayItems.map((item, i) => {
+                                const price = parseFloat((item as any).price || "0");
+                                return (i > 0 ? ", " : "") + `${item.quantity > 1 ? item.quantity + "× " : ""}${item.productName}${price > 0 ? ` (${price.toFixed(2)})` : ""}`;
+                              }).join("")}
+                            </div>
+                          )}
+                          {displayItems.length === 0 && (
+                            <div className="flex items-center gap-1">
+                              <span className="text-xs text-muted-foreground">No items</span>
+                              {(() => {
+                                const tuesdayMatch = tuesdayOrders?.find(
+                                  t => t.customerName.toLowerCase() === order.customerName.toLowerCase() && t.items.length > 0
+                                );
+                                return tuesdayMatch ? (
                                   <Button
                                     size="sm"
                                     variant="outline"
@@ -266,12 +269,12 @@ export default function SaturdayOrdersPage() {
                                     <Copy className="w-3 h-3 mr-1" />
                                     Copy from Tuesday
                                   </Button>
-                                )}
-                              </>
-                            );
-                          })()}
+                                ) : null;
+                              })()}
+                            </div>
+                          )}
                           {prevEntry && (
-                            <span className="text-xs text-muted-foreground ml-1 w-full mt-0.5" data-testid={`text-prev-order-date-${order.id}`}>
+                            <span className="text-xs text-muted-foreground" data-testid={`text-prev-order-date-${order.id}`}>
                               Last order: {format(new Date(prevEntry.orderDate), "d MMM")}
                             </span>
                           )}
@@ -366,12 +369,11 @@ export default function SaturdayOrdersPage() {
                           {order.customerName}
                         </TableCell>
                         <TableCell>
-                          <div className="flex flex-wrap gap-1">
-                            {order.items.map((item, i) => (
-                              <Badge key={i} variant="secondary" className="text-xs" data-testid={`badge-manual-item-${order.id}-${i}`}>
-                                {item.quantity > 1 ? `${item.quantity}× ` : ""}{item.productName}
-                              </Badge>
-                            ))}
+                          <div className="text-sm leading-snug" data-testid={`text-manual-items-${order.id}`}>
+                            {order.items.map((item, i) => {
+                              const price = parseFloat(item.price || "0");
+                              return (i > 0 ? ", " : "") + `${item.quantity > 1 ? item.quantity + "× " : ""}${item.productName}${price > 0 ? ` (${price.toFixed(2)})` : ""}`;
+                            }).join("")}
                           </div>
                         </TableCell>
                         <TableCell>
@@ -516,12 +518,11 @@ export default function SaturdayOrdersPage() {
                             {order.customerName}
                           </TableCell>
                           <TableCell>
-                            <div className="flex flex-wrap gap-1">
-                              {order.items.map((item, i) => (
-                                <Badge key={i} variant="secondary" className="text-xs" data-testid={`badge-website-item-${order.id}-${i}`}>
-                                  {item.quantity > 1 ? `${item.quantity}× ` : ""}{item.productName}
-                                </Badge>
-                              ))}
+                            <div className="text-sm leading-snug" data-testid={`text-website-items-${order.id}`}>
+                              {order.items.map((item, i) => {
+                                const price = parseFloat(item.price || "0");
+                                return (i > 0 ? ", " : "") + `${item.quantity > 1 ? item.quantity + "× " : ""}${item.productName}${price > 0 ? ` (${price.toFixed(2)})` : ""}`;
+                              }).join("")}
                             </div>
                           </TableCell>
                           <TableCell>
