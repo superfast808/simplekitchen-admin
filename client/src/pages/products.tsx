@@ -103,9 +103,11 @@ export default function ProductsPage() {
   const { toast } = useToast();
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
 
-  const { data: products, isLoading } = useQuery<Product[]>({
+  const { data: allProducts, isLoading } = useQuery<Product[]>({
     queryKey: ["/api/products"],
   });
+  const HIDDEN_CATEGORIES = /^(subscription|gift\s*card)/i;
+  const products = allProducts?.filter(p => !HIDDEN_CATEGORIES.test(p.category || ""));
 
   const syncMutation = useMutation({
     mutationFn: () => apiRequest("POST", "/api/woo/sync-products"),
