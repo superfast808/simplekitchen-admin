@@ -71,3 +71,28 @@ export async function fetchWooProducts(params: Record<string, string> = {}): Pro
 
   return allProducts;
 }
+
+export async function fetchWooVariations(parentId: number, parentProduct: any): Promise<any[]> {
+  const allVariations: any[] = [];
+  let page = 1;
+  const perPage = "100";
+
+  while (true) {
+    const url = buildUrl(`products/${parentId}/variations`, { status: "any", per_page: perPage, page: String(page) });
+    const response = await fetch(url);
+    if (!response.ok) break;
+    const variations = await response.json();
+    if (!Array.isArray(variations) || variations.length === 0) break;
+    // Attach parent info so we can build name/category
+    for (const v of variations) {
+      v._parentName = parentProduct.name;
+      v._parentCategories = parentProduct.categories;
+      v._parentImages = parentProduct.images;
+    }
+    allVariations.push(...variations);
+    if (variations.length < parseInt(perPage)) break;
+    page++;
+  }
+
+  return allVariations;
+}

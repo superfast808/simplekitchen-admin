@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { fetchWooOrders, fetchWooProducts, decodeHtmlEntities } from "./woocommerce";
+import { fetchWooOrders, fetchWooProducts, fetchWooVariations, decodeHtmlEntities } from "./woocommerce";
 import { insertProductSchema, insertIngredientSchema, insertOrderSchema, insertOrderItemSchema, insertManualQuantitySchema } from "@shared/schema";
 import * as XLSX from "xlsx";
 import PDFDocument from "pdfkit";
@@ -448,7 +448,8 @@ async function performSync() {
         await storage.updateOrder(existing.id, orderData);
         await storage.deleteOrderItemsByOrderId(existing.id);
         for (const item of wo.line_items || []) {
-          const product = await storage.getProductByWooId(item.product_id);
+          let product = await storage.getProductByWooId(item.product_id);
+          if (!product && item.variation_id) product = await storage.getProductByWooId(item.variation_id);
           await storage.createOrderItem({
             orderId: existing.id,
             productId: product?.id || null,
@@ -1207,7 +1208,8 @@ export async function registerRoutes(
           orderData.deliveryLng = null;
           const order = await storage.createOrder(orderData);
           for (const item of wo.line_items || []) {
-            const product = await storage.getProductByWooId(item.product_id);
+            let product = await storage.getProductByWooId(item.product_id);
+            if (!product && item.variation_id) product = await storage.getProductByWooId(item.variation_id);
             await storage.createOrderItem({
               orderId: order.id,
               productId: product?.id || null,
@@ -1233,14 +1235,30 @@ export async function registerRoutes(
       let imported = 0;
       let updated = 0;
 
+      // Collect all products including variations for variable products
+      const allWooProducts: any[] = [];
       for (const wp of wooProducts) {
+        allWooProducts.push(wp);
+        if (wp.type && (wp.type.includes("variable"))) {
+          const variations = await fetchWooVariations(wp.id, wp);
+          allWooProducts.push(...variations);
+        }
+      }
+
+      for (const wp of allWooProducts) {
         const existing = await storage.getProductByWooId(wp.id);
+        // For variations, build name from parent name + attribute values
+        let name = decodeHtmlEntities(wp.name || wp._parentName || "");
+        if (wp._parentName && wp.attributes?.length) {
+          const attrs = wp.attributes.map((a: any) => a.option).filter(Boolean).join(", ");
+          if (attrs) name = `${decodeHtmlEntities(wp._parentName)} - ${attrs}`;
+        }
         const productData = {
           wooId: wp.id,
-          name: decodeHtmlEntities(wp.name),
+          name,
           price: String(wp.price || "0"),
-          imageUrl: wp.images?.[0]?.src || null,
-          category: wp.categories?.[0]?.name || null,
+          imageUrl: (wp.images?.[0]?.src || wp._parentImages?.[0]?.src) || null,
+          category: (wp.categories?.[0]?.name || wp._parentCategories?.[0]?.name) || null,
         };
 
         if (existing) {
@@ -1252,7 +1270,7 @@ export async function registerRoutes(
         }
       }
 
-      res.json({ imported, updated, total: wooProducts.length });
+      res.json({ imported, updated, total: allWooProducts.length });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
