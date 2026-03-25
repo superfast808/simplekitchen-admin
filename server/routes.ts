@@ -1040,7 +1040,7 @@ export async function registerRoutes(
         }>;
       }> = [];
 
-      const grandTotals: Record<string, { name: string; totalQuantity: number; unit: string }> = {};
+      const grandTotals: Record<string, { name: string; totalQuantity: number; unit: string; totalCost: number | null }> = {};
 
       for (const product of uniqueProducts) {
         const productNameKey = product.name.toLowerCase().trim();
@@ -1055,12 +1055,15 @@ export async function registerRoutes(
           ingredients: pIngredients.map(ing => {
             const totalNeeded = orderedQty * parseFloat(ing.quantityPerUnit);
             const key = `${ing.name}_${ing.unit}`;
-            if (!grandTotals[key]) {
-              grandTotals[key] = { name: ing.name, totalQuantity: 0, unit: ing.unit };
-            }
-            grandTotals[key].totalQuantity += totalNeeded;
             const costPerG = (ing as any).costPerG != null ? String((ing as any).costPerG) : null;
             const totalCost = costPerG != null ? totalNeeded * parseFloat(costPerG) : null;
+            if (!grandTotals[key]) {
+              grandTotals[key] = { name: ing.name, totalQuantity: 0, unit: ing.unit, totalCost: null };
+            }
+            grandTotals[key].totalQuantity += totalNeeded;
+            if (totalCost != null) {
+              grandTotals[key].totalCost = (grandTotals[key].totalCost ?? 0) + totalCost;
+            }
             return {
               name: ing.name,
               quantityPerUnit: ing.quantityPerUnit,

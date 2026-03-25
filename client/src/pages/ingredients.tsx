@@ -25,6 +25,7 @@ type GrandTotal = {
   name: string;
   totalQuantity: number;
   unit: string;
+  totalCost: number | null;
 };
 
 type BreakdownResponse = {
@@ -181,6 +182,7 @@ export default function IngredientsPage() {
                       <TableHead>Ingredient</TableHead>
                       <TableHead className="text-right">Total Quantity</TableHead>
                       <TableHead>Unit</TableHead>
+                      <TableHead className="text-right w-[100px]">Total Cost</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -193,6 +195,9 @@ export default function IngredientsPage() {
                             {formatQty(item.totalQuantity)}
                           </TableCell>
                           <TableCell className="text-muted-foreground" data-testid={`text-grand-unit-${idx}`}>{item.unit}</TableCell>
+                          <TableCell className="text-right tabular-nums font-medium" data-testid={`text-grand-cost-${idx}`}>
+                            {item.totalCost != null ? `£${item.totalCost.toFixed(2)}` : <span className="text-muted-foreground/30">—</span>}
+                          </TableCell>
                         </TableRow>
                       ))}
                   </TableBody>
