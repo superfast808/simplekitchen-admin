@@ -166,6 +166,20 @@ export default function OrdersPage() {
 
   const [smartStampResult, setSmartStampResult] = useState<{ created: number; skipped: number; total: number; details: string[] } | null>(null);
   const [showSmartStampResult, setShowSmartStampResult] = useState(false);
+  const [confirmRemoveStamps, setConfirmRemoveStamps] = useState(false);
+
+  const removeStampsMutation = useMutation({
+    mutationFn: () => apiRequest("DELETE", "/api/recurring-orders/stamps-this-week"),
+    onSuccess: async (res) => {
+      const data = await res.json();
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      setConfirmRemoveStamps(false);
+      toast({ title: `Removed ${data.deleted} stamped order${data.deleted !== 1 ? "s" : ""}` });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Remove failed", description: error.message, variant: "destructive" });
+    },
+  });
 
   const smartStampAllMutation = useMutation({
     mutationFn: () => apiRequest("POST", "/api/recurring-orders/smart-stamp-all"),
@@ -397,6 +411,34 @@ export default function OrdersPage() {
                   <Stamp className="w-3 h-3 mr-1" />
                   {smartStampAllMutation.isPending ? "Stamping…" : "Stamp All This Week"}
                 </Button>
+                {confirmRemoveStamps ? (
+                  <div className="flex items-center gap-1">
+                    <span className="text-xs text-destructive font-medium">Remove all this week's stamps?</span>
+                    <Button
+                      size="sm" variant="destructive" className="h-7 text-xs"
+                      onClick={() => removeStampsMutation.mutate()}
+                      disabled={removeStampsMutation.isPending}
+                      data-testid="button-confirm-remove-stamps"
+                    >
+                      {removeStampsMutation.isPending ? "Removing…" : "Yes, remove"}
+                    </Button>
+                    <Button
+                      size="sm" variant="outline" className="h-7 text-xs"
+                      onClick={() => setConfirmRemoveStamps(false)}
+                      data-testid="button-cancel-remove-stamps"
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                ) : (
+                  <Button
+                    size="sm" variant="outline" className="h-7 text-xs text-destructive border-destructive/40"
+                    onClick={() => setConfirmRemoveStamps(true)}
+                    data-testid="button-remove-stamps"
+                  >
+                    <Trash2 className="w-3 h-3 mr-1" />Remove All Stamps
+                  </Button>
+                )}
                 <Button
                   size="sm" variant="outline" className="h-7 text-xs text-amber-600 border-amber-300"
                   onClick={() => deduplicateMutation.mutate()}

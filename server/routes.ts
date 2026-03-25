@@ -2977,6 +2977,22 @@ export async function registerRoutes(
     }
   });
 
+  // Delete all manual (stamped) orders for the current week.
+  app.delete("/api/recurring-orders/stamps-this-week", async (req, res) => {
+    try {
+      const week = getWeekRange(0);
+      const thisWeekOrders = await storage.getOrders(week.from, week.to);
+      const manualOrders = thisWeekOrders.filter(o => o.isManual);
+      for (const o of manualOrders) {
+        await storage.deleteOrderItemsByOrderId(o.id);
+        await storage.deleteOrder(o.id);
+      }
+      res.json({ deleted: manualOrders.length });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   // Smart stamp: create this week's orders for all active recurring customers,
   // using last week's actual orders as the item template and mapping to the current week's menu.
   app.post("/api/recurring-orders/smart-stamp-all", async (req, res) => {
