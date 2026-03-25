@@ -1845,6 +1845,51 @@ export async function registerRoutes(
     try {
       const from = req.query.from ? new Date(req.query.from as string) : undefined;
       const to = req.query.to ? new Date(req.query.to as string) : undefined;
+
+      // Auto-create invite records (no email) for any subscription orders this week
+      // that don't have an invite yet, so admin can manage them immediately.
+      const week = getWeekRange(0);
+      const weekOrders = await storage.getOrders(week.from, week.to);
+      const weekOrdersWithItems = await Promise.all(
+        weekOrders.map(async (o) => ({ ...o, items: await storage.getOrderItems(o.id) }))
+      );
+      const subOrders = weekOrdersWithItems.filter(o =>
+        o.items.some(i => SUB_PATTERN.test(i.productName) || WEEKLY_SUB_PATTERN.test(i.productName))
+      );
+      const existingThisWeek = await storage.getSubscriptionInvites(week.from, week.to);
+      const existingKeys = new Set(existingThisWeek.map(i =>
+        (i as any).isDual ? `${i.orderId}-dual` : `${i.orderId}-${i.isTuesday}`
+      ));
+      for (const order of subOrders) {
+        const slots = getSubscriptionSlots(order);
+        for (const slot of slots) {
+          const key = slot.isDual ? `${order.id}-dual` : `${order.id}-${slot.isTuesday}`;
+          if (existingKeys.has(key)) continue;
+          const token = crypto.randomBytes(32).toString("hex");
+          let inviteAddress = order.deliveryAddress || null;
+          let inviteFulfillment = order.fulfillmentType || "delivery";
+          if (!inviteAddress && order.customerEmail) {
+            const pastAddr = await storage.getCustomerDeliveryAddress(order.customerEmail, order.customerName);
+            if (pastAddr?.deliveryAddress) { inviteAddress = pastAddr.deliveryAddress; inviteFulfillment = pastAddr.fulfillmentType || "delivery"; }
+          }
+          await storage.createSubscriptionInvite({
+            orderId: order.id,
+            customerEmail: order.customerEmail || "",
+            customerName: order.customerName,
+            token,
+            subscriptionQuantity: slot.qty,
+            status: "pending",
+            weekFrom: week.from,
+            weekTo: week.to,
+            deliveryAddress: inviteAddress,
+            fulfillmentType: inviteFulfillment,
+            isTuesday: slot.isTuesday,
+            isDual: slot.isDual,
+          } as any);
+          existingKeys.add(key);
+        }
+      }
+
       const invites = await storage.getSubscriptionInvites(from, to);
       const allProducts = await storage.getProducts();
       const productPriceByName = new Map<string, number>();
