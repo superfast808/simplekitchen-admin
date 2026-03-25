@@ -590,7 +590,7 @@ function MealRows({ meals, selections, maxMeals, onAdd, onRemove, onAddExtra, on
   );
 }
 
-function ExtraRows({ extras: extrasData, extras, onAdd, onRemove, prefix }: {
+function ExtraRows({ extrasData, extras, onAdd, onRemove, prefix }: {
   extrasData: Array<{ name: string; popularity: number }>;
   extras: Record<string, number>;
   onAdd: (n: string) => void;
