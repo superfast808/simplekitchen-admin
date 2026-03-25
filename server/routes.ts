@@ -1879,26 +1879,8 @@ export async function registerRoutes(
         .filter(p => !SKIP_PAT.test(p.name) && Math.abs(parseFloat(p.price || "0") - 7.50) < 0.01)
         .sort((a, b) => a.name.localeCompare(b.name))
         .map(p => ({ name: p.name, popularity: 0, price: p.price || "7.50" }));
-      // Extras: include current-week extras + non-week-gated extras (Specialities etc),
-      // but exclude products only available in a past week.
-      // Deduplicate by name, preferring current week version.
-      const WEEK_CAT_PAT = /^Week \d+$/i;
-      const extraCandidates = allProducts.filter(p => {
-        if (SKIP_PAT.test(p.name)) return false;
-        const pr = parseFloat(p.price || "0");
-        if (!(pr > 0 && Math.abs(pr - 7.50) >= 0.01)) return false;
-        // Always include non-week-categorised products (Specialities, etc.)
-        if (!WEEK_CAT_PAT.test(p.category || "")) return true;
-        // Week products: only include if it's the current week
-        return p.category === categoryName;
-      });
-      // Deduplicate by name — current week wins over non-week
-      const extrasByName = new Map<string, typeof extraCandidates[0]>();
-      for (const p of extraCandidates) {
-        const existing = extrasByName.get(p.name);
-        if (!existing || p.category === categoryName) extrasByName.set(p.name, p);
-      }
-      availableExtras = Array.from(extrasByName.values())
+      availableExtras = productPool
+        .filter(p => { if (SKIP_PAT.test(p.name)) return false; const pr = parseFloat(p.price || "0"); return pr > 0 && Math.abs(pr - 7.50) >= 0.01; })
         .sort((a, b) => a.name.localeCompare(b.name))
         .map(p => ({ name: p.name, popularity: 0, price: p.price || "0" }));
 
@@ -2211,21 +2193,8 @@ export async function registerRoutes(
         .filter(p => !SKIP_PAT.test(p.name) && Math.abs(parseFloat(p.price || "0") - 7.50) < 0.01)
         .sort((a, b) => a.name.localeCompare(b.name))
         .map(p => ({ name: p.name, popularity: 0 }));
-      // Extras: current-week + non-week-gated (Specialities etc), excluding past-week-only products.
-      const WEEK_CAT_PAT = /^Week \d+$/i;
-      const extraCandidates = allProducts.filter(p => {
-        if (SKIP_PAT.test(p.name)) return false;
-        const pr = parseFloat(p.price || "0");
-        if (!(pr > 0 && Math.abs(pr - 7.50) >= 0.01)) return false;
-        if (!WEEK_CAT_PAT.test(p.category || "")) return true;
-        return p.category === categoryName;
-      });
-      const extrasByName = new Map<string, typeof extraCandidates[0]>();
-      for (const p of extraCandidates) {
-        const existing = extrasByName.get(p.name);
-        if (!existing || p.category === categoryName) extrasByName.set(p.name, p);
-      }
-      availableExtras = Array.from(extrasByName.values())
+      availableExtras = productPool
+        .filter(p => { if (SKIP_PAT.test(p.name)) return false; const pr = parseFloat(p.price || "0"); return pr > 0 && Math.abs(pr - 7.50) >= 0.01; })
         .sort((a, b) => a.name.localeCompare(b.name))
         .map(p => ({ name: p.name, popularity: 0 }));
 
