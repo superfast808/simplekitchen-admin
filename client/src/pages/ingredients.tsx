@@ -17,6 +17,7 @@ type ProductBreakdown = {
     unit: string;
     totalNeeded: number;
     costPerG: string | null;
+    costPerMeal: number | null;
     totalCost: number | null;
   }>;
 };
@@ -46,6 +47,10 @@ function ProductAccordion({ product }: { product: ProductBreakdown }) {
   const [open, setOpen] = useState(product.orderedQuantity > 0);
   const hasOrders = product.orderedQuantity > 0;
 
+  const totalCostPerMeal = product.ingredients.some(i => i.costPerMeal != null)
+    ? product.ingredients.reduce((sum, i) => sum + (i.costPerMeal ?? 0), 0)
+    : null;
+
   return (
     <div className={`border rounded-lg ${hasOrders ? "" : "opacity-60"}`} data-testid={`accordion-product-${product.productId}`}>
       <button
@@ -58,9 +63,16 @@ function ProductAccordion({ product }: { product: ProductBreakdown }) {
           {open ? <ChevronDown className="w-4 h-4 flex-shrink-0" /> : <ChevronRight className="w-4 h-4 flex-shrink-0" />}
           <span className="font-medium text-sm truncate">{product.productName}</span>
         </div>
-        <span className={`text-sm flex-shrink-0 ml-2 ${hasOrders ? "font-semibold" : "text-muted-foreground"}`}>
-          {product.orderedQuantity} ordered
-        </span>
+        <div className="flex items-center gap-3 flex-shrink-0 ml-2">
+          {totalCostPerMeal != null && (
+            <span className="text-xs text-muted-foreground" data-testid={`text-cost-per-meal-${product.productId}`}>
+              £{totalCostPerMeal.toFixed(2)}/meal
+            </span>
+          )}
+          <span className={`text-sm ${hasOrders ? "font-semibold" : "text-muted-foreground"}`}>
+            {product.orderedQuantity} ordered
+          </span>
+        </div>
       </button>
       {open && (
         <div className="border-t">
@@ -73,6 +85,7 @@ function ProductAccordion({ product }: { product: ProductBreakdown }) {
                 <TableHead className="text-right w-[120px]">Total Needed</TableHead>
                 <TableHead className="w-[60px]">Unit</TableHead>
                 <TableHead className="text-right w-[80px]">£/g</TableHead>
+                <TableHead className="text-right w-[100px]">Cost/Meal</TableHead>
                 <TableHead className="text-right w-[90px]">Total Cost</TableHead>
               </TableRow>
             </TableHeader>
@@ -87,12 +100,24 @@ function ProductAccordion({ product }: { product: ProductBreakdown }) {
                   <TableCell className="text-right tabular-nums text-sm text-muted-foreground">
                     {ing.costPerG != null ? parseFloat(ing.costPerG).toFixed(4) : <span className="text-muted-foreground/30">—</span>}
                   </TableCell>
+                  <TableCell className="text-right tabular-nums text-sm">
+                    {ing.costPerMeal != null ? `£${ing.costPerMeal.toFixed(4)}` : <span className="text-muted-foreground/30">—</span>}
+                  </TableCell>
                   <TableCell className="text-right tabular-nums text-sm font-medium">
                     {ing.totalCost != null ? `£${ing.totalCost.toFixed(2)}` : <span className="text-muted-foreground/30">—</span>}
                   </TableCell>
                 </TableRow>
               ))}
             </TableBody>
+            {totalCostPerMeal != null && (
+              <TableFooter>
+                <TableRow>
+                  <TableCell colSpan={6} className="text-right text-sm font-semibold">Total cost per meal</TableCell>
+                  <TableCell className="text-right tabular-nums text-sm font-bold">£{totalCostPerMeal.toFixed(4)}</TableCell>
+                  <TableCell />
+                </TableRow>
+              </TableFooter>
+            )}
           </Table>
         </div>
       )}

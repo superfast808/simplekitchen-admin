@@ -1036,6 +1036,7 @@ export async function registerRoutes(
           unit: string;
           totalNeeded: number;
           costPerG: string | null;
+          costPerMeal: number | null;
           totalCost: number | null;
         }>;
       }> = [];
@@ -1056,6 +1057,7 @@ export async function registerRoutes(
             const totalNeeded = orderedQty * parseFloat(ing.quantityPerUnit);
             const key = `${ing.name}_${ing.unit}`;
             const costPerG = (ing as any).costPerG != null ? String((ing as any).costPerG) : null;
+            const costPerMeal = costPerG != null ? parseFloat(costPerG) * parseFloat(ing.quantityPerUnit) : null;
             const totalCost = costPerG != null ? totalNeeded * parseFloat(costPerG) : null;
             if (!grandTotals[key]) {
               grandTotals[key] = { name: ing.name, totalQuantity: 0, unit: ing.unit, totalCost: null };
@@ -1070,6 +1072,7 @@ export async function registerRoutes(
               unit: ing.unit,
               totalNeeded,
               costPerG,
+              costPerMeal,
               totalCost,
             };
           }),
