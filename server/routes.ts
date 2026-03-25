@@ -3161,11 +3161,18 @@ export async function registerRoutes(
           continue;
         }
 
-        // Find most recent order for this customer + day (up to 3 weeks back), newest-first
-        const lastOrder = recentWithItems.find(
-          o => o.customerName.toLowerCase().trim() === ro.customerName.toLowerCase().trim()
-            && !!o.isTuesday === !!ro.isTuesday
-        );
+        // Find most recent order for this customer + day (up to 3 weeks back), newest-first.
+        // If no same-day order exists, fall back to any recent order from that customer
+        // (e.g. Sat order used as basis for Tue stamp) rather than the stale template.
+        const customerKey = ro.customerName.toLowerCase().trim();
+        const lastOrder =
+          recentWithItems.find(
+            o => o.customerName.toLowerCase().trim() === customerKey
+              && !!o.isTuesday === !!ro.isTuesday
+          ) ??
+          recentWithItems.find(
+            o => o.customerName.toLowerCase().trim() === customerKey
+          );
 
         let newItems: ReturnType<typeof resolveItems>;
 
