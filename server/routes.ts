@@ -1872,50 +1872,16 @@ export async function registerRoutes(
         extraPriceMap[p.name] = p.price || "0";
       }
 
-      if (weekProducts.length > 0) {
-        availableMeals = weekProducts
-          .filter(p => Math.abs(parseFloat(p.price || "0") - 7.50) < 0.01)
-          .sort((a, b) => a.name.localeCompare(b.name))
-          .map(p => ({ name: p.name, popularity: 0, price: p.price || "7.50" }));
-        availableExtras = weekProducts
-          .filter(p => { const pr = parseFloat(p.price || "0"); return pr > 0 && Math.abs(pr - 7.50) >= 0.01; })
-          .sort((a, b) => a.name.localeCompare(b.name))
-          .map(p => ({ name: p.name, popularity: 0, price: p.price || "0" }));
-      } else {
-        const mealProductNames = new Set(
-          allProducts.filter(p => Math.abs(parseFloat(p.price || "0") - 7.50) < 0.01).map(p => p.name)
-        );
-        const extraProductNames = new Set(
-          allProducts.filter(p => {
-            const pr = parseFloat(p.price || "0");
-            return pr > 0 && Math.abs(pr - 7.50) >= 0.01;
-          }).map(p => p.name)
-        );
-        const ordersList = await storage.getOrders(invite.weekFrom, invite.weekTo);
-        const ordersWithItems = await Promise.all(
-          ordersList.map(async (order) => {
-            const items = await storage.getOrderItems(order.id);
-            return { ...order, items };
-          })
-        );
-        const subscriptionPattern = /meal\s+subscription/i;
-        const addDeliveryPattern = /add\s+delivery/i;
-        const mealCounts: Record<string, number> = {};
-        const extraCounts: Record<string, number> = {};
-        for (const order of ordersWithItems) {
-          for (const item of order.items) {
-            if (subscriptionPattern.test(item.productName)) continue;
-            if (addDeliveryPattern.test(item.productName)) continue;
-            if (extraProductNames.has(item.productName)) {
-              extraCounts[item.productName] = (extraCounts[item.productName] || 0) + item.quantity;
-            } else {
-              mealCounts[item.productName] = (mealCounts[item.productName] || 0) + item.quantity;
-            }
-          }
-        }
-        availableMeals = Object.entries(mealCounts).sort((a, b) => b[1] - a[1]).map(([name, count]) => ({ name, popularity: count, price: "7.50" }));
-        availableExtras = Object.entries(extraCounts).sort((a, b) => b[1] - a[1]).map(([name, count]) => ({ name, popularity: count, price: extraPriceMap[name] || "0" }));
-      }
+      const SKIP_PAT = /subscription|add\s+delivery/i;
+      const productPool = weekProducts.length > 0 ? weekProducts : allProducts.filter(p => !SKIP_PAT.test(p.name));
+      availableMeals = productPool
+        .filter(p => !SKIP_PAT.test(p.name) && Math.abs(parseFloat(p.price || "0") - 7.50) < 0.01)
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map(p => ({ name: p.name, popularity: 0, price: p.price || "7.50" }));
+      availableExtras = productPool
+        .filter(p => { if (SKIP_PAT.test(p.name)) return false; const pr = parseFloat(p.price || "0"); return pr > 0 && Math.abs(pr - 7.50) >= 0.01; })
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map(p => ({ name: p.name, popularity: 0, price: p.price || "0" }));
 
       const existingSelections = await storage.getSubscriptionSelections(invite.id);
       const isDual = (invite as any).isDual === true;
@@ -2219,50 +2185,16 @@ export async function registerRoutes(
       let availableMeals: Array<{ name: string; popularity: number }>;
       let availableExtras: Array<{ name: string; popularity: number }>;
 
-      if (weekProducts.length > 0) {
-        availableMeals = weekProducts
-          .filter(p => Math.abs(parseFloat(p.price || "0") - 7.50) < 0.01)
-          .sort((a, b) => a.name.localeCompare(b.name))
-          .map(p => ({ name: p.name, popularity: 0 }));
-        availableExtras = weekProducts
-          .filter(p => { const pr = parseFloat(p.price || "0"); return pr > 0 && Math.abs(pr - 7.50) >= 0.01; })
-          .sort((a, b) => a.name.localeCompare(b.name))
-          .map(p => ({ name: p.name, popularity: 0 }));
-      } else {
-        const mealProductNames = new Set(
-          allProducts.filter(p => Math.abs(parseFloat(p.price || "0") - 7.50) < 0.01).map(p => p.name)
-        );
-        const extraProductNames = new Set(
-          allProducts.filter(p => {
-            const pr = parseFloat(p.price || "0");
-            return pr > 0 && Math.abs(pr - 7.50) >= 0.01;
-          }).map(p => p.name)
-        );
-        const ordersList = await storage.getOrders(invite.weekFrom, invite.weekTo);
-        const ordersWithItems = await Promise.all(
-          ordersList.map(async (order) => {
-            const items = await storage.getOrderItems(order.id);
-            return { ...order, items };
-          })
-        );
-        const subPat = /meal\s+subscription/i;
-        const delPat = /add\s+delivery/i;
-        const mealCounts: Record<string, number> = {};
-        const extraCounts: Record<string, number> = {};
-        for (const order of ordersWithItems) {
-          for (const item of order.items) {
-            if (subPat.test(item.productName)) continue;
-            if (delPat.test(item.productName)) continue;
-            if (extraProductNames.has(item.productName)) {
-              extraCounts[item.productName] = (extraCounts[item.productName] || 0) + item.quantity;
-            } else {
-              mealCounts[item.productName] = (mealCounts[item.productName] || 0) + item.quantity;
-            }
-          }
-        }
-        availableMeals = Object.entries(mealCounts).sort((a, b) => b[1] - a[1]).map(([name, count]) => ({ name, popularity: count }));
-        availableExtras = Object.entries(extraCounts).sort((a, b) => b[1] - a[1]).map(([name, count]) => ({ name, popularity: count }));
-      }
+      const SKIP_PAT = /subscription|add\s+delivery/i;
+      const productPool = weekProducts.length > 0 ? weekProducts : allProducts.filter(p => !SKIP_PAT.test(p.name));
+      availableMeals = productPool
+        .filter(p => !SKIP_PAT.test(p.name) && Math.abs(parseFloat(p.price || "0") - 7.50) < 0.01)
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map(p => ({ name: p.name, popularity: 0 }));
+      availableExtras = productPool
+        .filter(p => { if (SKIP_PAT.test(p.name)) return false; const pr = parseFloat(p.price || "0"); return pr > 0 && Math.abs(pr - 7.50) >= 0.01; })
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map(p => ({ name: p.name, popularity: 0 }));
 
       const existingSelections = await storage.getSubscriptionSelections(invite.id);
       const isDual = (invite as any).isDual === true;
