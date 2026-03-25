@@ -22,6 +22,17 @@ type RecurringOrderWithItems = RecurringOrder & { items: RecurringOrderItem[] };
 type OrderWithItems = Order & { items: OrderItem[] };
 type PreviousOrderMap = Record<number, { items: { productName: string; quantity: number }[]; orderDate: string }>;
 
+function itemSortPriority(name: string): number {
+  const n = name.toLowerCase();
+  if (/subscription/i.test(n)) return 30;
+  if (/soup/i.test(n)) return 20;
+  if (/oat/i.test(n)) return 10;
+  return 0;
+}
+function sortItems<T extends { productName: string }>(items: T[]): T[] {
+  return [...items].sort((a, b) => itemSortPriority(a.productName) - itemSortPriority(b.productName));
+}
+
 export default function TuesdayOrdersPage() {
   const { toast } = useToast();
   const [showAddDialog, setShowAddDialog] = useState(false);
@@ -239,7 +250,7 @@ export default function TuesdayOrdersPage() {
                         <div className="space-y-0.5">
                           {displayItems.length > 0 && (
                             <div className="text-sm leading-snug" data-testid={`text-items-${order.id}`}>
-                              {displayItems.map((item, i) => {
+                              {sortItems(displayItems).map((item, i) => {
                                 const price = parseFloat((item as any).price || "0");
                                 return (i > 0 ? ", " : "") + `${item.quantity > 1 ? item.quantity + "× " : ""}${item.productName}${price > 0 ? ` (${price.toFixed(2)})` : ""}`;
                               }).join("")}
@@ -368,7 +379,7 @@ export default function TuesdayOrdersPage() {
                         </TableCell>
                         <TableCell>
                           <div className="text-sm leading-snug" data-testid={`text-manual-items-${order.id}`}>
-                            {order.items.map((item, i) => {
+                            {sortItems(order.items).map((item, i) => {
                               const price = parseFloat(item.price || "0");
                               return (i > 0 ? ", " : "") + `${item.quantity > 1 ? item.quantity + "× " : ""}${item.productName}${price > 0 ? ` (${price.toFixed(2)})` : ""}`;
                             }).join("")}
@@ -517,7 +528,7 @@ export default function TuesdayOrdersPage() {
                           </TableCell>
                           <TableCell>
                             <div className="text-sm leading-snug" data-testid={`text-tue-website-items-${order.id}`}>
-                              {order.items.map((item, i) => {
+                              {sortItems(order.items).map((item, i) => {
                                 const price = parseFloat(item.price || "0");
                                 return (i > 0 ? ", " : "") + `${item.quantity > 1 ? item.quantity + "× " : ""}${item.productName}${price > 0 ? ` (${price.toFixed(2)})` : ""}`;
                               }).join("")}

@@ -24,6 +24,17 @@ import type { Order, OrderItem, RecurringOrder, RecurringOrderItem } from "@shar
 type OrderWithItems = Order & { items: OrderItem[] };
 type RecurringOrderWithItems = RecurringOrder & { items: RecurringOrderItem[] };
 
+function itemSortPriority(name: string): number {
+  const n = name.toLowerCase();
+  if (/subscription/i.test(n)) return 30;
+  if (/soup/i.test(n)) return 20;
+  if (/oat/i.test(n)) return 10;
+  return 0;
+}
+function sortItems<T extends { productName: string }>(items: T[]): T[] {
+  return [...items].sort((a, b) => itemSortPriority(a.productName) - itemSortPriority(b.productName));
+}
+
 export default function OrdersPage() {
   const { toast } = useToast();
   const dateFilter = useDateFilter();
@@ -486,7 +497,7 @@ export default function OrdersPage() {
                                   : group.saturday!.items;
                                 return items.length === 0
                                   ? <span className="italic">No items — amend to add</span>
-                                  : <>{items.map(i => `${i.quantity > 1 ? i.quantity + "× " : ""}${i.productName}${parseFloat((i as any).price || "0") > 0 ? ` (${parseFloat((i as any).price).toFixed(2)})` : ""}`).join(", ")}{actualOrders && actualOrders.length > 0 && <span className="ml-1 text-xs text-muted-foreground/60">(actual)</span>}</>;
+                                  : <>{sortItems(items).map(i => `${i.quantity > 1 ? i.quantity + "× " : ""}${i.productName}${parseFloat((i as any).price || "0") > 0 ? ` (${parseFloat((i as any).price).toFixed(2)})` : ""}`).join(", ")}{actualOrders && actualOrders.length > 0 && <span className="ml-1 text-xs text-muted-foreground/60">(actual)</span>}</>;
                               })()
                             : <span className="text-muted-foreground/40 italic">—</span>}
                         </TableCell>
@@ -501,7 +512,7 @@ export default function OrdersPage() {
                                   : group.tuesday!.items;
                                 return items.length === 0
                                   ? <span className="italic">No items — amend to add</span>
-                                  : <>{items.map(i => `${i.quantity > 1 ? i.quantity + "× " : ""}${i.productName}${parseFloat((i as any).price || "0") > 0 ? ` (${parseFloat((i as any).price).toFixed(2)})` : ""}`).join(", ")}{actualOrders && actualOrders.length > 0 && <span className="ml-1 text-xs text-muted-foreground/60">(actual)</span>}</>;
+                                  : <>{sortItems(items).map(i => `${i.quantity > 1 ? i.quantity + "× " : ""}${i.productName}${parseFloat((i as any).price || "0") > 0 ? ` (${parseFloat((i as any).price).toFixed(2)})` : ""}`).join(", ")}{actualOrders && actualOrders.length > 0 && <span className="ml-1 text-xs text-muted-foreground/60">(actual)</span>}</>;
                               })()
                             : <span className="text-muted-foreground/40 italic">—</span>}
                         </TableCell>
@@ -588,8 +599,8 @@ export default function OrdersPage() {
                       const unitPrice = parseFloat(i.price || "0");
                       return sum + (order.isManual ? unitPrice * i.quantity : unitPrice);
                     }, 0) + parseFloat((order as any).shippingTotal || "0");
-                    const itemSummary = order.items
-                      .filter(i => !i.productName.toLowerCase().includes("add delivery"))
+                    const itemSummary = sortItems(order.items
+                      .filter(i => !i.productName.toLowerCase().includes("add delivery")))
                       .map(i => {
                         const price = parseFloat(i.price || "0");
                         return `${i.quantity > 1 ? i.quantity + "× " : ""}${i.productName}${price > 0 ? ` (${price.toFixed(2)})` : ""}`;
