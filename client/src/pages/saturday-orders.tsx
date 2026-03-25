@@ -21,10 +21,12 @@ type RecurringOrderWithItems = RecurringOrder & { items: RecurringOrderItem[] };
 type OrderWithItems = Order & { items: OrderItem[] };
 type PreviousOrderMap = Record<number, { items: { productName: string; quantity: number }[]; orderDate: string }>;
 
+const SOUP_PRODUCTS = ["curried sweet potato & carrot"];
+
 function itemSortPriority(name: string): number {
   const n = name.toLowerCase();
   if (/subscription/i.test(n)) return 30;
-  if (/soup/i.test(n)) return 20;
+  if (/soup/i.test(n) || SOUP_PRODUCTS.includes(n.trim())) return 20;
   if (/oat/i.test(n)) return 10;
   return 0;
 }
