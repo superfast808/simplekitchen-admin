@@ -230,7 +230,9 @@ function getSubscriptionSlots(order: { isTuesday: boolean; items: Array<{ produc
 
   // Single subscription (or same day repeated) — check for "2 week" dual-day flag
   return subItems.map(item => {
-    const m = item.productName.match(SUB_PATTERN);
+    // Try primary pattern first (e.g. "Meal Subscription - 6"),
+    // then fall back to any trailing "- N" in the name (e.g. "Meal Subscription 2 week - 6")
+    const m = item.productName.match(SUB_PATTERN) || item.productName.match(/-\s*(\d+)\s*$/);
     const qty = m ? parseInt(m[1], 10) : (item.quantity || 0);
     const isDual = TWO_WEEK_PATTERN.test(item.productName);
     return { qty, isTuesday: isDual ? false : order.isTuesday, isDual };
