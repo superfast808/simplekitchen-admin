@@ -1874,11 +1874,13 @@ export async function registerRoutes(
 
       const SKIP_PAT = /subscription|add\s+delivery/i;
       const productPool = weekProducts.length > 0 ? weekProducts : allProducts.filter(p => !SKIP_PAT.test(p.name));
+      // Meals: strictly this week's category only
       availableMeals = productPool
         .filter(p => !SKIP_PAT.test(p.name) && Math.abs(parseFloat(p.price || "0") - 7.50) < 0.01)
         .sort((a, b) => a.name.localeCompare(b.name))
         .map(p => ({ name: p.name, popularity: 0, price: p.price || "7.50" }));
-      availableExtras = productPool
+      // Extras: all products by price regardless of week — oats/soups aren't re-tagged each week
+      availableExtras = allProducts
         .filter(p => { if (SKIP_PAT.test(p.name)) return false; const pr = parseFloat(p.price || "0"); return pr > 0 && Math.abs(pr - 7.50) >= 0.01; })
         .sort((a, b) => a.name.localeCompare(b.name))
         .map(p => ({ name: p.name, popularity: 0, price: p.price || "0" }));
@@ -2187,11 +2189,13 @@ export async function registerRoutes(
 
       const SKIP_PAT = /subscription|add\s+delivery/i;
       const productPool = weekProducts.length > 0 ? weekProducts : allProducts.filter(p => !SKIP_PAT.test(p.name));
+      // Meals: strictly this week's category only
       availableMeals = productPool
         .filter(p => !SKIP_PAT.test(p.name) && Math.abs(parseFloat(p.price || "0") - 7.50) < 0.01)
         .sort((a, b) => a.name.localeCompare(b.name))
         .map(p => ({ name: p.name, popularity: 0 }));
-      availableExtras = productPool
+      // Extras: all products by price regardless of week — oats/soups aren't re-tagged each week
+      availableExtras = allProducts
         .filter(p => { if (SKIP_PAT.test(p.name)) return false; const pr = parseFloat(p.price || "0"); return pr > 0 && Math.abs(pr - 7.50) >= 0.01; })
         .sort((a, b) => a.name.localeCompare(b.name))
         .map(p => ({ name: p.name, popularity: 0 }));
