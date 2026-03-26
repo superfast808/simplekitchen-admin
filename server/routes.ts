@@ -55,11 +55,11 @@ function buildAddressVariants(raw: string): string[] {
 
 // Returns the current week number (1-6) based on week1ReferenceDate setting.
 // The week advances every Saturday at noon (every 7 days from the reference date).
-async function getCurrentWeekInfo(): Promise<{ weekNumber: number; categoryName: string }> {
+async function getCurrentWeekInfo(asOf?: Date): Promise<{ weekNumber: number; categoryName: string }> {
   const refDateStr = await storage.getSetting("week1ReferenceDate");
   if (!refDateStr) return { weekNumber: 1, categoryName: "Week 1" };
   const refDate = new Date(refDateStr);
-  const now = new Date();
+  const now = asOf ?? new Date();
   const diffMs = now.getTime() - refDate.getTime();
   if (diffMs < 0) return { weekNumber: 1, categoryName: "Week 1" };
   const diffWeeks = Math.floor(diffMs / (7 * 24 * 60 * 60 * 1000));
@@ -1925,7 +1925,10 @@ export async function registerRoutes(
         return res.status(404).json({ message: "Invitation not found or expired" });
       }
 
-      const { weekNumber, categoryName } = await getCurrentWeekInfo();
+      // Use the invite's weekFrom to determine which week's products to show —
+      // so a late click never shows the next week's menu.
+      const inviteWeekDate = invite.weekFrom ? new Date(invite.weekFrom) : undefined;
+      const { weekNumber, categoryName } = await getCurrentWeekInfo(inviteWeekDate);
       const allProducts = await storage.getProducts();
       const weekProducts = allProducts.filter(p => p.category === categoryName);
 
@@ -2245,7 +2248,9 @@ export async function registerRoutes(
       const invite = await storage.getSubscriptionInviteById(parseInt(req.params.id));
       if (!invite) return res.status(404).json({ message: "Invite not found" });
 
-      const { weekNumber, categoryName } = await getCurrentWeekInfo();
+      // Anchor product pool to the invite's own week, not today
+      const inviteWeekDate = invite.weekFrom ? new Date(invite.weekFrom) : undefined;
+      const { weekNumber, categoryName } = await getCurrentWeekInfo(inviteWeekDate);
       const allProducts = await storage.getProducts();
       const weekProducts = allProducts.filter(p => p.category === categoryName);
 
