@@ -1297,7 +1297,8 @@ export async function registerRoutes(
         })
       );
       applyAddDeliveryUpgrades(ordersWithItems);
-      const subRe = /meal\s+subscription\s*-\s*\d+/i;
+      // Exclude any order whose items are subscription products (they show via stamped manual orders instead)
+      const isSubscriptionItem = (name: string) => SUB_PATTERN.test(name) || WEEKLY_SUB_PATTERN.test(name);
       const isAddDeliveryOnly = (items: { productName: string }[]) =>
         items.length > 0 && items.every(i => i.productName.toLowerCase().includes("add delivery"));
       // Subscription-origin orders count as "website" for reconciliation
@@ -1305,7 +1306,7 @@ export async function registerRoutes(
       const addresses = ordersWithItems
         .filter(o =>
           (o.deliveryAddress || o.fulfillmentType === "collection") &&
-          !o.items.some(i => subRe.test(i.productName)) &&
+          !o.items.some(i => isSubscriptionItem(i.productName)) &&
           !isAddDeliveryOnly(o.items)
         )
         .map(o => {
