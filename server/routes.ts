@@ -242,6 +242,9 @@ function getSubscriptionSlots(order: { isTuesday: boolean; items: Array<{ produc
 // Attempt to auto-send subscription invite emails for any subscription order
 // in the current week that hasn't already been invited.
 async function autoSendSubscriptionInvites(): Promise<void> {
+  // Never send real emails from the development environment — tokens only exist
+  // in the local DB and customers would receive broken links to production.
+  if (process.env.NODE_ENV !== "production") return;
   if (!isWithinAutoSendWindow()) return;
 
   try {
