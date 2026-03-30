@@ -37,6 +37,7 @@ function sortItems<T extends { productName: string }>(items: T[]): T[] {
 export default function SaturdayOrdersPage() {
   const { toast } = useToast();
   const [showAddDialog, setShowAddDialog] = useState(false);
+  const [showTemplates, setShowTemplates] = useState(false);
   const [editingOrder, setEditingOrder] = useState<RecurringOrderWithItems | null>(null);
   const [editingManualOrder, setEditingManualOrder] = useState<OrderWithItems | null>(null);
   const dateFilter = useDateFilter();
@@ -191,12 +192,13 @@ export default function SaturdayOrdersPage() {
       </div>
 
       <div>
-        <div className="mb-3">
-          <h2 className="text-lg font-semibold" data-testid="text-recurring-heading">Recurring Customer Templates</h2>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            These are saved customer profiles — not orders. Hit <span className="font-medium text-foreground">Generate This Week</span> to create this week's manual orders from the active ones. Scroll down for the actual orders to prepare for delivery.
-          </p>
+        <div className="mb-3 flex items-start gap-3">
+          <div className="flex items-center gap-2 mt-0.5 cursor-pointer" onClick={() => setShowTemplates(v => !v)}>
+            <Checkbox checked={showTemplates} onCheckedChange={(v) => setShowTemplates(!!v)} data-testid="checkbox-show-templates" />
+            <h2 className="text-lg font-semibold select-none" data-testid="text-recurring-heading">Recurring Customer Templates</h2>
+          </div>
         </div>
+        {showTemplates && (
         <Card>
         <CardContent className="p-0">
           {isLoading ? (
@@ -335,6 +337,7 @@ export default function SaturdayOrdersPage() {
           )}
         </CardContent>
         </Card>
+        )}
       </div>
 
       <div>
