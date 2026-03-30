@@ -11,7 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { Send, CheckCircle2, Clock, Mail, Pencil, Minus, Plus, UtensilsCrossed, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, RotateCcw, CreditCard, ExternalLink, Trash2 } from "lucide-react";
-import { format, addWeeks, startOfDay } from "date-fns";
+import { format, addWeeks } from "date-fns";
 
 type Selection = {
   id: number;
@@ -58,13 +58,12 @@ type MealData = {
 };
 
 function getCurrentWeekRange(offsetWeeks: number = 0): { from: Date; to: Date } {
+  // Use UTC throughout so dates match what the backend stores (server runs in UTC).
   const now = new Date();
-  const day = now.getDay();
+  const day = now.getUTCDay();
   // Find the most recent or upcoming Saturday (day 6)
   const daysUntilSat = (6 - day + 7) % 7;
   const daysFromSat = day === 6 ? 0 : -(7 - daysUntilSat);
-  // If today is past Wednesday (day > 3) and not yet Saturday, use next Saturday
-  // Otherwise use last Saturday
   let satOffset = 0;
   if (day >= 4 && day < 6) {
     // Thu/Fri — upcoming Saturday
@@ -74,12 +73,10 @@ function getCurrentWeekRange(offsetWeeks: number = 0): { from: Date; to: Date } 
     satOffset = daysFromSat;
   }
   // day === 6 → satOffset = 0 (today is Saturday)
-  const sat = new Date(now);
-  sat.setDate(now.getDate() + satOffset + offsetWeeks * 7);
-  const from = startOfDay(sat);
-  const to = new Date(sat);
-  to.setDate(sat.getDate() + 4);
-  to.setHours(23, 59, 59, 999);
+  const satUtcDate = now.getUTCDate() + satOffset + offsetWeeks * 7;
+  // Build UTC-anchored dates to match backend storage
+  const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), satUtcDate, 0, 0, 0, 0));
+  const to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), satUtcDate + 4, 23, 59, 59, 999));
   return { from, to };
 }
 
