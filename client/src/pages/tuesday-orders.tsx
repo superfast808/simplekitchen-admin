@@ -407,40 +407,48 @@ export default function TuesdayOrdersPage() {
                             <div className="font-semibold tabular-nums text-right">
                               {order.items.reduce((s, i) => s + i.quantity, 0)}
                             </div>
-                            <Select
-                              value={(order as any).paymentMethod || "none"}
-                              onValueChange={(v) => packingMutation.mutate({ id: order.id, data: { paymentMethod: v === "none" ? null : v } })}
-                            >
-                              <SelectTrigger className="h-7 text-xs px-2" data-testid={`select-payment-${order.id}`}>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="none">—</SelectItem>
-                                {!order.items.some(i => /subscription/i.test(i.productName)) && (
-                                  <SelectItem value="cash">Cash</SelectItem>
+                            {(order as any).isSubscriptionStamped ? (
+                              (order as any).parentOrderTotal != null ? (
+                                <div className="text-xs text-muted-foreground" data-testid={`text-sub-paid-${order.id}`}>
+                                  Paid £{parseFloat((order as any).parentOrderTotal).toFixed(2)}
+                                </div>
+                              ) : (
+                                <div className="text-xs text-muted-foreground">Paid (sub)</div>
+                              )
+                            ) : (
+                              <>
+                                <Select
+                                  value={(order as any).paymentMethod || "none"}
+                                  onValueChange={(v) => packingMutation.mutate({ id: order.id, data: { paymentMethod: v === "none" ? null : v } })}
+                                >
+                                  <SelectTrigger className="h-7 text-xs px-2" data-testid={`select-payment-${order.id}`}>
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="none">—</SelectItem>
+                                    <SelectItem value="cash">Cash</SelectItem>
+                                    <SelectItem value="bank_transfer">Bank</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                                {(order as any).paymentMethod && (order as any).paymentMethod !== "none" && (
+                                  <Input
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    value={editingAmounts[order.id] ?? ((order as any).cashAmount != null ? String((order as any).cashAmount) : "")}
+                                    onChange={(e) => setEditingAmounts(prev => ({ ...prev, [order.id]: e.target.value }))}
+                                    onBlur={(e) => {
+                                      const val = e.target.value;
+                                      const orig = (order as any).cashAmount != null ? String((order as any).cashAmount) : "";
+                                      if (val !== orig) packingMutation.mutate({ id: order.id, data: { cashAmount: val ? parseFloat(val) : null } });
+                                      setEditingAmounts(prev => { const n = { ...prev }; delete n[order.id]; return n; });
+                                    }}
+                                    className="h-7 text-xs px-2"
+                                    placeholder="£0.00"
+                                    data-testid={`input-cash-amount-${order.id}`}
+                                  />
                                 )}
-                                {!order.items.some(i => /subscription/i.test(i.productName)) && (
-                                  <SelectItem value="bank_transfer">Bank</SelectItem>
-                                )}
-                              </SelectContent>
-                            </Select>
-                            {(order as any).paymentMethod && (order as any).paymentMethod !== "none" && (
-                              <Input
-                                type="number"
-                                min="0"
-                                step="0.01"
-                                value={editingAmounts[order.id] ?? ((order as any).cashAmount != null ? String((order as any).cashAmount) : "")}
-                                onChange={(e) => setEditingAmounts(prev => ({ ...prev, [order.id]: e.target.value }))}
-                                onBlur={(e) => {
-                                  const val = e.target.value;
-                                  const orig = (order as any).cashAmount != null ? String((order as any).cashAmount) : "";
-                                  if (val !== orig) packingMutation.mutate({ id: order.id, data: { cashAmount: val ? parseFloat(val) : null } });
-                                  setEditingAmounts(prev => { const n = { ...prev }; delete n[order.id]; return n; });
-                                }}
-                                className="h-7 text-xs px-2"
-                                placeholder="£0.00"
-                                data-testid={`input-cash-amount-${order.id}`}
-                              />
+                              </>
                             )}
                           </div>
                         </TableCell>

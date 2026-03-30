@@ -725,7 +725,37 @@ export async function registerRoutes(
         })
       );
       applyAddDeliveryUpgrades(ordersWithItems);
-      res.json(ordersWithItems);
+
+      // Build subscription-stamp annotation: map stamped order ID → parent WooCommerce order total
+      const allInvites = await storage.getSubscriptionInvites();
+      const stampedToParentId = new Map<number, number>();
+      for (const invite of allInvites) {
+        if ((invite as any).selectionsOrderId && invite.orderId) {
+          stampedToParentId.set((invite as any).selectionsOrderId, invite.orderId);
+        }
+        if ((invite as any).tuesdaySelectionsOrderId && invite.orderId) {
+          stampedToParentId.set((invite as any).tuesdaySelectionsOrderId, invite.orderId);
+        }
+      }
+      const parentIdToTotal = new Map<number, number>();
+      for (const parentId of new Set(stampedToParentId.values())) {
+        const parentItems = await storage.getOrderItems(parentId);
+        const parentOrder = ordersList.find(o => o.id === parentId);
+        const itemsTotal = parentItems.reduce((s, i) => s + parseFloat(i.price || "0"), 0);
+        const shipping = parseFloat((parentOrder as any)?.shippingTotal || "0");
+        parentIdToTotal.set(parentId, itemsTotal + shipping);
+      }
+
+      const annotated = ordersWithItems.map(o => {
+        const parentId = stampedToParentId.get(o.id);
+        return {
+          ...o,
+          isSubscriptionStamped: stampedToParentId.has(o.id),
+          parentOrderTotal: parentId != null ? (parentIdToTotal.get(parentId) ?? null) : null,
+        };
+      });
+
+      res.json(annotated);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
