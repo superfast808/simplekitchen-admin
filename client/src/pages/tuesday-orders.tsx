@@ -370,7 +370,6 @@ export default function TuesdayOrdersPage() {
                       <TableHead className="min-w-[200px]">Items</TableHead>
                       <TableHead className="min-w-[200px]">Address</TableHead>
                       <TableHead className="w-[90px]">Type</TableHead>
-                      <TableHead className="w-[80px]">Date</TableHead>
                       <TableHead className="w-[130px]">Qty / Spend</TableHead>
                       <TableHead className="w-[60px] text-center">Pack</TableHead>
                       <TableHead className="w-[100px]"></TableHead>
@@ -402,11 +401,6 @@ export default function TuesdayOrdersPage() {
                           >
                             {order.fulfillmentType === "delivery" ? "Delivery" : "Collection"}
                           </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <span className="text-xs text-muted-foreground">
-                            {format(new Date(order.orderDate), "EEE d")}
-                          </span>
                         </TableCell>
                         <TableCell data-testid={`text-manual-qty-${order.id}`}>
                           <div className="space-y-1">
@@ -520,7 +514,6 @@ export default function TuesdayOrdersPage() {
                       <TableHead className="min-w-[220px]">Items</TableHead>
                       <TableHead className="min-w-[180px]">Address</TableHead>
                       <TableHead className="w-[90px]">Type</TableHead>
-                      <TableHead className="w-[80px]">Date</TableHead>
                       <TableHead className="w-[50px] text-right">Qty</TableHead>
                       <TableHead className="w-[90px] text-right">Total</TableHead>
                       <TableHead className="w-[60px] text-center">Pack</TableHead>
@@ -555,11 +548,6 @@ export default function TuesdayOrdersPage() {
                             >
                               {order.fulfillmentType === "delivery" ? "Delivery" : "Collection"}
                             </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <span className="text-xs text-muted-foreground">
-                              {format(new Date(order.orderDate), "EEE d")}
-                            </span>
                           </TableCell>
                           <TableCell className="text-right font-semibold tabular-nums" data-testid={`text-tue-website-qty-${order.id}`}>
                             {orderQty}
