@@ -78,12 +78,24 @@ function filterItems(
   });
 }
 
+const SUB_RE = /meal\s+subscription/i;
+
 function computeGroup(
   orders: OrderWithItems[],
   hideAddons: boolean,
   hideAddDelivery: boolean,
   hideSubscriptionBase: boolean,
+  allOrders?: OrderWithItems[],
 ): GroupStats {
+  // Customers who have a WooCommerce subscription order in this period —
+  // their manual recurring orders are operational records only; actual payment
+  // (including delivery) is captured in the WooCommerce subscription order.
+  const subCustomers = new Set(
+    (allOrders ?? orders)
+      .filter(o => !o.isManual && o.items.some(i => SUB_RE.test(i.productName)))
+      .map(o => o.customerName)
+  );
+
   let mealsSold = 0, revenue = 0, deliveryStops = 0;
   const mealCounts: Record<string, number> = {};
   for (const order of orders) {
@@ -94,9 +106,11 @@ function computeGroup(
     if (cashAmount > 0) {
       // Cash/bank amount entered — use it directly as this order's revenue
       revenue += cashAmount;
+    } else if (order.isManual && subCustomers.has(order.customerName)) {
+      // Subscription customer: their revenue + delivery is in the WooCommerce sub order — skip
     } else {
-      // Fall back: sum item prices + shipping
-      // Manual orders store unit price; WooCommerce stores line total (qty already baked in)
+      // WooCommerce order or B2B manual order without cashAmount yet:
+      // WooCommerce: item.price is line total; manual: unit price × qty
       revenue += parseFloat(order.shippingTotal || "0");
       for (const item of items) {
         const unitPrice = parseFloat(item.price || "0");
@@ -160,9 +174,9 @@ export default function WeeklyStatsPage() {
     if (!rawOrders) return null;
     const webOrders = rawOrders.filter(o => !o.isManual);
     const manualOrders = rawOrders.filter(o => o.isManual);
-    const all = computeGroup(rawOrders, hideAddons, hideAddDelivery, hideSubscriptionBase);
-    const web = computeGroup(webOrders, hideAddons, hideAddDelivery, hideSubscriptionBase);
-    const manual = computeGroup(manualOrders, hideAddons, hideAddDelivery, hideSubscriptionBase);
+    const all = computeGroup(rawOrders, hideAddons, hideAddDelivery, hideSubscriptionBase, rawOrders);
+    const web = computeGroup(webOrders, hideAddons, hideAddDelivery, hideSubscriptionBase, rawOrders);
+    const manual = computeGroup(manualOrders, hideAddons, hideAddDelivery, hideSubscriptionBase, rawOrders);
     const entries = Object.entries(all.mealCounts).sort((a, b) => b[1] - a[1]);
     const topSeller = entries.length > 0 ? `${entries[0][0]} (${entries[0][1]})` : "—";
     const worstSeller = entries.length > 0 ? `${entries[entries.length - 1][0]} (${entries[entries.length - 1][1]})` : "—";
