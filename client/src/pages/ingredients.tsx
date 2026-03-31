@@ -133,7 +133,7 @@ function ProductAccordion({
                     {ing.costPerG != null ? parseFloat(ing.costPerG).toFixed(4) : <span className="text-muted-foreground/30">—</span>}
                   </TableCell>
                   <TableCell className="text-right tabular-nums text-sm">
-                    {ing.costPerMeal != null ? `£${ing.costPerMeal.toFixed(2)}` : <span className="text-muted-foreground/30">—</span>}
+                    {ing.costPerMeal != null ? `£${ing.costPerMeal.toFixed(4)}` : <span className="text-muted-foreground/30">—</span>}
                   </TableCell>
                   <TableCell className="text-right tabular-nums text-sm font-medium">
                     {ing.totalCost != null ? `£${ing.totalCost.toFixed(2)}` : <span className="text-muted-foreground/30">—</span>}
@@ -162,7 +162,7 @@ function ProductAccordion({
                     Total cost per meal{showPackaging && packagingCost > 0 ? " (incl. packaging)" : ""}
                   </TableCell>
                   <TableCell className="text-right tabular-nums text-sm font-bold">
-                    £{(displayCostPerMeal ?? 0).toFixed(2)}
+                    £{(displayCostPerMeal ?? 0).toFixed(4)}
                   </TableCell>
                   <TableCell />
                 </TableRow>
