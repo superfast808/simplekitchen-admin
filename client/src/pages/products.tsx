@@ -214,7 +214,8 @@ function IngredientsDialog({ product, open, onOpenChange }: { product: Product; 
     enabled: open,
   });
 
-  const [ingredientLines, setIngredientLines] = useState<Array<{ name: string; quantityPerUnit: string; unit: string; costPerG: string; totalCost: string }>>([]);
+  type IngredientLine = { name: string; quantityPerUnit: string; unit: string; costPerG: string; totalCost: string; costSource: "perG" | "total" | null };
+  const [ingredientLines, setIngredientLines] = useState<IngredientLine[]>([]);
   const [initialized, setInitialized] = useState(false);
 
   function deriveTotalCost(costPerG: string, qty: string): string {
@@ -231,6 +232,8 @@ function IngredientsDialog({ product, open, onOpenChange }: { product: Product; 
     return "";
   }
 
+  const emptyLine: IngredientLine = { name: "", quantityPerUnit: "", unit: "g", costPerG: "", totalCost: "", costSource: null };
+
   if (existingIngredients && !initialized) {
     if (existingIngredients.length > 0) {
       setIngredientLines(existingIngredients.map(i => {
@@ -241,10 +244,11 @@ function IngredientsDialog({ product, open, onOpenChange }: { product: Product; 
           unit: i.unit,
           costPerG,
           totalCost: deriveTotalCost(costPerG, i.quantityPerUnit),
+          costSource: costPerG ? "perG" as const : null,
         };
       }));
     } else {
-      setIngredientLines([{ name: "", quantityPerUnit: "", unit: "g", costPerG: "", totalCost: "" }]);
+      setIngredientLines([{ ...emptyLine }]);
     }
     setInitialized(true);
   }
@@ -268,29 +272,37 @@ function IngredientsDialog({ product, open, onOpenChange }: { product: Product; 
     saveMutation.mutate({ ingredients: valid });
   };
 
-  const addLine = () => setIngredientLines([...ingredientLines, { name: "", quantityPerUnit: "", unit: "g", costPerG: "", totalCost: "" }]);
+  const addLine = () => setIngredientLines([...ingredientLines, { ...emptyLine }]);
 
   const removeLine = (idx: number) => {
     const newLines = ingredientLines.filter((_, i) => i !== idx);
-    setIngredientLines(newLines.length > 0 ? newLines : [{ name: "", quantityPerUnit: "", unit: "g", costPerG: "", totalCost: "" }]);
+    setIngredientLines(newLines.length > 0 ? newLines : [{ ...emptyLine }]);
   };
 
   const updateLine = (idx: number, field: string, value: string) => {
     const newLines = [...ingredientLines];
     const line = { ...newLines[idx], [field]: value };
-    // Auto-calculate the linked cost field
+
     if (field === "costPerG") {
+      line.costSource = "perG";
       line.totalCost = deriveTotalCost(value, line.quantityPerUnit);
     } else if (field === "totalCost") {
+      line.costSource = "total";
       line.costPerG = deriveCostPerG(value, line.quantityPerUnit);
     } else if (field === "quantityPerUnit") {
-      // Recalculate based on whichever cost field was last set
-      if (line.costPerG) {
+      // Always derive the non-source field from the one the user typed,
+      // preventing floating-point drift on the user-entered value.
+      if (line.costSource === "total") {
+        line.costPerG = deriveCostPerG(line.totalCost, value);
+      } else if (line.costSource === "perG") {
+        line.totalCost = deriveTotalCost(line.costPerG, value);
+      } else if (line.costPerG) {
         line.totalCost = deriveTotalCost(line.costPerG, value);
       } else if (line.totalCost) {
         line.costPerG = deriveCostPerG(line.totalCost, value);
       }
     }
+
     newLines[idx] = line;
     setIngredientLines(newLines);
   };
