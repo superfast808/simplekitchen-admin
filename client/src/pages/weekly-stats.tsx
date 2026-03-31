@@ -96,9 +96,11 @@ function computeGroup(
       revenue += cashAmount;
     } else {
       // Fall back: sum item prices + shipping
+      // Manual orders store unit price; WooCommerce stores line total (qty already baked in)
       revenue += parseFloat(order.shippingTotal || "0");
       for (const item of items) {
-        revenue += parseFloat(item.price || "0");
+        const unitPrice = parseFloat(item.price || "0");
+        revenue += order.isManual ? unitPrice * item.quantity : unitPrice;
       }
     }
 
