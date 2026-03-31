@@ -10,6 +10,7 @@ import {
   Truck, UserPlus, UserCheck, TrendingUp, TrendingDown, Globe, Stamp, Package,
   Banknote, CreditCard, ShoppingBag,
 } from "lucide-react";
+import { DeliveryDatePills } from "@/components/date-filter";
 
 type OrderItem = { productName: string; quantity: number; price: string };
 type OrderWithItems = {
@@ -233,6 +234,7 @@ export default function WeeklyStatsPage() {
           <p className="text-sm text-muted-foreground" data-testid="text-weekly-stats-range">
             {format(displayRange.from, "EEE, MMM d")} – {format(displayRange.to, "EEE, MMM d, yyyy")}
           </p>
+          <DeliveryDatePills weekStart={displayRange.from} />
           {isCurrent && !canViewCurrent && offset === 0 && (
             <p className="text-xs text-amber-600 dark:text-amber-400 mt-1" data-testid="text-stats-cutoff-notice">
               Current week stats hidden after Saturday noon — showing previous week

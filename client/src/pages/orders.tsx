@@ -17,7 +17,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { DateFilter, DateRangeLabel, useDateFilter, getDeliveryDateForOrder } from "@/components/date-filter";
+import { DateFilter, DateRangeLabel, DeliveryDatePills, useDateFilter, getDeliveryDateForOrder } from "@/components/date-filter";
 import { OrderSourceFilter, useOrderSourceFilter } from "@/components/order-source-filter";
 import type { Order, OrderItem, RecurringOrder, RecurringOrderItem } from "@shared/schema";
 
@@ -331,6 +331,7 @@ export default function OrdersPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight" data-testid="text-page-title">Orders</h1>
           <DateRangeLabel from={from} to={to} />
+          <DeliveryDatePills weekStart={from} />
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <DateFilter {...dateFilter} testIdPrefix="orders" showMonth />

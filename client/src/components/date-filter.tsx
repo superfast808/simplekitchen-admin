@@ -182,3 +182,19 @@ export function DateRangeLabel({ from, to }: { from: Date; to: Date }) {
     </span>
   );
 }
+
+/** Shows the two delivery dates for the given order-window start (Saturday). */
+export function DeliveryDatePills({ weekStart }: { weekStart: Date }) {
+  const satDelivery = addDays(weekStart, 7);
+  const tueDelivery = addDays(weekStart, 10);
+  return (
+    <div className="flex items-center gap-1.5 mt-1">
+      <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-[11px] font-medium px-2 py-0.5">
+        🚚 Sat {format(satDelivery, "do")}
+      </span>
+      <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 text-[11px] font-medium px-2 py-0.5">
+        🚚 Tue {format(tueDelivery, "do")}
+      </span>
+    </div>
+  );
+}
