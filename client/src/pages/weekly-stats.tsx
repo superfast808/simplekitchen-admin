@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import {
   ChevronLeft, ChevronRight, UtensilsCrossed, PoundSterling, Receipt,
   Truck, UserPlus, UserCheck, TrendingUp, TrendingDown, Globe, Stamp, Package,
+  Banknote, CreditCard, ShoppingBag,
 } from "lucide-react";
 
 type OrderItem = { productName: string; quantity: number; price: string };
@@ -19,6 +20,7 @@ type OrderWithItems = {
   isManual: boolean;
   isTuesday: boolean;
   cashAmount: string | null;
+  paymentMethod: string | null;
   shippingTotal: string | null;
   items: OrderItem[];
 };
@@ -86,6 +88,7 @@ function computeGroup(
   hideAddDelivery: boolean,
   hideSubscriptionBase: boolean,
   allOrders?: OrderWithItems[],
+  includeDelivery = true,
 ): GroupStats {
   // Customers who have a WooCommerce subscription order in this period —
   // their manual recurring orders are operational records only; actual payment
@@ -104,14 +107,13 @@ function computeGroup(
 
     const cashAmount = parseFloat(order.cashAmount || "0");
     if (cashAmount > 0) {
-      // Cash/bank amount entered — use it directly as this order's revenue
+      // Cash/bank amount entered — use it directly (delivery already included in what they paid)
       revenue += cashAmount;
     } else if (order.isManual && subCustomers.has(order.customerName)) {
       // Subscription customer: their revenue + delivery is in the WooCommerce sub order — skip
     } else {
-      // WooCommerce order or B2B manual order without cashAmount yet:
-      // WooCommerce: item.price is line total; manual: unit price × qty
-      revenue += parseFloat(order.shippingTotal || "0");
+      // WooCommerce order or B2B manual order without cashAmount yet
+      if (includeDelivery) revenue += parseFloat(order.shippingTotal || "0");
       for (const item of items) {
         const unitPrice = parseFloat(item.price || "0");
         revenue += order.isManual ? unitPrice * item.quantity : unitPrice;
@@ -141,6 +143,7 @@ export default function WeeklyStatsPage() {
   const [hideAddons, setHideAddons] = useState(false);
   const [hideAddDelivery, setHideAddDelivery] = useState(false);
   const [hideSubscriptionBase, setHideSubscriptionBase] = useState(false);
+  const [includeDelivery, setIncludeDelivery] = useState(true);
 
   const { from, to, isCurrent } = getWeekRange(offset);
   const canViewCurrent = isVisibleCurrentWeek();
@@ -174,19 +177,47 @@ export default function WeeklyStatsPage() {
     if (!rawOrders) return null;
     const webOrders = rawOrders.filter(o => !o.isManual);
     const manualOrders = rawOrders.filter(o => o.isManual);
-    const all = computeGroup(rawOrders, hideAddons, hideAddDelivery, hideSubscriptionBase, rawOrders);
-    const web = computeGroup(webOrders, hideAddons, hideAddDelivery, hideSubscriptionBase, rawOrders);
-    const manual = computeGroup(manualOrders, hideAddons, hideAddDelivery, hideSubscriptionBase, rawOrders);
+    const all = computeGroup(rawOrders, hideAddons, hideAddDelivery, hideSubscriptionBase, rawOrders, includeDelivery);
+    const web = computeGroup(webOrders, hideAddons, hideAddDelivery, hideSubscriptionBase, rawOrders, includeDelivery);
+    const manual = computeGroup(manualOrders, hideAddons, hideAddDelivery, hideSubscriptionBase, rawOrders, includeDelivery);
     const entries = Object.entries(all.mealCounts).sort((a, b) => b[1] - a[1]);
     const topSeller = entries.length > 0 ? `${entries[0][0]} (${entries[0][1]})` : "—";
     const worstSeller = entries.length > 0 ? `${entries[entries.length - 1][0]} (${entries[entries.length - 1][1]})` : "—";
-    return { all, web, manual, topSeller, worstSeller };
-  }, [rawOrders, hideAddons, hideAddDelivery, hideSubscriptionBase]);
+
+    // Three-bucket revenue breakdown
+    const subCustomers = new Set(
+      rawOrders
+        .filter(o => !o.isManual && o.items.some(i => SUB_RE.test(i.productName)))
+        .map(o => o.customerName)
+    );
+    let cashRevenue = 0, bankRevenue = 0, onlineSubsRevenue = 0, onlineOtherRevenue = 0;
+    for (const o of rawOrders) {
+      const cash = parseFloat(o.cashAmount || "0");
+      if (o.isManual) {
+        if (cash > 0) {
+          if (o.paymentMethod === "cash") cashRevenue += cash;
+          else if (o.paymentMethod === "bank_transfer") bankRevenue += cash;
+          else bankRevenue += cash; // default untagged manual payments to bank
+        }
+        // Manual without cashAmount & subscription customer → £0 (already in WooCommerce sub)
+      } else {
+        const items = filterItems(o.items, hideAddons, hideAddDelivery, hideSubscriptionBase);
+        const shipping = includeDelivery ? parseFloat(o.shippingTotal || "0") : 0;
+        const itemRev = items.reduce((s, i) => s + parseFloat(i.price || "0"), 0);
+        const orderRev = itemRev + shipping;
+        if (o.items.some(i => SUB_RE.test(i.productName))) onlineSubsRevenue += orderRev;
+        else onlineOtherRevenue += orderRev;
+      }
+    }
+
+    return { all, web, manual, topSeller, worstSeller, cashRevenue, bankRevenue, onlineSubsRevenue, onlineOtherRevenue };
+  }, [rawOrders, hideAddons, hideAddDelivery, hideSubscriptionBase, includeDelivery]);
 
   const filters = [
     { id: "hideAddons", label: "Hide addons (≤ £4 items)", checked: hideAddons, onChange: setHideAddons },
     { id: "hideAddDelivery", label: "Hide Add Delivery (£4.99)", checked: hideAddDelivery, onChange: setHideAddDelivery },
     { id: "hideSubscriptionBase", label: "Hide subscription base orders", checked: hideSubscriptionBase, onChange: setHideSubscriptionBase },
+    { id: "includeDelivery", label: "Include delivery in revenue", checked: includeDelivery, onChange: setIncludeDelivery },
   ];
 
   const totalPackagingCost = computed ? packagingCost * computed.all.mealsSold : 0;
@@ -273,6 +304,52 @@ export default function WeeklyStatsPage() {
               );
             })}
           </div>
+
+          <Card className="border-l-4 border-l-emerald-400 bg-emerald-50 dark:bg-emerald-950/30" data-testid="card-revenue-breakdown">
+            <CardContent className="p-5">
+              <div className="flex items-center gap-2 mb-4">
+                <PoundSterling className="w-4 h-4 text-emerald-500" />
+                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Revenue Breakdown</span>
+                <span className="ml-auto text-[10px] text-muted-foreground">
+                  = £{computed.all.revenue.toFixed(2)} total
+                </span>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="flex flex-col gap-1" data-testid="stat-revenue-cash">
+                  <div className="flex items-center gap-1.5 text-muted-foreground">
+                    <Banknote className="w-3.5 h-3.5 text-green-600" />
+                    <span className="text-xs font-medium uppercase tracking-wide">Cash</span>
+                  </div>
+                  <p className="text-xl font-bold tabular-nums text-green-700 dark:text-green-400">£{computed.cashRevenue.toFixed(2)}</p>
+                  <p className="text-[10px] text-muted-foreground">Manual orders marked cash</p>
+                </div>
+                <div className="flex flex-col gap-1" data-testid="stat-revenue-bank">
+                  <div className="flex items-center gap-1.5 text-muted-foreground">
+                    <CreditCard className="w-3.5 h-3.5 text-blue-600" />
+                    <span className="text-xs font-medium uppercase tracking-wide">Bank Transfer</span>
+                  </div>
+                  <p className="text-xl font-bold tabular-nums text-blue-700 dark:text-blue-400">£{computed.bankRevenue.toFixed(2)}</p>
+                  <p className="text-[10px] text-muted-foreground">B2B / store orders</p>
+                </div>
+                <div className="flex flex-col gap-1" data-testid="stat-revenue-online-subs">
+                  <div className="flex items-center gap-1.5 text-muted-foreground">
+                    <ShoppingBag className="w-3.5 h-3.5 text-violet-600" />
+                    <span className="text-xs font-medium uppercase tracking-wide">Online — Subs</span>
+                  </div>
+                  <p className="text-xl font-bold tabular-nums text-violet-700 dark:text-violet-400">£{computed.onlineSubsRevenue.toFixed(2)}</p>
+                  <p className="text-[10px] text-muted-foreground">WooCommerce subscription orders{includeDelivery ? " incl. delivery" : ""}</p>
+                </div>
+                <div className="flex flex-col gap-1" data-testid="stat-revenue-online-other">
+                  <div className="flex items-center gap-1.5 text-muted-foreground">
+                    <Globe className="w-3.5 h-3.5 text-sky-600" />
+                    <span className="text-xs font-medium uppercase tracking-wide">Online — Add-ons</span>
+                  </div>
+                  <p className="text-xl font-bold tabular-nums text-sky-700 dark:text-sky-400">£{computed.onlineOtherRevenue.toFixed(2)}</p>
+                  <p className="text-[10px] text-muted-foreground">Individual / subscriber extras{includeDelivery ? " incl. delivery" : ""}</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
           {packagingCost > 0 && (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
