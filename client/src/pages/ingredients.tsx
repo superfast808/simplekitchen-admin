@@ -43,6 +43,13 @@ function formatQty(n: number | string): string {
   return s.replace(/\.?0+$/, "");
 }
 
+function formatPrecise(n: number): string {
+  if (isNaN(n) || n === 0) return "0";
+  // Convert to string without scientific notation, strip trailing zeros
+  const s = n.toPrecision(10);
+  return parseFloat(s).toString();
+}
+
 function ProductAccordion({
   product,
   packagingCost,
@@ -130,10 +137,10 @@ function ProductAccordion({
                   <TableCell className="text-right tabular-nums font-semibold text-sm">{formatQty(ing.totalNeeded)}</TableCell>
                   <TableCell className="text-muted-foreground text-sm">{ing.unit}</TableCell>
                   <TableCell className="text-right tabular-nums text-sm text-muted-foreground">
-                    {ing.costPerG != null ? parseFloat(ing.costPerG).toFixed(4) : <span className="text-muted-foreground/30">—</span>}
+                    {ing.costPerG != null ? formatPrecise(parseFloat(ing.costPerG)) : <span className="text-muted-foreground/30">—</span>}
                   </TableCell>
                   <TableCell className="text-right tabular-nums text-sm">
-                    {ing.costPerMeal != null ? `£${ing.costPerMeal.toFixed(4)}` : <span className="text-muted-foreground/30">—</span>}
+                    {ing.costPerMeal != null ? `£${formatPrecise(ing.costPerMeal)}` : <span className="text-muted-foreground/30">—</span>}
                   </TableCell>
                   <TableCell className="text-right tabular-nums text-sm font-medium">
                     {ing.totalCost != null ? `£${ing.totalCost.toFixed(2)}` : <span className="text-muted-foreground/30">—</span>}
