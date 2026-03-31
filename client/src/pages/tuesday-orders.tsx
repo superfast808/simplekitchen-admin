@@ -88,6 +88,21 @@ export default function TuesdayOrdersPage() {
     return { orders: tuesdayWebOrders.length, delivery, collection, revenue, items };
   }, [tuesdayWebOrders]);
 
+  const OATS_RE = /oat|porridge|overnight/i;
+  const mealOatSummary = useMemo(() => {
+    let meals = 0, oats = 0;
+    const countItems = (items: { productName: string; quantity: number }[]) => {
+      for (const item of items) {
+        if (OATS_RE.test(item.productName)) oats += item.quantity;
+        else meals += item.quantity;
+      }
+    };
+    for (const o of orders ?? []) countItems(o.items);
+    for (const o of manualOrders ?? []) countItems(o.items);
+    for (const o of tuesdayWebOrders ?? []) countItems(o.items);
+    return { meals, oats };
+  }, [orders, manualOrders, tuesdayWebOrders]);
+
   const deleteMutation = useMutation({
     mutationFn: (id: number) => apiRequest("DELETE", `/api/recurring-orders/${id}`),
     onSuccess: () => {
@@ -161,6 +176,11 @@ export default function TuesdayOrdersPage() {
               <Badge className="bg-amber-500 text-white text-sm px-2.5 py-0.5" data-testid="badge-delivery-date">
                 <CalendarCheck className="w-3.5 h-3.5 mr-1" />
                 Delivering {format(deliveryTue, "EEEE do MMMM")}
+              </Badge>
+            )}
+            {(mealOatSummary.meals > 0 || mealOatSummary.oats > 0) && (
+              <Badge variant="outline" className="text-sm px-2.5 py-0.5 font-medium" data-testid="badge-meal-summary">
+                {mealOatSummary.meals} meal{mealOatSummary.meals !== 1 ? "s" : ""}{mealOatSummary.oats > 0 ? ` + ${mealOatSummary.oats} oats` : ""}
               </Badge>
             )}
           </div>
