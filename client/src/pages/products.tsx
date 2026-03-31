@@ -220,14 +220,14 @@ function IngredientsDialog({ product, open, onOpenChange }: { product: Product; 
   function deriveTotalCost(costPerG: string, qty: string): string {
     const c = parseFloat(costPerG);
     const q = parseFloat(qty);
-    if (!isNaN(c) && !isNaN(q) && q > 0 && c > 0) return (c * q).toFixed(2);
+    if (!isNaN(c) && !isNaN(q) && q > 0 && c > 0) return String(c * q);
     return "";
   }
 
   function deriveCostPerG(totalCost: string, qty: string): string {
     const t = parseFloat(totalCost);
     const q = parseFloat(qty);
-    if (!isNaN(t) && !isNaN(q) && q > 0 && t > 0) return (t / q).toFixed(6);
+    if (!isNaN(t) && !isNaN(q) && q > 0 && t > 0) return String(t / q);
     return "";
   }
 
