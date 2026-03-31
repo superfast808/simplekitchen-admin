@@ -43,13 +43,40 @@ function formatQty(n: number | string): string {
   return s.replace(/\.?0+$/, "");
 }
 
-function ProductAccordion({ product }: { product: ProductBreakdown }) {
+function ProductAccordion({
+  product,
+  packagingCost,
+  showPackaging,
+}: {
+  product: ProductBreakdown;
+  packagingCost: number;
+  showPackaging: boolean;
+}) {
   const [open, setOpen] = useState(product.orderedQuantity > 0);
   const hasOrders = product.orderedQuantity > 0;
 
-  const totalCostPerMeal = product.ingredients.some(i => i.costPerMeal != null)
+  const hasIngredientCosts = product.ingredients.some(i => i.costPerMeal != null);
+  const ingredientCostPerMeal = hasIngredientCosts
     ? product.ingredients.reduce((sum, i) => sum + (i.costPerMeal ?? 0), 0)
     : null;
+
+  const displayCostPerMeal =
+    ingredientCostPerMeal != null
+      ? ingredientCostPerMeal + (showPackaging ? packagingCost : 0)
+      : packagingCost > 0 && showPackaging
+      ? packagingCost
+      : null;
+
+  const totalIngredientCost = hasIngredientCosts
+    ? product.ingredients.reduce((sum, i) => sum + (i.totalCost ?? 0), 0)
+    : null;
+
+  const totalWithPackaging =
+    totalIngredientCost != null
+      ? totalIngredientCost + (showPackaging ? packagingCost * product.orderedQuantity : 0)
+      : showPackaging && packagingCost > 0
+      ? packagingCost * product.orderedQuantity
+      : null;
 
   return (
     <div className={`border rounded-lg ${hasOrders ? "" : "opacity-60"}`} data-testid={`accordion-product-${product.productId}`}>
@@ -64,9 +91,14 @@ function ProductAccordion({ product }: { product: ProductBreakdown }) {
           <span className="font-medium text-sm truncate">{product.productName}</span>
         </div>
         <div className="flex items-center gap-3 flex-shrink-0 ml-2">
-          {totalCostPerMeal != null && (
+          {displayCostPerMeal != null && (
             <span className="text-xs text-muted-foreground" data-testid={`text-cost-per-meal-${product.productId}`}>
-              £{totalCostPerMeal.toFixed(2)}/meal
+              £{displayCostPerMeal.toFixed(2)}/meal{showPackaging && packagingCost > 0 ? " (incl. pkg)" : ""}
+            </span>
+          )}
+          {totalWithPackaging != null && hasOrders && (
+            <span className="text-xs text-muted-foreground tabular-nums" data-testid={`text-total-cost-${product.productId}`}>
+              £{totalWithPackaging.toFixed(2)} total
             </span>
           )}
           <span className={`text-sm ${hasOrders ? "font-semibold" : "text-muted-foreground"}`}>
@@ -108,12 +140,30 @@ function ProductAccordion({ product }: { product: ProductBreakdown }) {
                   </TableCell>
                 </TableRow>
               ))}
+              {showPackaging && packagingCost > 0 && (
+                <TableRow className="text-muted-foreground italic">
+                  <TableCell className="text-sm">Packaging</TableCell>
+                  <TableCell />
+                  <TableCell />
+                  <TableCell />
+                  <TableCell />
+                  <TableCell />
+                  <TableCell className="text-right tabular-nums text-sm">£{packagingCost.toFixed(4)}</TableCell>
+                  <TableCell className="text-right tabular-nums text-sm font-medium">
+                    £{(packagingCost * product.orderedQuantity).toFixed(2)}
+                  </TableCell>
+                </TableRow>
+              )}
             </TableBody>
-            {totalCostPerMeal != null && (
+            {(ingredientCostPerMeal != null || (showPackaging && packagingCost > 0)) && (
               <TableFooter>
                 <TableRow>
-                  <TableCell colSpan={6} className="text-right text-sm font-semibold">Total cost per meal</TableCell>
-                  <TableCell className="text-right tabular-nums text-sm font-bold">£{totalCostPerMeal.toFixed(4)}</TableCell>
+                  <TableCell colSpan={6} className="text-right text-sm font-semibold">
+                    Total cost per meal{showPackaging && packagingCost > 0 ? " (incl. packaging)" : ""}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums text-sm font-bold">
+                    £{(displayCostPerMeal ?? 0).toFixed(4)}
+                  </TableCell>
                   <TableCell />
                 </TableRow>
               </TableFooter>
@@ -130,15 +180,23 @@ export default function IngredientsPage() {
   const sourceFilter = useOrderSourceFilter();
   const { from, to } = dateFilter;
   const [showZeroIngredients, setShowZeroIngredients] = useState(false);
+  const [showPackaging, setShowPackaging] = useState(false);
 
   const { data, isLoading } = useQuery<BreakdownResponse>({
     queryKey: ["/api/ingredient-breakdown", `?from=${from.toISOString()}&to=${to.toISOString()}&source=${sourceFilter.toQueryParam()}`],
   });
 
-  // Only show products that have orders (or manual stock) this week
+  const { data: settings } = useQuery<Record<string, string>>({
+    queryKey: ["/api/settings"],
+  });
+
+  const packagingCost = parseFloat(settings?.packaging_cost || "0") || 0;
+
   const activeProducts = data?.products.filter(p => p.orderedQuantity > 0) ?? [];
   const hiddenCount = (data?.products.length ?? 0) - activeProducts.length;
   const hasData = activeProducts.length > 0 || (data?.grandTotals.length ?? 0) > 0;
+
+  const totalMealsOrdered = activeProducts.reduce((sum, p) => sum + p.orderedQuantity, 0);
 
   return (
     <div className="p-6 space-y-6">
@@ -169,23 +227,42 @@ export default function IngredientsPage() {
       ) : (
         <>
           <div className="space-y-3">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between flex-wrap gap-3">
               <h2 className="text-lg font-semibold">By Product</h2>
-              {hiddenCount > 0 && (
-                <span className="text-xs text-muted-foreground" data-testid="text-hidden-products">
-                  {hiddenCount} product{hiddenCount > 1 ? "s" : ""} with no orders this week hidden
-                </span>
-              )}
+              <div className="flex items-center gap-4">
+                {packagingCost > 0 && (
+                  <label className="flex items-center gap-2 cursor-pointer select-none text-sm text-muted-foreground shrink-0" data-testid="toggle-show-packaging">
+                    <input
+                      type="checkbox"
+                      className="rounded"
+                      checked={showPackaging}
+                      onChange={e => setShowPackaging(e.target.checked)}
+                      data-testid="checkbox-show-packaging"
+                    />
+                    Include packaging (£{packagingCost.toFixed(2)}/meal)
+                  </label>
+                )}
+                {hiddenCount > 0 && (
+                  <span className="text-xs text-muted-foreground" data-testid="text-hidden-products">
+                    {hiddenCount} product{hiddenCount > 1 ? "s" : ""} with no orders this week hidden
+                  </span>
+                )}
+              </div>
             </div>
             {activeProducts.map(product => (
-              <ProductAccordion key={product.productId} product={product} />
+              <ProductAccordion
+                key={product.productId}
+                product={product}
+                packagingCost={packagingCost}
+                showPackaging={showPackaging}
+              />
             ))}
           </div>
 
           {data.grandTotals.length > 0 && (
             <Card>
               <CardContent className="p-0">
-                <div className="p-4 border-b flex items-center justify-between gap-4">
+                <div className="p-4 border-b flex items-center justify-between gap-4 flex-wrap">
                   <div>
                     <h2 className="text-lg font-semibold" data-testid="text-grand-totals-heading">Grand Totals</h2>
                     <p className="text-sm text-muted-foreground">Combined ingredient totals across all products</p>
@@ -225,16 +302,30 @@ export default function IngredientsPage() {
                           </TableCell>
                         </TableRow>
                       ))}
+                    {showPackaging && packagingCost > 0 && totalMealsOrdered > 0 && (
+                      <TableRow className="text-muted-foreground italic" data-testid="row-grand-packaging">
+                        <TableCell className="font-medium" data-testid="text-grand-packaging">Packaging</TableCell>
+                        <TableCell className="text-right font-semibold tabular-nums">{totalMealsOrdered}</TableCell>
+                        <TableCell className="text-muted-foreground">meals</TableCell>
+                        <TableCell className="text-right tabular-nums font-medium" data-testid="text-grand-packaging-cost">
+                          £{(packagingCost * totalMealsOrdered).toFixed(2)}
+                        </TableCell>
+                      </TableRow>
+                    )}
                   </TableBody>
                   {(() => {
                     const visibleItems = data.grandTotals.filter(item => showZeroIngredients || item.totalQuantity > 0);
-                    const grandTotal = visibleItems.reduce((sum, item) => item.totalCost != null ? sum + item.totalCost : sum, 0);
-                    const anyCosted = visibleItems.some(item => item.totalCost != null);
+                    const ingredientTotal = visibleItems.reduce((sum, item) => item.totalCost != null ? sum + item.totalCost : sum, 0);
+                    const packagingTotal = showPackaging && packagingCost > 0 ? packagingCost * totalMealsOrdered : 0;
+                    const grandTotal = ingredientTotal + packagingTotal;
+                    const anyCosted = visibleItems.some(item => item.totalCost != null) || (showPackaging && packagingCost > 0);
                     if (!anyCosted) return null;
                     return (
                       <TableFooter>
                         <TableRow className="font-bold" data-testid="row-grand-cost-total">
-                          <TableCell colSpan={3}>Total Ingredient Cost</TableCell>
+                          <TableCell colSpan={3}>
+                            Total {showPackaging && packagingCost > 0 ? "Ingredient + Packaging" : "Ingredient"} Cost
+                          </TableCell>
                           <TableCell className="text-right tabular-nums" data-testid="text-grand-cost-total">
                             £{grandTotal.toFixed(2)}
                           </TableCell>

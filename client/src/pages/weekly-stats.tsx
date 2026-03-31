@@ -7,7 +7,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import {
   ChevronLeft, ChevronRight, UtensilsCrossed, PoundSterling, Receipt,
-  Truck, UserPlus, UserCheck, TrendingUp, TrendingDown, Globe, Stamp,
+  Truck, UserPlus, UserCheck, TrendingUp, TrendingDown, Globe, Stamp, Package,
 } from "lucide-react";
 
 type OrderItem = { productName: string; quantity: number; price: string };
@@ -134,6 +134,12 @@ export default function WeeklyStatsPage() {
     },
   });
 
+  const { data: settings } = useQuery<Record<string, string>>({
+    queryKey: ["/api/settings"],
+  });
+
+  const packagingCost = parseFloat(settings?.packaging_cost || "0") || 0;
+
   const computed = useMemo(() => {
     if (!rawOrders) return null;
     const webOrders = rawOrders.filter(o => !o.isManual);
@@ -152,6 +158,8 @@ export default function WeeklyStatsPage() {
     { id: "hideAddDelivery", label: "Hide Add Delivery (£4.99)", checked: hideAddDelivery, onChange: setHideAddDelivery },
     { id: "hideSubscriptionBase", label: "Hide subscription base orders", checked: hideSubscriptionBase, onChange: setHideSubscriptionBase },
   ];
+
+  const totalPackagingCost = computed ? packagingCost * computed.all.mealsSold : 0;
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-5">
@@ -235,6 +243,46 @@ export default function WeeklyStatsPage() {
               );
             })}
           </div>
+
+          {packagingCost > 0 && (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <Card className="border-l-4 border-l-slate-500 bg-slate-50 dark:bg-slate-950/30" data-testid="card-stat-packagingCostPerMeal">
+                <CardContent className="p-5">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Package className="w-4 h-4 text-slate-500" />
+                    <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Packaging / Meal</span>
+                  </div>
+                  <p className="text-2xl font-bold tabular-nums" data-testid="text-stat-packagingCostPerMeal">
+                    £{packagingCost.toFixed(2)}
+                  </p>
+                </CardContent>
+              </Card>
+              <Card className="border-l-4 border-l-slate-400 bg-slate-50 dark:bg-slate-950/30" data-testid="card-stat-totalPackagingCost">
+                <CardContent className="p-5">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Package className="w-4 h-4 text-slate-400" />
+                    <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Total Packaging</span>
+                  </div>
+                  <p className="text-2xl font-bold tabular-nums" data-testid="text-stat-totalPackagingCost">
+                    £{totalPackagingCost.toFixed(2)}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">{computed.all.mealsSold} meals × £{packagingCost.toFixed(2)}</p>
+                </CardContent>
+              </Card>
+              <Card className="col-span-2 border-l-4 border-l-rose-500 bg-rose-50 dark:bg-rose-950/30" data-testid="card-stat-revenueAfterPackaging">
+                <CardContent className="p-5">
+                  <div className="flex items-center gap-2 mb-1">
+                    <PoundSterling className="w-4 h-4 text-rose-500" />
+                    <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Revenue After Packaging</span>
+                  </div>
+                  <p className="text-2xl font-bold tabular-nums" data-testid="text-stat-revenueAfterPackaging">
+                    £{(computed.all.revenue - totalPackagingCost).toFixed(2)}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">Revenue £{computed.all.revenue.toFixed(2)} − Packaging £{totalPackagingCost.toFixed(2)}</p>
+                </CardContent>
+              </Card>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Card className="border-l-4 border-l-sky-500 bg-sky-50 dark:bg-sky-950/30" data-testid="card-stat-web">

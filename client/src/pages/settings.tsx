@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
-import { Save, RefreshCw, Upload, Trash2, Image, UserPlus, X, CalendarDays, Mail, CreditCard } from "lucide-react";
+import { Save, RefreshCw, Upload, Trash2, Image, UserPlus, X, CalendarDays, Mail, CreditCard, Package } from "lucide-react";
 
 const DAYS = [
   { value: "0", label: "Sunday" },
@@ -155,6 +155,7 @@ export default function SettingsPage() {
   const [stripeTestPublishableKey, setStripeTestPublishableKey] = useState("");
   const [stripeLiveSecretKey, setStripeLiveSecretKey] = useState("");
   const [stripeLivePublishableKey, setStripeLivePublishableKey] = useState("");
+  const [packagingCost, setPackagingCost] = useState("0");
 
   const { data: currentWeek } = useQuery<{ weekNumber: number; categoryName: string; week1ReferenceDate: string | null }>({
     queryKey: ["/api/current-week"],
@@ -184,6 +185,7 @@ export default function SettingsPage() {
       if (settings.stripe_mode === "live" || settings.stripe_mode === "test") setStripeMode(settings.stripe_mode);
       if (settings.stripe_test_publishable_key) setStripeTestPublishableKey(settings.stripe_test_publishable_key);
       if (settings.stripe_live_publishable_key) setStripeLivePublishableKey(settings.stripe_live_publishable_key);
+      if (settings.packaging_cost != null) setPackagingCost(settings.packaging_cost);
     }
   }, [settings]);
 
@@ -254,6 +256,7 @@ export default function SettingsPage() {
     if (week1ReferenceDate) {
       data.week1ReferenceDate = new Date(week1ReferenceDate).toISOString();
     }
+    data.packaging_cost = packagingCost || "0";
     saveMutation.mutate(data);
   };
 
@@ -490,6 +493,35 @@ export default function SettingsPage() {
           <p className="text-sm text-muted-foreground">
             Current: {DAYS.find(d => d.value === openDay)?.label} at {HOURS.find(h => h.value === openHour)?.label} to {DAYS.find(d => d.value === closeDay)?.label} at {HOURS.find(h => h.value === closeHour)?.label}
           </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Package className="w-4 h-4" />
+            Costs
+          </CardTitle>
+          <CardDescription>Operational costs applied to ingredient and stats calculations</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="packaging-cost">Packaging cost per meal (£)</Label>
+            <Input
+              id="packaging-cost"
+              type="number"
+              min="0"
+              step="0.01"
+              placeholder="0.00"
+              value={packagingCost}
+              onChange={e => setPackagingCost(e.target.value)}
+              className="max-w-[180px]"
+              data-testid="input-packaging-cost"
+            />
+            <p className="text-xs text-muted-foreground">
+              Added to ingredient cost-per-meal on the Ingredients page and used in Weekly Stats to show total packaging spend.
+            </p>
+          </div>
         </CardContent>
       </Card>
 
