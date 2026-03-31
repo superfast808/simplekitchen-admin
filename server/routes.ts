@@ -3110,13 +3110,24 @@ export async function registerRoutes(
         const SKIP = /add\s+delivery|subscription/i;
         const src = sourceItems.filter(i => !SKIP.test(i.productName));
 
-        // Separate meals vs extras by price
+        // Resolve the effective price for a source item.
+        // Stamped orders often store price=0; fall back to the known product catalogue price.
+        function effectivePrice(item: { productName: string; price?: string | null }): number {
+          const linePrice = parseFloat(item.price || "0");
+          if (linePrice > 0) return linePrice;
+          // Look up real price from the full product list (matched by name, case-insensitive)
+          const catalogProduct = allProducts.find(p => p.name.toLowerCase() === item.productName.toLowerCase());
+          return catalogProduct ? parseFloat(catalogProduct.price || "0") : 0;
+        }
+
+        // Separate meals vs extras using the effective (catalogue-resolved) price.
+        // This ensures oats stored at £0 are still recognised as extras, not meals.
         const mealSrc = src.filter(i => {
-          const pr = parseFloat(i.price || "0");
+          const pr = effectivePrice(i);
           return pr <= 0 || Math.abs(pr - STANDARD_PRICE) < 0.01;
         });
         const extraSrc = src.filter(i => {
-          const pr = parseFloat(i.price || "0");
+          const pr = effectivePrice(i);
           return pr > 0 && Math.abs(pr - STANDARD_PRICE) >= 0.01;
         });
 
