@@ -243,7 +243,7 @@ function IngredientsDialog({ product, open, onOpenChange }: { product: Product; 
           quantityPerUnit: i.quantityPerUnit,
           unit: i.unit,
           costPerG,
-          totalCost: deriveTotalCost(costPerG, i.quantityPerUnit),
+          totalCost: "",
           costSource: costPerG ? "perG" as const : null,
         };
       }));
