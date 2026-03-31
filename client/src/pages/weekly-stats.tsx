@@ -27,6 +27,7 @@ type OrderWithItems = {
 type GroupStats = {
   orderCount: number;
   mealsSold: number;
+  packagableMeals: number;
   revenue: number;
   avgOrderValue: number;
   deliveryStops: number;
@@ -81,6 +82,7 @@ function filterItems(
 }
 
 const SUB_RE = /meal\s+subscription/i;
+const NO_PACKAGING_RE = /oat|porridge|overnight|soup/i;
 
 function computeGroup(
   orders: OrderWithItems[],
@@ -99,7 +101,7 @@ function computeGroup(
       .map(o => o.customerName)
   );
 
-  let mealsSold = 0, revenue = 0, deliveryStops = 0;
+  let mealsSold = 0, packagableMeals = 0, revenue = 0, deliveryStops = 0;
   const mealCounts: Record<string, number> = {};
   for (const order of orders) {
     const items = filterItems(order.items, hideAddons, hideAddDelivery, hideSubscriptionBase);
@@ -122,11 +124,12 @@ function computeGroup(
 
     for (const item of items) {
       mealsSold += item.quantity;
+      if (!NO_PACKAGING_RE.test(item.productName)) packagableMeals += item.quantity;
       mealCounts[item.productName] = (mealCounts[item.productName] || 0) + item.quantity;
     }
   }
   const orderCount = orders.length;
-  return { orderCount, mealsSold, revenue, avgOrderValue: orderCount > 0 ? revenue / orderCount : 0, deliveryStops, mealCounts };
+  return { orderCount, mealsSold, packagableMeals, revenue, avgOrderValue: orderCount > 0 ? revenue / orderCount : 0, deliveryStops, mealCounts };
 }
 
 function StatMini({ label, value }: { label: string; value: string }) {
@@ -220,7 +223,7 @@ export default function WeeklyStatsPage() {
     { id: "includeDelivery", label: "Include delivery in revenue", checked: includeDelivery, onChange: setIncludeDelivery },
   ];
 
-  const totalPackagingCost = computed ? packagingCost * computed.all.mealsSold : 0;
+  const totalPackagingCost = computed ? packagingCost * computed.all.packagableMeals : 0;
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-5">
@@ -373,7 +376,7 @@ export default function WeeklyStatsPage() {
                   <p className="text-2xl font-bold tabular-nums" data-testid="text-stat-totalPackagingCost">
                     £{totalPackagingCost.toFixed(2)}
                   </p>
-                  <p className="text-[10px] text-muted-foreground mt-0.5">{computed.all.mealsSold} meals × £{packagingCost.toFixed(2)}</p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">{computed.all.packagableMeals} meals × £{packagingCost.toFixed(2)} (excl. oats &amp; soups)</p>
                 </CardContent>
               </Card>
               <Card className="col-span-2 border-l-4 border-l-rose-500 bg-rose-50 dark:bg-rose-950/30" data-testid="card-stat-revenueAfterPackaging">
