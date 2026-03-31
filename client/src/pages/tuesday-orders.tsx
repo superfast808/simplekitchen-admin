@@ -255,8 +255,7 @@ export default function TuesdayOrdersPage() {
                           {displayItems.length > 0 && (
                             <div className="text-sm leading-snug" data-testid={`text-items-${order.id}`}>
                               {sortItems(displayItems).map((item, i) => {
-                                const price = parseFloat((item as any).price || "0");
-                                return (i > 0 ? ", " : "") + `${item.quantity > 1 ? item.quantity + "× " : ""}${item.productName}${price > 0 ? ` (${price.toFixed(2)})` : ""}`;
+                                return (i > 0 ? ", " : "") + `${item.quantity > 1 ? item.quantity + "× " : ""}${item.productName}`;
                               }).join("")}
                             </div>
                           )}
@@ -384,8 +383,7 @@ export default function TuesdayOrdersPage() {
                         <TableCell>
                           <div className="text-sm leading-snug" data-testid={`text-manual-items-${order.id}`}>
                             {sortItems(order.items).map((item, i) => {
-                              const price = parseFloat(item.price || "0");
-                              return (i > 0 ? ", " : "") + `${item.quantity > 1 ? item.quantity + "× " : ""}${item.productName}${price > 0 ? ` (${price.toFixed(2)})` : ""}`;
+                              return (i > 0 ? ", " : "") + `${item.quantity > 1 ? item.quantity + "× " : ""}${item.productName}`;
                             }).join("")}
                           </div>
                         </TableCell>
@@ -539,8 +537,7 @@ export default function TuesdayOrdersPage() {
                           <TableCell>
                             <div className="text-sm leading-snug" data-testid={`text-tue-website-items-${order.id}`}>
                               {sortItems(order.items).map((item, i) => {
-                                const price = parseFloat(item.price || "0");
-                                return (i > 0 ? ", " : "") + `${item.quantity > 1 ? item.quantity + "× " : ""}${item.productName}${price > 0 ? ` (${price.toFixed(2)})` : ""}`;
+                                return (i > 0 ? ", " : "") + `${item.quantity > 1 ? item.quantity + "× " : ""}${item.productName}`;
                               }).join("")}
                             </div>
                           </TableCell>
