@@ -3198,6 +3198,10 @@ export async function registerRoutes(
         }
 
         // --- Extras / add-ons (oats, soups, etc.) ---
+        // Rotation counters per protein category so multiple extras of the same type
+        // (e.g. two different oat flavours from last week) each get a different this-week variant.
+        const catRotation = new Map<string, number>();
+
         for (const ex of extraSrc) {
           const srcPrice = ex.price || "0";
           // 1. Exact name match
@@ -3206,17 +3210,21 @@ export async function registerRoutes(
             resolved.push({ productName: exact.name, quantity: ex.quantity, price: exact.price || srcPrice, productId: exact.id });
             continue;
           }
-          // 2. Protein/category match — e.g. last-week oat → this-week oat regardless of price change
+          // 2. Protein/category match with rotation — e.g. last-week oats → spread across this-week oat variants
           const srcCat = detectProtein(ex.productName);
           if (srcCat) {
-            const catMatch = allExtras.find(m => detectProtein(m.name) === srcCat);
-            if (catMatch) {
+            const catPool = allExtras.filter(m => detectProtein(m.name) === srcCat);
+            if (catPool.length > 0) {
+              const idx = catRotation.get(srcCat) ?? 0;
+              catRotation.set(srcCat, idx + 1);
+              const catMatch = catPool[idx % catPool.length];
               resolved.push({ productName: catMatch.name, quantity: ex.quantity, price: catMatch.price || srcPrice, productId: catMatch.id });
               continue;
             }
           }
           // 3. Same price tier
-          const samePrice = allExtras.find(m => Math.abs(parseFloat(m.price || "0") - parseFloat(srcPrice)) < 0.01);
+          const srcEffectivePrice = effectivePrice(ex);
+          const samePrice = allExtras.find(m => Math.abs(parseFloat(m.price || "0") - srcEffectivePrice) < 0.01);
           if (samePrice) {
             resolved.push({ productName: samePrice.name, quantity: ex.quantity, price: samePrice.price || srcPrice, productId: samePrice.id });
             continue;
