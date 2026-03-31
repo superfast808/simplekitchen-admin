@@ -1,6 +1,6 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -209,10 +209,15 @@ function IngredientsDialog({ product, open, onOpenChange }: { product: Product; 
     enabled: open,
   });
 
-  const { data: knownIngredients } = useQuery<{ names: string[]; units: string[] }>({
+  type StandardIngredient = { id: number; name: string; costPerG: string; unit: string };
+  const { data: knownIngredients } = useQuery<{ names: string[]; units: string[]; standards: StandardIngredient[] }>({
     queryKey: ["/api/ingredient-names"],
     enabled: open,
   });
+  const standardsMap = useMemo<Map<string, StandardIngredient>>(
+    () => new Map((knownIngredients?.standards ?? []).map(s => [s.name.toLowerCase(), s])),
+    [knownIngredients?.standards],
+  );
 
   type IngredientLine = { name: string; quantityPerUnit: string; unit: string; costPerG: string; totalCost: string; costSource: "perG" | "total" | null };
   const [ingredientLines, setIngredientLines] = useState<IngredientLine[]>([]);
@@ -261,6 +266,7 @@ function IngredientsDialog({ product, open, onOpenChange }: { product: Product; 
       queryClient.invalidateQueries({ queryKey: ["/api/ingredient-summary"] });
       queryClient.invalidateQueries({ queryKey: ["/api/ingredient-breakdown"] });
       queryClient.invalidateQueries({ queryKey: ["/api/ingredient-names"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/standard-ingredients"] });
     },
     onError: (error: Error) => {
       toast({ title: "Failed to save", description: error.message, variant: "destructive" });
@@ -283,7 +289,16 @@ function IngredientsDialog({ product, open, onOpenChange }: { product: Product; 
     const newLines = [...ingredientLines];
     const line = { ...newLines[idx], [field]: value };
 
-    if (field === "costPerG") {
+    if (field === "name") {
+      // Auto-fill costPerG and unit from standard ingredients library on exact name match
+      const std = standardsMap.get(value.toLowerCase());
+      if (std) {
+        line.costPerG = std.costPerG;
+        line.unit = std.unit;
+        line.costSource = "perG";
+        line.totalCost = deriveTotalCost(std.costPerG, line.quantityPerUnit);
+      }
+    } else if (field === "costPerG") {
       line.costSource = "perG";
       line.totalCost = deriveTotalCost(value, line.quantityPerUnit);
     } else if (field === "totalCost") {

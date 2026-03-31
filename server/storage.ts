@@ -3,6 +3,7 @@ import { eq, gte, lte, and, sql, desc, isNotNull } from "drizzle-orm";
 import {
   products, ingredients, orders, orderItems, manualQuantities, settings, users,
   subscriptionInvites, subscriptionSelections, recurringOrders, recurringOrderItems,
+  standardIngredients,
   type Product, type InsertProduct,
   type Ingredient, type InsertIngredient,
   type Order, type InsertOrder,
@@ -13,6 +14,7 @@ import {
   type SubscriptionSelection, type InsertSubscriptionSelection,
   type RecurringOrder, type InsertRecurringOrder,
   type RecurringOrderItem, type InsertRecurringOrderItem,
+  type StandardIngredient, type InsertStandardIngredient,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -80,6 +82,11 @@ export interface IStorage {
   getRecurringOrderItems(recurringOrderId: number): Promise<RecurringOrderItem[]>;
   createRecurringOrderItem(item: InsertRecurringOrderItem): Promise<RecurringOrderItem>;
   deleteRecurringOrderItemsByOrderId(recurringOrderId: number): Promise<void>;
+
+  getStandardIngredients(): Promise<StandardIngredient[]>;
+  upsertStandardIngredient(name: string, costPerG: string, unit: string): Promise<StandardIngredient>;
+  updateStandardIngredient(id: number, data: Partial<InsertStandardIngredient>): Promise<StandardIngredient | undefined>;
+  deleteStandardIngredient(id: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -399,6 +406,28 @@ export class DatabaseStorage implements IStorage {
 
   async deleteRecurringOrderItemsByOrderId(recurringOrderId: number): Promise<void> {
     await db.delete(recurringOrderItems).where(eq(recurringOrderItems.recurringOrderId, recurringOrderId));
+  }
+
+  async getStandardIngredients(): Promise<StandardIngredient[]> {
+    return db.select().from(standardIngredients).orderBy(standardIngredients.name);
+  }
+
+  async upsertStandardIngredient(name: string, costPerG: string, unit: string): Promise<StandardIngredient> {
+    const [row] = await db
+      .insert(standardIngredients)
+      .values({ name, costPerG, unit })
+      .onConflictDoUpdate({ target: standardIngredients.name, set: { costPerG, unit } })
+      .returning();
+    return row;
+  }
+
+  async updateStandardIngredient(id: number, data: Partial<InsertStandardIngredient>): Promise<StandardIngredient | undefined> {
+    const [updated] = await db.update(standardIngredients).set(data).where(eq(standardIngredients.id, id)).returning();
+    return updated;
+  }
+
+  async deleteStandardIngredient(id: number): Promise<void> {
+    await db.delete(standardIngredients).where(eq(standardIngredients.id, id));
   }
 }
 

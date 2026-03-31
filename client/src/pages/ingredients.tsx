@@ -1,11 +1,15 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ChefHat, ChevronDown, ChevronRight } from "lucide-react";
+import { ChefHat, ChevronDown, ChevronRight, BookOpen, Pencil, Trash2, Check, X } from "lucide-react";
 import { DateFilter, DateRangeLabel, useDateFilter } from "@/components/date-filter";
 import { OrderSourceFilter, useOrderSourceFilter } from "@/components/order-source-filter";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { queryClient, apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 
 type ProductBreakdown = {
   productId: number;
@@ -182,6 +186,147 @@ function ProductAccordion({
   );
 }
 
+type StandardIngredient = { id: number; name: string; costPerG: string; unit: string };
+
+function StandardIngredientsPanel() {
+  const { toast } = useToast();
+  const [open, setOpen] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editCostPerG, setEditCostPerG] = useState("");
+  const [editUnit, setEditUnit] = useState("");
+
+  const { data: standards, isLoading } = useQuery<StandardIngredient[]>({
+    queryKey: ["/api/standard-ingredients"],
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, costPerG, unit }: { id: number; costPerG: string; unit: string }) =>
+      apiRequest("PUT", `/api/standard-ingredients/${id}`, { costPerG, unit }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/standard-ingredients"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/ingredient-names"] });
+      setEditingId(null);
+      toast({ title: "Updated" });
+    },
+    onError: (e: Error) => toast({ title: "Failed to update", description: e.message, variant: "destructive" }),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => apiRequest("DELETE", `/api/standard-ingredients/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/standard-ingredients"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/ingredient-names"] });
+      toast({ title: "Removed from library" });
+    },
+    onError: (e: Error) => toast({ title: "Failed to delete", description: e.message, variant: "destructive" }),
+  });
+
+  const startEdit = (s: StandardIngredient) => {
+    setEditingId(s.id);
+    setEditCostPerG(s.costPerG);
+    setEditUnit(s.unit);
+  };
+
+  const saveEdit = () => {
+    if (editingId == null) return;
+    updateMutation.mutate({ id: editingId, costPerG: editCostPerG, unit: editUnit });
+  };
+
+  return (
+    <Card data-testid="card-standard-ingredients">
+      <button
+        className="w-full flex items-center gap-2 px-6 py-4 text-left hover:bg-muted/40 transition-colors"
+        onClick={() => setOpen(v => !v)}
+        data-testid="button-toggle-standard-ingredients"
+      >
+        <BookOpen className="w-4 h-4 text-muted-foreground" />
+        <span className="font-semibold">Standard Ingredients Library</span>
+        <span className="ml-2 text-sm text-muted-foreground">{standards ? `${standards.length} ingredients` : ""}</span>
+        <span className="ml-auto">{open ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}</span>
+      </button>
+      {open && (
+        <CardContent className="pt-0 pb-4">
+          {isLoading ? (
+            <Skeleton className="h-24 w-full" />
+          ) : !standards || standards.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-4">
+              No standard ingredients yet. Save product ingredients with a £/g cost to populate this library automatically.
+            </p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Ingredient</TableHead>
+                  <TableHead className="text-right">£/g</TableHead>
+                  <TableHead>Unit</TableHead>
+                  <TableHead className="w-24" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {standards.map(s => (
+                  <TableRow key={s.id} data-testid={`row-standard-ingredient-${s.id}`}>
+                    <TableCell className="font-medium" data-testid={`text-std-name-${s.id}`}>{s.name}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {editingId === s.id ? (
+                        <Input
+                          type="number"
+                          value={editCostPerG}
+                          onChange={e => setEditCostPerG(e.target.value)}
+                          step="0.000001"
+                          min="0"
+                          className="w-28 text-right ml-auto"
+                          data-testid={`input-std-costperg-${s.id}`}
+                        />
+                      ) : (
+                        <span data-testid={`text-std-costperg-${s.id}`}>{parseFloat(s.costPerG).toPrecision(6).replace(/\.?0+$/, "")}</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {editingId === s.id ? (
+                        <Input
+                          value={editUnit}
+                          onChange={e => setEditUnit(e.target.value)}
+                          className="w-16"
+                          data-testid={`input-std-unit-${s.id}`}
+                        />
+                      ) : (
+                        <span className="text-muted-foreground text-sm" data-testid={`text-std-unit-${s.id}`}>{s.unit}</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex gap-1 justify-end">
+                        {editingId === s.id ? (
+                          <>
+                            <Button size="icon" variant="ghost" className="h-7 w-7 text-green-600" onClick={saveEdit} disabled={updateMutation.isPending} data-testid={`button-std-save-${s.id}`}>
+                              <Check className="w-3 h-3" />
+                            </Button>
+                            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setEditingId(null)} data-testid={`button-std-cancel-${s.id}`}>
+                              <X className="w-3 h-3" />
+                            </Button>
+                          </>
+                        ) : (
+                          <>
+                            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => startEdit(s)} data-testid={`button-std-edit-${s.id}`}>
+                              <Pencil className="w-3 h-3" />
+                            </Button>
+                            <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" onClick={() => deleteMutation.mutate(s.id)} disabled={deleteMutation.isPending} data-testid={`button-std-delete-${s.id}`}>
+                              <Trash2 className="w-3 h-3" />
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
 export default function IngredientsPage() {
   const dateFilter = useDateFilter();
   const sourceFilter = useOrderSourceFilter();
@@ -346,6 +491,8 @@ export default function IngredientsPage() {
           )}
         </>
       )}
+
+      <StandardIngredientsPanel />
     </div>
   );
 }

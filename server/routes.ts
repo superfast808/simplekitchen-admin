@@ -715,6 +715,10 @@ export async function registerRoutes(
           costPerG: ing.costPerG || null,
         });
         created.push(result);
+        // Auto-upsert into standard ingredients library if costPerG is present
+        if (ing.costPerG && ing.name.trim()) {
+          await storage.upsertStandardIngredient(ing.name.trim(), ing.costPerG, ing.unit || "g");
+        }
       }
       res.json(created);
     } catch (error: any) {
@@ -1138,10 +1142,42 @@ export async function registerRoutes(
 
   app.get("/api/ingredient-names", async (_req, res) => {
     try {
-      const allIngredients = await storage.getAllIngredients();
+      const [allIngredients, standards] = await Promise.all([
+        storage.getAllIngredients(),
+        storage.getStandardIngredients(),
+      ]);
       const uniqueNames = Array.from(new Set(allIngredients.map(i => i.name))).sort();
       const uniqueUnits = Array.from(new Set(allIngredients.map(i => i.unit))).sort();
-      res.json({ names: uniqueNames, units: uniqueUnits });
+      res.json({ names: uniqueNames, units: uniqueUnits, standards });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/standard-ingredients", async (_req, res) => {
+    try {
+      res.json(await storage.getStandardIngredients());
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.put("/api/standard-ingredients/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { costPerG, unit } = req.body;
+      const updated = await storage.updateStandardIngredient(id, { costPerG, unit });
+      if (!updated) return res.status(404).json({ message: "Not found" });
+      res.json(updated);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/standard-ingredients/:id", async (req, res) => {
+    try {
+      await storage.deleteStandardIngredient(parseInt(req.params.id));
+      res.json({ ok: true });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }

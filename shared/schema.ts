@@ -118,6 +118,13 @@ export const recurringOrderItems = pgTable("recurring_order_items", {
   quantity: integer("quantity").notNull().default(1),
 });
 
+export const standardIngredients = pgTable("standard_ingredients", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull().unique(),
+  costPerG: decimal("cost_per_g", { precision: 10, scale: 6 }).notNull(),
+  unit: text("unit").notNull().default("g"),
+});
+
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
   password: true,
@@ -132,6 +139,7 @@ export const insertSubscriptionInviteSchema = createInsertSchema(subscriptionInv
 export const insertSubscriptionSelectionSchema = createInsertSchema(subscriptionSelections).omit({ id: true });
 export const insertRecurringOrderSchema = createInsertSchema(recurringOrders).omit({ id: true });
 export const insertRecurringOrderItemSchema = createInsertSchema(recurringOrderItems).omit({ id: true });
+export const insertStandardIngredientSchema = createInsertSchema(standardIngredients).omit({ id: true });
 
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
@@ -154,3 +162,5 @@ export type RecurringOrder = typeof recurringOrders.$inferSelect;
 export type InsertRecurringOrder = z.infer<typeof insertRecurringOrderSchema>;
 export type RecurringOrderItem = typeof recurringOrderItems.$inferSelect;
 export type InsertRecurringOrderItem = z.infer<typeof insertRecurringOrderItemSchema>;
+export type StandardIngredient = typeof standardIngredients.$inferSelect;
+export type InsertStandardIngredient = z.infer<typeof insertStandardIngredientSchema>;
