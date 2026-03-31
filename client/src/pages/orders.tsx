@@ -553,7 +553,7 @@ export default function OrdersPage() {
                                   : group.saturday!.items;
                                 return items.length === 0
                                   ? <span className="italic">No items — amend to add</span>
-                                  : <>{sortItems(items).map(i => `${i.quantity > 1 ? i.quantity + "× " : ""}${i.productName}${parseFloat((i as any).price || "0") > 0 ? ` (${parseFloat((i as any).price).toFixed(2)})` : ""}`).join(", ")}{actualOrders && actualOrders.length > 0 && <span className="ml-1 text-xs text-muted-foreground/60">(actual)</span>}</>;
+                                  : <>{sortItems(items).map(i => `${i.quantity > 1 ? i.quantity + "× " : ""}${i.productName}`).join(", ")}{actualOrders && actualOrders.length > 0 && <span className="ml-1 text-xs text-muted-foreground/60">(actual)</span>}</>;
                               })()
                             : <span className="text-muted-foreground/40 italic">—</span>}
                         </TableCell>
@@ -568,7 +568,7 @@ export default function OrdersPage() {
                                   : group.tuesday!.items;
                                 return items.length === 0
                                   ? <span className="italic">No items — amend to add</span>
-                                  : <>{sortItems(items).map(i => `${i.quantity > 1 ? i.quantity + "× " : ""}${i.productName}${parseFloat((i as any).price || "0") > 0 ? ` (${parseFloat((i as any).price).toFixed(2)})` : ""}`).join(", ")}{actualOrders && actualOrders.length > 0 && <span className="ml-1 text-xs text-muted-foreground/60">(actual)</span>}</>;
+                                  : <>{sortItems(items).map(i => `${i.quantity > 1 ? i.quantity + "× " : ""}${i.productName}`).join(", ")}{actualOrders && actualOrders.length > 0 && <span className="ml-1 text-xs text-muted-foreground/60">(actual)</span>}</>;
                               })()
                             : <span className="text-muted-foreground/40 italic">—</span>}
                         </TableCell>
@@ -655,8 +655,7 @@ export default function OrdersPage() {
                     const itemSummary = sortItems(order.items
                       .filter(i => !i.productName.toLowerCase().includes("add delivery")))
                       .map(i => {
-                        const price = parseFloat(i.price || "0");
-                        return `${i.quantity > 1 ? i.quantity + "× " : ""}${i.productName}${price > 0 ? ` (${price.toFixed(2)})` : ""}`;
+                        return `${i.quantity > 1 ? i.quantity + "× " : ""}${i.productName}`;
                       })
                       .join(", ");
                     return (
