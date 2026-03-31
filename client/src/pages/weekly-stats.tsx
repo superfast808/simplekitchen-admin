@@ -18,6 +18,8 @@ type OrderWithItems = {
   fulfillmentType: string;
   isManual: boolean;
   isTuesday: boolean;
+  cashAmount: string | null;
+  shippingTotal: string | null;
   items: OrderItem[];
 };
 type GroupStats = {
@@ -87,8 +89,20 @@ function computeGroup(
   for (const order of orders) {
     const items = filterItems(order.items, hideAddons, hideAddDelivery, hideSubscriptionBase);
     if (order.fulfillmentType === "delivery") deliveryStops++;
+
+    const cashAmount = parseFloat(order.cashAmount || "0");
+    if (cashAmount > 0) {
+      // Cash/bank amount entered — use it directly as this order's revenue
+      revenue += cashAmount;
+    } else {
+      // Fall back: sum item prices + shipping
+      revenue += parseFloat(order.shippingTotal || "0");
+      for (const item of items) {
+        revenue += parseFloat(item.price || "0");
+      }
+    }
+
     for (const item of items) {
-      revenue += parseFloat(item.price || "0");
       mealsSold += item.quantity;
       mealCounts[item.productName] = (mealCounts[item.productName] || 0) + item.quantity;
     }
@@ -223,7 +237,7 @@ export default function WeeklyStatsPage() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {([
               { key: "mealsSold", label: "Meals Sold", note: "", icon: UtensilsCrossed, color: "border-l-orange-500", iconColor: "text-orange-500", bgColor: "bg-orange-50 dark:bg-orange-950/30", fmt: (v: number) => String(v) },
-              { key: "revenue", label: "Revenue", note: "inc. delivery costs", icon: PoundSterling, color: "border-l-emerald-500", iconColor: "text-emerald-500", bgColor: "bg-emerald-50 dark:bg-emerald-950/30", fmt: (v: number) => `£${v.toFixed(2)}` },
+              { key: "revenue", label: "Revenue", note: "cash/bank if entered, else item prices", icon: PoundSterling, color: "border-l-emerald-500", iconColor: "text-emerald-500", bgColor: "bg-emerald-50 dark:bg-emerald-950/30", fmt: (v: number) => `£${v.toFixed(2)}` },
               { key: "avgOrderValue", label: "Avg Order", note: "", icon: Receipt, color: "border-l-blue-500", iconColor: "text-blue-500", bgColor: "bg-blue-50 dark:bg-blue-950/30", fmt: (v: number) => `£${v.toFixed(2)}` },
               { key: "deliveryStops", label: "Delivery Stops", note: "", icon: Truck, color: "border-l-violet-500", iconColor: "text-violet-500", bgColor: "bg-violet-50 dark:bg-violet-950/30", fmt: (v: number) => String(v) },
             ] as const).map(card => {
@@ -297,7 +311,7 @@ export default function WeeklyStatsPage() {
                   <StatMini label="Revenue" value={`£${computed.web.revenue.toFixed(2)}`} />
                   <StatMini label="Deliveries" value={String(computed.web.deliveryStops)} />
                 </div>
-                <p className="text-[10px] text-muted-foreground mt-2 text-center">Revenue includes delivery costs</p>
+                <p className="text-[10px] text-muted-foreground mt-2 text-center">Cash/bank amount used where entered</p>
               </CardContent>
             </Card>
 
@@ -313,7 +327,7 @@ export default function WeeklyStatsPage() {
                   <StatMini label="Revenue" value={`£${computed.manual.revenue.toFixed(2)}`} />
                   <StatMini label="Deliveries" value={String(computed.manual.deliveryStops)} />
                 </div>
-                <p className="text-[10px] text-muted-foreground mt-2 text-center">Revenue includes delivery costs</p>
+                <p className="text-[10px] text-muted-foreground mt-2 text-center">Cash/bank amount used where entered</p>
               </CardContent>
             </Card>
           </div>
