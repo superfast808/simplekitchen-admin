@@ -422,8 +422,15 @@ export default function TuesdayOrdersPage() {
                         </TableCell>
                         <TableCell data-testid={`text-manual-qty-${order.id}`}>
                           <div className="space-y-1">
-                            <div className="font-semibold tabular-nums text-right">
-                              {order.items.reduce((s, i) => s + i.quantity, 0)}
+                            <div className="tabular-nums text-right leading-tight">
+                              {(() => {
+                                const meals = order.items.filter(i => !OATS_RE.test(i.productName)).reduce((s, i) => s + i.quantity, 0);
+                                const oats = order.items.filter(i => OATS_RE.test(i.productName)).reduce((s, i) => s + i.quantity, 0);
+                                return (<>
+                                  {meals > 0 && <div className="font-semibold">{meals} meal{meals !== 1 ? "s" : ""}</div>}
+                                  {oats > 0 && <div className="text-xs text-muted-foreground">{oats} oats</div>}
+                                </>);
+                              })()}
                             </div>
                             {(order as any).isSubscriptionStamped ? (
                               (order as any).parentOrderTotal != null ? (
@@ -548,7 +555,8 @@ export default function TuesdayOrdersPage() {
                   <TableBody>
                     {tuesdayWebOrders.map((order) => {
                       const orderTotal = order.items.reduce((sum, i) => sum + (parseFloat(i.price) || 0), 0);
-                      const orderQty = order.items.reduce((s, i) => s + i.quantity, 0);
+                      const orderMeals = order.items.filter(i => !OATS_RE.test(i.productName)).reduce((s, i) => s + i.quantity, 0);
+                      const orderOats = order.items.filter(i => OATS_RE.test(i.productName)).reduce((s, i) => s + i.quantity, 0);
                       return (
                         <TableRow key={order.id} data-testid={`row-tue-website-${order.id}`}>
                           <TableCell className="font-medium" data-testid={`text-tue-website-customer-${order.id}`}>
@@ -574,8 +582,11 @@ export default function TuesdayOrdersPage() {
                               {order.fulfillmentType === "delivery" ? "Delivery" : "Collection"}
                             </Badge>
                           </TableCell>
-                          <TableCell className="text-right font-semibold tabular-nums" data-testid={`text-tue-website-qty-${order.id}`}>
-                            {orderQty}
+                          <TableCell className="text-right tabular-nums" data-testid={`text-tue-website-qty-${order.id}`}>
+                            <div className="leading-tight">
+                              {orderMeals > 0 && <div className="font-semibold">{orderMeals} meal{orderMeals !== 1 ? "s" : ""}</div>}
+                              {orderOats > 0 && <div className="text-xs text-muted-foreground">{orderOats} oats</div>}
+                            </div>
                           </TableCell>
                           <TableCell className="text-right font-medium" data-testid={`text-tue-website-total-${order.id}`}>
                             £{orderTotal.toFixed(2)}
