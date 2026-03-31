@@ -11,3 +11,33 @@ export const pool = new Pool({
 });
 
 export const db = drizzle(pool, { schema });
+
+export async function runStartupMigrations() {
+  const client = await pool.connect();
+  try {
+    // Create standard_ingredients table if it doesn't exist
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS standard_ingredients (
+        id serial PRIMARY KEY,
+        name text NOT NULL UNIQUE,
+        cost_per_g decimal(10,6) NOT NULL,
+        unit text NOT NULL DEFAULT 'g'
+      )
+    `);
+
+    // Seed from existing ingredients that have cost_per_g, but only if library is empty
+    const { rows } = await client.query(`SELECT COUNT(*) FROM standard_ingredients`);
+    if (parseInt(rows[0].count) === 0) {
+      await client.query(`
+        INSERT INTO standard_ingredients (name, cost_per_g, unit)
+        SELECT DISTINCT ON (name) name, cost_per_g, unit
+        FROM ingredients
+        WHERE cost_per_g IS NOT NULL AND cost_per_g != '0'
+        ORDER BY name, cost_per_g DESC
+        ON CONFLICT (name) DO NOTHING
+      `);
+    }
+  } finally {
+    client.release();
+  }
+}
