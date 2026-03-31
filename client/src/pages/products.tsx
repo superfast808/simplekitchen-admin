@@ -214,19 +214,37 @@ function IngredientsDialog({ product, open, onOpenChange }: { product: Product; 
     enabled: open,
   });
 
-  const [ingredientLines, setIngredientLines] = useState<Array<{ name: string; quantityPerUnit: string; unit: string; costPerG: string }>>([]);
+  const [ingredientLines, setIngredientLines] = useState<Array<{ name: string; quantityPerUnit: string; unit: string; costPerG: string; totalCost: string }>>([]);
   const [initialized, setInitialized] = useState(false);
+
+  function deriveTotalCost(costPerG: string, qty: string): string {
+    const c = parseFloat(costPerG);
+    const q = parseFloat(qty);
+    if (!isNaN(c) && !isNaN(q) && q > 0 && c > 0) return (c * q).toFixed(2);
+    return "";
+  }
+
+  function deriveCostPerG(totalCost: string, qty: string): string {
+    const t = parseFloat(totalCost);
+    const q = parseFloat(qty);
+    if (!isNaN(t) && !isNaN(q) && q > 0 && t > 0) return (t / q).toFixed(6);
+    return "";
+  }
 
   if (existingIngredients && !initialized) {
     if (existingIngredients.length > 0) {
-      setIngredientLines(existingIngredients.map(i => ({
-        name: i.name,
-        quantityPerUnit: i.quantityPerUnit,
-        unit: i.unit,
-        costPerG: (i as any).costPerG != null ? String((i as any).costPerG) : "",
-      })));
+      setIngredientLines(existingIngredients.map(i => {
+        const costPerG = (i as any).costPerG != null ? String((i as any).costPerG) : "";
+        return {
+          name: i.name,
+          quantityPerUnit: i.quantityPerUnit,
+          unit: i.unit,
+          costPerG,
+          totalCost: deriveTotalCost(costPerG, i.quantityPerUnit),
+        };
+      }));
     } else {
-      setIngredientLines([{ name: "", quantityPerUnit: "", unit: "g", costPerG: "" }]);
+      setIngredientLines([{ name: "", quantityPerUnit: "", unit: "g", costPerG: "", totalCost: "" }]);
     }
     setInitialized(true);
   }
@@ -250,22 +268,36 @@ function IngredientsDialog({ product, open, onOpenChange }: { product: Product; 
     saveMutation.mutate({ ingredients: valid });
   };
 
-  const addLine = () => setIngredientLines([...ingredientLines, { name: "", quantityPerUnit: "", unit: "g", costPerG: "" }]);
+  const addLine = () => setIngredientLines([...ingredientLines, { name: "", quantityPerUnit: "", unit: "g", costPerG: "", totalCost: "" }]);
 
   const removeLine = (idx: number) => {
     const newLines = ingredientLines.filter((_, i) => i !== idx);
-    setIngredientLines(newLines.length > 0 ? newLines : [{ name: "", quantityPerUnit: "", unit: "g", costPerG: "" }]);
+    setIngredientLines(newLines.length > 0 ? newLines : [{ name: "", quantityPerUnit: "", unit: "g", costPerG: "", totalCost: "" }]);
   };
 
   const updateLine = (idx: number, field: string, value: string) => {
     const newLines = [...ingredientLines];
-    (newLines[idx] as any)[field] = value;
+    const line = { ...newLines[idx], [field]: value };
+    // Auto-calculate the linked cost field
+    if (field === "costPerG") {
+      line.totalCost = deriveTotalCost(value, line.quantityPerUnit);
+    } else if (field === "totalCost") {
+      line.costPerG = deriveCostPerG(value, line.quantityPerUnit);
+    } else if (field === "quantityPerUnit") {
+      // Recalculate based on whichever cost field was last set
+      if (line.costPerG) {
+        line.totalCost = deriveTotalCost(line.costPerG, value);
+      } else if (line.totalCost) {
+        line.costPerG = deriveCostPerG(line.totalCost, value);
+      }
+    }
+    newLines[idx] = line;
     setIngredientLines(newLines);
   };
 
   return (
     <Dialog open={open} onOpenChange={(v) => { onOpenChange(v); setInitialized(false); }}>
-      <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
+      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             {product.imageUrl && (
@@ -284,6 +316,14 @@ function IngredientsDialog({ product, open, onOpenChange }: { product: Product; 
               Enter each ingredient with the quantity needed per unit of this product.
               Start typing to see suggestions from existing ingredients.
             </p>
+            <div className="flex gap-2 items-center text-xs text-muted-foreground px-1">
+              <span className="flex-1 min-w-[140px]">Ingredient</span>
+              <span className="w-20">Qty/unit</span>
+              <span className="w-20">Unit</span>
+              <span className="w-24 text-right">£/g</span>
+              <span className="w-24 text-right">£ total</span>
+              <span className="w-8" />
+            </div>
             {ingredientLines.map((line, idx) => (
               <div key={idx} className="flex gap-2 items-center flex-wrap">
                 <AutocompleteInput
@@ -317,11 +357,24 @@ function IngredientsDialog({ product, open, onOpenChange }: { product: Product; 
                     type="number"
                     value={line.costPerG}
                     onChange={(e) => updateLine(idx, "costPerG", e.target.value)}
-                    placeholder="0.000"
+                    placeholder="0.0000"
                     className="pl-7 w-full"
                     step="0.000001"
                     min="0"
                     data-testid={`input-ingredient-cost-${idx}`}
+                  />
+                </div>
+                <div className="relative w-24">
+                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">£ total</span>
+                  <Input
+                    type="number"
+                    value={line.totalCost}
+                    onChange={(e) => updateLine(idx, "totalCost", e.target.value)}
+                    placeholder="0.00"
+                    className="pl-12 w-full"
+                    step="0.01"
+                    min="0"
+                    data-testid={`input-ingredient-total-${idx}`}
                   />
                 </div>
                 <Button size="icon" variant="ghost" onClick={() => removeLine(idx)} data-testid={`button-remove-ingredient-${idx}`}>
