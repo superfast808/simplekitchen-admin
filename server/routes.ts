@@ -60,7 +60,12 @@ async function getCurrentWeekInfo(asOf?: Date): Promise<{ weekNumber: number; ca
   if (!refDateStr) return { weekNumber: 1, categoryName: "Week 1" };
   const refDate = new Date(refDateStr);
   const now = asOf ?? new Date();
-  const diffMs = now.getTime() - refDate.getTime();
+  // The week boundary is at noon on each Saturday (matching the WooCommerce order-window open
+  // time stored in week1ReferenceDate). Invite weekFrom and order-week 'from' dates are stored
+  // as Saturday midnight (00:00 UTC), which is 12 h before the boundary and would otherwise
+  // land in the previous week. Shift by +12 h so midnight Saturday aligns with the correct week.
+  const normalized = new Date(now.getTime() + 12 * 60 * 60 * 1000);
+  const diffMs = normalized.getTime() - refDate.getTime();
   if (diffMs < 0) return { weekNumber: 1, categoryName: "Week 1" };
   const diffWeeks = Math.floor(diffMs / (7 * 24 * 60 * 60 * 1000));
   const weekNumber = (diffWeeks % 6) + 1;
