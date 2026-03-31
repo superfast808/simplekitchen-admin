@@ -334,18 +334,18 @@ export default function WeeklyStatsPage() {
                 <div className="flex flex-col gap-1" data-testid="stat-revenue-online-subs">
                   <div className="flex items-center gap-1.5 text-muted-foreground">
                     <ShoppingBag className="w-3.5 h-3.5 text-violet-600" />
-                    <span className="text-xs font-medium uppercase tracking-wide">Online — Subs</span>
+                    <span className="text-xs font-medium uppercase tracking-wide">Subscriptions</span>
                   </div>
                   <p className="text-xl font-bold tabular-nums text-violet-700 dark:text-violet-400">£{computed.onlineSubsRevenue.toFixed(2)}</p>
-                  <p className="text-[10px] text-muted-foreground">WooCommerce subscription orders{includeDelivery ? " incl. delivery" : ""}</p>
+                  <p className="text-[10px] text-muted-foreground">WooCommerce subscription payments{includeDelivery ? " incl. delivery" : ""}</p>
                 </div>
                 <div className="flex flex-col gap-1" data-testid="stat-revenue-online-other">
                   <div className="flex items-center gap-1.5 text-muted-foreground">
                     <Globe className="w-3.5 h-3.5 text-sky-600" />
-                    <span className="text-xs font-medium uppercase tracking-wide">Online — Add-ons</span>
+                    <span className="text-xs font-medium uppercase tracking-wide">Website Orders + Extras</span>
                   </div>
                   <p className="text-xl font-bold tabular-nums text-sky-700 dark:text-sky-400">£{computed.onlineOtherRevenue.toFixed(2)}</p>
-                  <p className="text-[10px] text-muted-foreground">Individual / subscriber extras{includeDelivery ? " incl. delivery" : ""}</p>
+                  <p className="text-[10px] text-muted-foreground">Website orders & optional subscriber extras{includeDelivery ? " incl. delivery" : ""}</p>
                 </div>
               </div>
             </CardContent>
