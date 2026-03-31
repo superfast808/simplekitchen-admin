@@ -2863,6 +2863,23 @@ export async function registerRoutes(
     }
   });
 
+  // Delete all manual (stamped) orders for the current week.
+  // MUST be registered before the generic /:id route so Express doesn't swallow it.
+  app.delete("/api/recurring-orders/stamps-this-week", async (req, res) => {
+    try {
+      const week = getWeekRange(0);
+      const thisWeekOrders = await storage.getOrders(week.from, week.to);
+      const manualOrders = thisWeekOrders.filter(o => o.isManual);
+      for (const o of manualOrders) {
+        await storage.deleteOrderItemsByOrderId(o.id);
+        await storage.deleteOrder(o.id);
+      }
+      res.json({ deleted: manualOrders.length });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   app.delete("/api/recurring-orders/:id", async (req, res) => {
     try {
       await storage.deleteRecurringOrder(parseInt(req.params.id));
@@ -3021,21 +3038,6 @@ export async function registerRoutes(
     }
   });
 
-  // Delete all manual (stamped) orders for the current week.
-  app.delete("/api/recurring-orders/stamps-this-week", async (req, res) => {
-    try {
-      const week = getWeekRange(0);
-      const thisWeekOrders = await storage.getOrders(week.from, week.to);
-      const manualOrders = thisWeekOrders.filter(o => o.isManual);
-      for (const o of manualOrders) {
-        await storage.deleteOrderItemsByOrderId(o.id);
-        await storage.deleteOrder(o.id);
-      }
-      res.json({ deleted: manualOrders.length });
-    } catch (error: any) {
-      res.status(500).json({ message: error.message });
-    }
-  });
 
   // Smart stamp: create this week's orders for all active recurring customers,
   // using last week's actual orders as the item template and mapping to the current week's menu.
@@ -3184,21 +3186,31 @@ export async function registerRoutes(
           }
         }
 
-        // --- Extras / add-ons ---
+        // --- Extras / add-ons (oats, soups, etc.) ---
         for (const ex of extraSrc) {
           const srcPrice = ex.price || "0";
+          // 1. Exact name match
           const exact = allExtras.find(m => m.name.toLowerCase() === ex.productName.toLowerCase());
           if (exact) {
             resolved.push({ productName: exact.name, quantity: ex.quantity, price: exact.price || srcPrice, productId: exact.id });
             continue;
           }
-          // Same price tier
+          // 2. Protein/category match — e.g. last-week oat → this-week oat regardless of price change
+          const srcCat = detectProtein(ex.productName);
+          if (srcCat) {
+            const catMatch = allExtras.find(m => detectProtein(m.name) === srcCat);
+            if (catMatch) {
+              resolved.push({ productName: catMatch.name, quantity: ex.quantity, price: catMatch.price || srcPrice, productId: catMatch.id });
+              continue;
+            }
+          }
+          // 3. Same price tier
           const samePrice = allExtras.find(m => Math.abs(parseFloat(m.price || "0") - parseFloat(srcPrice)) < 0.01);
           if (samePrice) {
             resolved.push({ productName: samePrice.name, quantity: ex.quantity, price: samePrice.price || srcPrice, productId: samePrice.id });
             continue;
           }
-          // Keep original (not in current menu — keep as-is so admin can review)
+          // 4. Keep original (not in current menu — keep as-is so admin can review)
           resolved.push({ productName: ex.productName, quantity: ex.quantity, price: srcPrice, productId: null });
         }
 
