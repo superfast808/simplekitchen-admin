@@ -37,12 +37,17 @@ function sortItems<T extends { productName: string }>(items: T[]): T[] {
   return [...items].sort((a, b) => itemSortPriority(a.productName) - itemSortPriority(b.productName));
 }
 
-function effectiveSpend(o: any): number {
-  if (o.isManual && o.cashAmount != null) return parseFloat(o.cashAmount);
-  return o.items.reduce((s: number, i: any) => {
-    const p = parseFloat(i.price || "0");
-    return s + (o.isManual ? p * i.quantity : p);
-  }, 0) + parseFloat(o.shippingTotal || "0");
+const SUB_RE_ORDERS = /meal\s+subscription/i;
+
+function effectiveSpend(o: any, subCustomers: Set<string> = new Set()): number {
+  if (o.isManual) {
+    const cash = parseFloat(o.cashAmount ?? "0");
+    if (cash > 0) return cash;
+    if (subCustomers.has(o.customerName)) return 0;
+    return o.items.reduce((s: number, i: any) => s + parseFloat(i.price || "0") * i.quantity, 0);
+  }
+  return o.items.reduce((s: number, i: any) => s + parseFloat(i.price || "0"), 0)
+    + parseFloat(o.shippingTotal || "0");
 }
 
 export default function OrdersPage() {
@@ -219,6 +224,17 @@ export default function OrdersPage() {
     return true;
   });
 
+  // Customers who have a WooCommerce subscription order this week — their manual
+  // recurring orders are operational records only; the actual payment is captured
+  // in the WooCommerce subscription order, so we exclude them from revenue totals.
+  const subCustomers = useMemo(() =>
+    new Set(
+      (allOrders || [])
+        .filter(o => !o.isManual && o.items.some(i => SUB_RE_ORDERS.test(i.productName)))
+        .map(o => o.customerName)
+    ),
+  [allOrders]);
+
   const syncMutation = useMutation({
     mutationFn: () => apiRequest("POST", "/api/woo/sync-orders"),
     onSuccess: async (res) => {
@@ -267,7 +283,7 @@ export default function OrdersPage() {
       let av: number | string, bv: number | string;
       if (orderSortCol === "customer") { av = a.customerName?.toLowerCase() ?? ""; bv = b.customerName?.toLowerCase() ?? ""; }
       else if (orderSortCol === "total") { av = a.items.filter(i => !i.productName.toLowerCase().includes("add delivery")).reduce((s, i) => s + i.quantity, 0); bv = b.items.filter(i => !i.productName.toLowerCase().includes("add delivery")).reduce((s, i) => s + i.quantity, 0); }
-      else if (orderSortCol === "spend") { av = effectiveSpend(a); bv = effectiveSpend(b); }
+      else if (orderSortCol === "spend") { av = effectiveSpend(a, subCustomers); bv = effectiveSpend(b, subCustomers); }
       else if (orderSortCol === "type") { av = a.fulfillmentType ?? ""; bv = b.fulfillmentType ?? ""; }
       else { av = a.status ?? ""; bv = b.status ?? ""; }
       if (av < bv) return orderSortDir === "asc" ? -1 : 1;
@@ -651,7 +667,7 @@ export default function OrdersPage() {
                 </TableHeader>
                 <TableBody>
                   {sortedOrders.map((order) => {
-                    const orderSpend = effectiveSpend(order);
+                    const orderSpend = effectiveSpend(order, subCustomers);
                     const itemSummary = sortItems(order.items
                       .filter(i => !i.productName.toLowerCase().includes("add delivery")))
                       .map(i => {
@@ -871,7 +887,7 @@ export default function OrdersPage() {
                     <TableCell></TableCell>
                     <TableCell></TableCell>
                     <TableCell className="text-right font-bold text-sm" data-testid="text-total-spend">
-                      £{(orders || []).reduce((sum, o) => sum + effectiveSpend(o), 0).toFixed(2)}
+                      £{(orders || []).reduce((sum, o) => sum + effectiveSpend(o, subCustomers), 0).toFixed(2)}
                     </TableCell>
                     <TableCell></TableCell>
                     <TableCell className="text-sm font-medium text-green-700 dark:text-green-400" data-testid="text-total-payment-methods">
