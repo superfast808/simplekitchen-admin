@@ -409,7 +409,7 @@ async function performSync() {
     const fourWeeksAgo = new Date();
     fourWeeksAgo.setDate(fourWeeksAgo.getDate() - 28);
     const params: Record<string, string> = {
-      status: "processing,completed,on-hold",
+      status: "processing,completed,on-hold,refunded,cancelled",
       after: fourWeeksAgo.toISOString(),
     };
     const wooOrders = await fetchWooOrders(params);
