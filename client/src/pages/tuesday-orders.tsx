@@ -97,11 +97,10 @@ export default function TuesdayOrdersPage() {
         else meals += item.quantity;
       }
     };
-    for (const o of orders ?? []) countItems(o.items);
     for (const o of manualOrders ?? []) countItems(o.items);
     for (const o of tuesdayWebOrders ?? []) countItems(o.items);
     return { meals, oats };
-  }, [orders, manualOrders, tuesdayWebOrders]);
+  }, [manualOrders, tuesdayWebOrders]);
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => apiRequest("DELETE", `/api/recurring-orders/${id}`),
