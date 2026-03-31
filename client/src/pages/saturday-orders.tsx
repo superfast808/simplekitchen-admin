@@ -60,7 +60,7 @@ export default function SaturdayOrdersPage() {
 
   const { data: manualOrders } = useQuery<OrderWithItems[]>({
     queryKey: ["/api/orders", `?from=${from.toISOString()}&to=${to.toISOString()}`],
-    select: (data) => data.filter(o => o.isManual && !o.isTuesday),
+    select: (data) => data.filter(o => o.isManual && !o.isTuesday && o.status !== 'refunded'),
   });
 
   const { data: websiteOrders } = useQuery<OrderWithItems[]>({
@@ -68,6 +68,7 @@ export default function SaturdayOrdersPage() {
     select: (data) => data.filter(o => {
       if (o.isManual) return false;
       if (o.isTuesday) return false;
+      if (o.status === 'refunded') return false;
       if (o.items.length > 0 && o.items.every(i => /add\s+delivery/i.test(i.productName))) return false;
       return true;
     }),
