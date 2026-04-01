@@ -219,7 +219,7 @@ export default function WeeklyStatsPage() {
 
   const filters = [
     { id: "hideAddons", label: "Hide addons (≤ £4 items)", checked: hideAddons, onChange: setHideAddons },
-    { id: "hideAddDelivery", label: "Hide Add Delivery (£4.99)", checked: hideAddDelivery, onChange: setHideAddDelivery },
+    { id: "hideAddDelivery", label: "Hide Add Delivery (£5.49)", checked: hideAddDelivery, onChange: setHideAddDelivery },
     { id: "hideSubscriptionBase", label: "Hide subscription base orders", checked: hideSubscriptionBase, onChange: setHideSubscriptionBase },
     { id: "includeDelivery", label: "Include delivery in revenue", checked: includeDelivery, onChange: setIncludeDelivery },
   ];
