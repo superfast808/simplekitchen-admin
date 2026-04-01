@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Send, CheckCircle2, Clock, Mail, Pencil, Minus, Plus, UtensilsCrossed, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, RotateCcw, CreditCard, ExternalLink, Trash2 } from "lucide-react";
+import { Send, CheckCircle2, Clock, Mail, Pencil, Minus, Plus, UtensilsCrossed, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, RotateCcw, CreditCard, ExternalLink, Trash2, X } from "lucide-react";
 import { format, addWeeks } from "date-fns";
 
 type Selection = {
@@ -91,6 +91,8 @@ export default function SubscriptionOverviewPage() {
   const [resettingId, setResettingId] = useState<number | null>(null);
   const [confirmResetId, setConfirmResetId] = useState<number | null>(null);
   const [receiptingId, setReceiptingId] = useState<number | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   const weekRange = getCurrentWeekRange(weekOffset);
   const isCurrentWeek = weekOffset === 0;
@@ -208,6 +210,28 @@ export default function SubscriptionOverviewPage() {
       toast({ title: "Failed to reset", description, variant: "destructive" });
       setResettingId(null);
       setConfirmResetId(null);
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (inviteId: number) => {
+      return apiRequest("DELETE", `/api/subscription-invites/${inviteId}`, {});
+    },
+    onSuccess: () => {
+      toast({ title: "Invite deleted" });
+      setDeletingId(null);
+      setConfirmDeleteId(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/subscription-invites"] });
+    },
+    onError: (err: Error) => {
+      let description = err.message;
+      try {
+        const parsed = JSON.parse(err.message.replace(/^\d+:\s*/, ""));
+        if (parsed?.message) description = parsed.message;
+      } catch {}
+      toast({ title: "Failed to delete", description, variant: "destructive" });
+      setDeletingId(null);
+      setConfirmDeleteId(null);
     },
   });
 
@@ -523,6 +547,46 @@ export default function SubscriptionOverviewPage() {
                               ) : (
                                 <CreditCard className="w-3 h-3" />
                               )}
+                            </Button>
+                          )}
+                          {confirmDeleteId === invite.id ? (
+                            <div className="flex items-center gap-1">
+                              <span className="text-xs text-red-600 whitespace-nowrap">Delete invite?</span>
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                className="h-7 text-xs px-2"
+                                disabled={deletingId === invite.id && deleteMutation.isPending}
+                                onClick={() => {
+                                  setDeletingId(invite.id);
+                                  deleteMutation.mutate(invite.id);
+                                }}
+                                data-testid={`button-confirm-delete-invite-${invite.id}`}
+                              >
+                                {deletingId === invite.id && deleteMutation.isPending ? (
+                                  <RotateCcw className="w-3 h-3 animate-spin" />
+                                ) : "Yes"}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 text-xs px-2"
+                                onClick={() => setConfirmDeleteId(null)}
+                                data-testid={`button-cancel-delete-invite-${invite.id}`}
+                              >
+                                No
+                              </Button>
+                            </div>
+                          ) : (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 text-xs px-2 text-red-500 hover:text-red-700 hover:bg-red-50"
+                              title="Delete this invite record"
+                              onClick={() => setConfirmDeleteId(invite.id)}
+                              data-testid={`button-delete-invite-${invite.id}`}
+                            >
+                              <X className="w-3 h-3" />
                             </Button>
                           )}
                         </div>

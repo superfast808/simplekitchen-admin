@@ -87,6 +87,7 @@ export interface IStorage {
   upsertStandardIngredient(name: string, costPerG: string, unit: string): Promise<StandardIngredient>;
   updateStandardIngredient(id: number, data: Partial<InsertStandardIngredient>): Promise<StandardIngredient | undefined>;
   deleteStandardIngredient(id: number): Promise<void>;
+  deleteSubscriptionInvite(id: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -428,6 +429,10 @@ export class DatabaseStorage implements IStorage {
 
   async deleteStandardIngredient(id: number): Promise<void> {
     await db.delete(standardIngredients).where(eq(standardIngredients.id, id));
+  }
+
+  async deleteSubscriptionInvite(id: number): Promise<void> {
+    await db.delete(subscriptionInvites).where(eq(subscriptionInvites.id, id));
   }
 }
 

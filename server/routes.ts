@@ -2711,6 +2711,18 @@ export async function registerRoutes(
     }
   });
 
+  app.delete("/api/subscription-invites/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const invite = await storage.getSubscriptionInviteById(id);
+      if (!invite) return res.status(404).json({ message: "Invite not found" });
+      await storage.deleteSubscriptionInvite(id);
+      res.json({ ok: true });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   // Returns the most recent website (WooCommerce) order + items for each recurring customer,
   // keyed by recurringOrder.id. Used to preview "last order" in the templates table.
   app.get("/api/recurring-orders/previous-orders", async (req, res) => {
