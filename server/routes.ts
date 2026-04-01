@@ -1162,6 +1162,17 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/standard-ingredients", async (req, res) => {
+    try {
+      const { name, costPerG, unit } = req.body;
+      if (!name || !costPerG || !unit) return res.status(400).json({ message: "name, costPerG and unit are required" });
+      const result = await storage.upsertStandardIngredient(name.trim(), costPerG, unit);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   app.put("/api/standard-ingredients/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);

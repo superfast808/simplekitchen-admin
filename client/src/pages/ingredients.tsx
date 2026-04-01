@@ -3,7 +3,7 @@ import { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ChefHat, ChevronDown, ChevronRight, BookOpen, Pencil, Trash2, Check, X } from "lucide-react";
+import { ChefHat, ChevronDown, ChevronRight, BookOpen, Pencil, Trash2, Check, X, Plus } from "lucide-react";
 import { DateFilter, DateRangeLabel, useDateFilter } from "@/components/date-filter";
 import { OrderSourceFilter, useOrderSourceFilter } from "@/components/order-source-filter";
 import { Button } from "@/components/ui/button";
@@ -194,6 +194,10 @@ function StandardIngredientsPanel() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editCostPerG, setEditCostPerG] = useState("");
   const [editUnit, setEditUnit] = useState("");
+  const [showAddRow, setShowAddRow] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newCostPerG, setNewCostPerG] = useState("");
+  const [newUnit, setNewUnit] = useState("g");
 
   const { data: standards, isLoading } = useQuery<StandardIngredient[]>({
     queryKey: ["/api/standard-ingredients"],
@@ -221,6 +225,23 @@ function StandardIngredientsPanel() {
     onError: (e: Error) => toast({ title: "Failed to delete", description: e.message, variant: "destructive" }),
   });
 
+  const addMutation = useMutation({
+    mutationFn: ({ name, costPerG, unit }: { name: string; costPerG: string; unit: string }) =>
+      apiRequest("POST", "/api/standard-ingredients", { name, costPerG, unit }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/standard-ingredients"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/ingredient-names"] });
+      setNewName(""); setNewCostPerG(""); setNewUnit("g"); setShowAddRow(false);
+      toast({ title: "Added to library" });
+    },
+    onError: (e: Error) => toast({ title: "Failed to add", description: e.message, variant: "destructive" }),
+  });
+
+  const saveAdd = () => {
+    if (!newName.trim() || !newCostPerG) return;
+    addMutation.mutate({ name: newName.trim(), costPerG: newCostPerG, unit: newUnit || "g" });
+  };
+
   const startEdit = (s: StandardIngredient) => {
     setEditingId(s.id);
     setEditCostPerG(s.costPerG);
@@ -245,81 +266,131 @@ function StandardIngredientsPanel() {
         <span className="ml-auto">{open ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}</span>
       </button>
       {open && (
-        <CardContent className="pt-0 pb-4">
+        <CardContent className="pt-0 pb-4 space-y-3">
           {isLoading ? (
             <Skeleton className="h-24 w-full" />
-          ) : !standards || standards.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-4">
-              No standard ingredients yet. Save product ingredients with a £/g cost to populate this library automatically.
-            </p>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Ingredient</TableHead>
-                  <TableHead className="text-right">£/g</TableHead>
-                  <TableHead>Unit</TableHead>
-                  <TableHead className="w-24" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {standards.map(s => (
-                  <TableRow key={s.id} data-testid={`row-standard-ingredient-${s.id}`}>
-                    <TableCell className="font-medium" data-testid={`text-std-name-${s.id}`}>{s.name}</TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {editingId === s.id ? (
-                        <Input
-                          type="number"
-                          value={editCostPerG}
-                          onChange={e => setEditCostPerG(e.target.value)}
-                          step="0.000001"
-                          min="0"
-                          className="w-28 text-right ml-auto"
-                          data-testid={`input-std-costperg-${s.id}`}
-                        />
-                      ) : (
-                        <span data-testid={`text-std-costperg-${s.id}`}>{parseFloat(s.costPerG).toPrecision(6).replace(/\.?0+$/, "")}</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {editingId === s.id ? (
-                        <Input
-                          value={editUnit}
-                          onChange={e => setEditUnit(e.target.value)}
-                          className="w-16"
-                          data-testid={`input-std-unit-${s.id}`}
-                        />
-                      ) : (
-                        <span className="text-muted-foreground text-sm" data-testid={`text-std-unit-${s.id}`}>{s.unit}</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex gap-1 justify-end">
-                        {editingId === s.id ? (
-                          <>
-                            <Button size="icon" variant="ghost" className="h-7 w-7 text-green-600" onClick={saveEdit} disabled={updateMutation.isPending} data-testid={`button-std-save-${s.id}`}>
-                              <Check className="w-3 h-3" />
-                            </Button>
-                            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setEditingId(null)} data-testid={`button-std-cancel-${s.id}`}>
-                              <X className="w-3 h-3" />
-                            </Button>
-                          </>
-                        ) : (
-                          <>
-                            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => startEdit(s)} data-testid={`button-std-edit-${s.id}`}>
-                              <Pencil className="w-3 h-3" />
-                            </Button>
-                            <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" onClick={() => deleteMutation.mutate(s.id)} disabled={deleteMutation.isPending} data-testid={`button-std-delete-${s.id}`}>
-                              <Trash2 className="w-3 h-3" />
-                            </Button>
-                          </>
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+            <>
+              {(!standards || standards.length === 0) && !showAddRow && (
+                <p className="text-sm text-muted-foreground text-center py-2">
+                  No standard ingredients yet. Save product ingredients with a £/g cost to populate this library automatically, or add one below.
+                </p>
+              )}
+              {standards && standards.length > 0 && (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Ingredient</TableHead>
+                      <TableHead className="text-right">£/g</TableHead>
+                      <TableHead>Unit</TableHead>
+                      <TableHead className="w-24" />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {standards.map(s => (
+                      <TableRow key={s.id} data-testid={`row-standard-ingredient-${s.id}`}>
+                        <TableCell className="font-medium" data-testid={`text-std-name-${s.id}`}>{s.name}</TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {editingId === s.id ? (
+                            <Input
+                              type="number"
+                              value={editCostPerG}
+                              onChange={e => setEditCostPerG(e.target.value)}
+                              step="0.000001"
+                              min="0"
+                              className="w-28 text-right ml-auto"
+                              data-testid={`input-std-costperg-${s.id}`}
+                            />
+                          ) : (
+                            <span data-testid={`text-std-costperg-${s.id}`}>{parseFloat(s.costPerG).toPrecision(6).replace(/\.?0+$/, "")}</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {editingId === s.id ? (
+                            <Input
+                              value={editUnit}
+                              onChange={e => setEditUnit(e.target.value)}
+                              className="w-16"
+                              data-testid={`input-std-unit-${s.id}`}
+                            />
+                          ) : (
+                            <span className="text-muted-foreground text-sm" data-testid={`text-std-unit-${s.id}`}>{s.unit}</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex gap-1 justify-end">
+                            {editingId === s.id ? (
+                              <>
+                                <Button size="icon" variant="ghost" className="h-7 w-7 text-green-600" onClick={saveEdit} disabled={updateMutation.isPending} data-testid={`button-std-save-${s.id}`}>
+                                  <Check className="w-3 h-3" />
+                                </Button>
+                                <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setEditingId(null)} data-testid={`button-std-cancel-${s.id}`}>
+                                  <X className="w-3 h-3" />
+                                </Button>
+                              </>
+                            ) : (
+                              <>
+                                <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => startEdit(s)} data-testid={`button-std-edit-${s.id}`}>
+                                  <Pencil className="w-3 h-3" />
+                                </Button>
+                                <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" onClick={() => deleteMutation.mutate(s.id)} disabled={deleteMutation.isPending} data-testid={`button-std-delete-${s.id}`}>
+                                  <Trash2 className="w-3 h-3" />
+                                </Button>
+                              </>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+              {showAddRow ? (
+                <div className="flex gap-2 items-center flex-wrap pt-1" data-testid="form-add-standard-ingredient">
+                  <Input
+                    placeholder="Ingredient name"
+                    value={newName}
+                    onChange={e => setNewName(e.target.value)}
+                    className="flex-1 min-w-[160px]"
+                    data-testid="input-new-std-name"
+                    onKeyDown={e => e.key === "Enter" && saveAdd()}
+                  />
+                  <div className="relative w-28">
+                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">£/g</span>
+                    <Input
+                      type="number"
+                      placeholder="0.000000"
+                      value={newCostPerG}
+                      onChange={e => setNewCostPerG(e.target.value)}
+                      step="0.000001"
+                      min="0"
+                      className="pl-7 w-full"
+                      data-testid="input-new-std-costperg"
+                      onKeyDown={e => e.key === "Enter" && saveAdd()}
+                    />
+                  </div>
+                  <Input
+                    placeholder="Unit"
+                    value={newUnit}
+                    onChange={e => setNewUnit(e.target.value)}
+                    className="w-16"
+                    data-testid="input-new-std-unit"
+                    onKeyDown={e => e.key === "Enter" && saveAdd()}
+                  />
+                  <Button size="icon" variant="ghost" className="h-8 w-8 text-green-600" onClick={saveAdd} disabled={addMutation.isPending || !newName.trim() || !newCostPerG} data-testid="button-new-std-save">
+                    <Check className="w-4 h-4" />
+                  </Button>
+                  <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => { setShowAddRow(false); setNewName(""); setNewCostPerG(""); setNewUnit("g"); }} data-testid="button-new-std-cancel">
+                    <X className="w-4 h-4" />
+                  </Button>
+                </div>
+              ) : (
+                <Button size="sm" variant="outline" onClick={() => setShowAddRow(true)} data-testid="button-add-standard-ingredient">
+                  <Plus className="w-3 h-3 mr-1" />
+                  Add ingredient
+                </Button>
+              )}
+            </>
           )}
         </CardContent>
       )}
