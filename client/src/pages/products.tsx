@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
-import { RefreshCw, Package, ChevronRight, X, Plus, Save } from "lucide-react";
+import { RefreshCw, Package, ChevronRight, X, Plus, Save, ArrowDownToLine } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { Product, Ingredient } from "@shared/schema";
@@ -278,6 +278,27 @@ function IngredientsDialog({ product, open, onOpenChange }: { product: Product; 
     saveMutation.mutate({ ingredients: valid });
   };
 
+  const handleSyncFromLibrary = () => {
+    let count = 0;
+    const synced = ingredientLines.map(line => {
+      const std = standardsMap.get(line.name.trim().toLowerCase());
+      if (!std) return line;
+      count++;
+      return {
+        ...line,
+        costPerG: std.costPerG,
+        unit: std.unit,
+        costSource: "perG" as const,
+        totalCost: deriveTotalCost(std.costPerG, line.quantityPerUnit),
+      };
+    });
+    setIngredientLines(synced);
+    toast({
+      title: count > 0 ? `Synced ${count} ingredient${count !== 1 ? "s" : ""} from library` : "No matching ingredients found",
+      description: count > 0 ? "£/g values updated from the standard ingredients library." : "Add ingredients to the library first.",
+    });
+  };
+
   const addLine = () => setIngredientLines([...ingredientLines, { ...emptyLine }]);
 
   const removeLine = (idx: number) => {
@@ -409,10 +430,21 @@ function IngredientsDialog({ product, open, onOpenChange }: { product: Product; 
                 </Button>
               </div>
             ))}
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
               <Button size="sm" variant="outline" onClick={addLine} data-testid="button-add-ingredient">
                 <Plus className="w-3 h-3 mr-1" />
                 Add Ingredient
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleSyncFromLibrary}
+                disabled={!knownIngredients?.standards?.length}
+                title="Pull £/g values from the standard ingredients library for any matching ingredient names"
+                data-testid="button-sync-ingredients-from-library"
+              >
+                <ArrowDownToLine className="w-3 h-3 mr-1" />
+                Sync £/g from library
               </Button>
               <Button size="sm" onClick={handleSave} disabled={saveMutation.isPending} data-testid="button-save-ingredients">
                 <Save className="w-3 h-3 mr-1" />
