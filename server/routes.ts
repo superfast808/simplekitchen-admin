@@ -661,8 +661,8 @@ export async function registerRoutes(
       const { weekNumber, categoryName } = await getCurrentWeekInfo();
       const allProducts = await storage.getProducts();
       const weekProducts = allProducts.filter(p => p.category === categoryName);
-      const meals = weekProducts.filter(p => Math.abs(parseFloat(p.price || "0") - 7.50) < 0.01).sort((a, b) => a.name.localeCompare(b.name));
-      const extras = weekProducts.filter(p => { const pr = parseFloat(p.price || "0"); return pr > 0 && Math.abs(pr - 7.50) >= 0.01; }).sort((a, b) => a.name.localeCompare(b.name));
+      const meals = weekProducts.filter(p => Math.abs(parseFloat(p.price || "0") - 7.75) < 0.01).sort((a, b) => a.name.localeCompare(b.name));
+      const extras = weekProducts.filter(p => { const pr = parseFloat(p.price || "0"); return pr > 0 && Math.abs(pr - 7.75) >= 0.01; }).sort((a, b) => a.name.localeCompare(b.name));
       const week1ReferenceDate = await storage.getSetting("week1ReferenceDate");
       res.json({ weekNumber, categoryName, meals, extras, week1ReferenceDate: week1ReferenceDate || null });
     } catch (error: any) {
@@ -1984,7 +1984,7 @@ export async function registerRoutes(
         const price = parseFloat(p.price || "0");
         productPriceByName.set(p.name.toLowerCase(), price);
       }
-      const STANDARD_PRICE = 7.50;
+      const STANDARD_PRICE = 7.75;
       const result = await Promise.all(
         invites.map(async (invite) => {
           const selections = await storage.getSubscriptionSelections(invite.id);
@@ -2031,11 +2031,11 @@ export async function registerRoutes(
       const productPool = weekProducts.length > 0 ? weekProducts : allProducts.filter(p => !SKIP_PAT.test(p.name));
       // Meals: strictly this week's category only
       availableMeals = productPool
-        .filter(p => !SKIP_PAT.test(p.name) && Math.abs(parseFloat(p.price || "0") - 7.50) < 0.01)
+        .filter(p => !SKIP_PAT.test(p.name) && Math.abs(parseFloat(p.price || "0") - 7.75) < 0.01)
         .sort((a, b) => a.name.localeCompare(b.name))
-        .map(p => ({ name: p.name, popularity: 0, price: p.price || "7.50" }));
+        .map(p => ({ name: p.name, popularity: 0, price: p.price || "7.75" }));
       availableExtras = productPool
-        .filter(p => { if (SKIP_PAT.test(p.name)) return false; const pr = parseFloat(p.price || "0"); return pr > 0 && Math.abs(pr - 7.50) >= 0.01; })
+        .filter(p => { if (SKIP_PAT.test(p.name)) return false; const pr = parseFloat(p.price || "0"); return pr > 0 && Math.abs(pr - 7.75) >= 0.01; })
         .sort((a, b) => a.name.localeCompare(b.name))
         .map(p => ({ name: p.name, popularity: 0, price: p.price || "0" }));
 
@@ -2148,7 +2148,7 @@ export async function registerRoutes(
           isTuesday: false,
         });
         for (const sel of satSels) {
-          await storage.createOrderItem({ orderId: satOrder.id, productId: null, productName: sel.productName, quantity: parseInt(sel.quantity, 10), price: "7.50" });
+          await storage.createOrderItem({ orderId: satOrder.id, productId: null, productName: sel.productName, quantity: parseInt(sel.quantity, 10), price: "7.75" });
         }
         for (const ext of satExtList) {
           if (!ext.productName?.trim()) continue;
@@ -2169,7 +2169,7 @@ export async function registerRoutes(
           isTuesday: true,
         });
         for (const sel of tueSels) {
-          await storage.createOrderItem({ orderId: tueOrder.id, productId: null, productName: sel.productName, quantity: parseInt(sel.quantity, 10), price: "7.50" });
+          await storage.createOrderItem({ orderId: tueOrder.id, productId: null, productName: sel.productName, quantity: parseInt(sel.quantity, 10), price: "7.75" });
         }
         for (const ext of tueExtList) {
           if (!ext.productName?.trim()) continue;
@@ -2262,7 +2262,7 @@ export async function registerRoutes(
           productId: null,
           productName: sel.productName,
           quantity: parseInt(sel.quantity, 10),
-          price: "7.50",
+          price: "7.75",
         });
       }
       for (const extra of extrasList) {
@@ -2347,11 +2347,11 @@ export async function registerRoutes(
       const productPool = weekProducts.length > 0 ? weekProducts : allProducts.filter(p => !SKIP_PAT.test(p.name));
       // Meals: strictly this week's category only
       availableMeals = productPool
-        .filter(p => !SKIP_PAT.test(p.name) && Math.abs(parseFloat(p.price || "0") - 7.50) < 0.01)
+        .filter(p => !SKIP_PAT.test(p.name) && Math.abs(parseFloat(p.price || "0") - 7.75) < 0.01)
         .sort((a, b) => a.name.localeCompare(b.name))
         .map(p => ({ name: p.name, popularity: 0 }));
       availableExtras = productPool
-        .filter(p => { if (SKIP_PAT.test(p.name)) return false; const pr = parseFloat(p.price || "0"); return pr > 0 && Math.abs(pr - 7.50) >= 0.01; })
+        .filter(p => { if (SKIP_PAT.test(p.name)) return false; const pr = parseFloat(p.price || "0"); return pr > 0 && Math.abs(pr - 7.75) >= 0.01; })
         .sort((a, b) => a.name.localeCompare(b.name))
         .map(p => ({ name: p.name, popularity: 0 }));
 
@@ -2428,11 +2428,11 @@ export async function registerRoutes(
         if (invite.selectionsOrderId) {
           await storage.updateOrder(invite.selectionsOrderId, { orderDate: invite.weekFrom, deliveryAddress: resolvedAddress, fulfillmentType: resolvedFulfillment as "delivery" | "collection" });
           await storage.deleteOrderItemsByOrderId(invite.selectionsOrderId);
-          for (const sel of satSels) { if (!sel.productName?.trim()) continue; await storage.createOrderItem({ orderId: invite.selectionsOrderId!, productId: null, productName: sel.productName, quantity: parseInt(sel.quantity, 10) || 1, price: "7.50" }); }
+          for (const sel of satSels) { if (!sel.productName?.trim()) continue; await storage.createOrderItem({ orderId: invite.selectionsOrderId!, productId: null, productName: sel.productName, quantity: parseInt(sel.quantity, 10) || 1, price: "7.75" }); }
           for (const ext of satExtList) { if (!ext.productName?.trim()) continue; await storage.createOrderItem({ orderId: invite.selectionsOrderId!, productId: null, productName: ext.productName, quantity: parseInt(ext.quantity, 10) || 1, price: "0" }); }
         } else {
           const satOrder = await storage.createOrder({ customerName: invite.customerName, customerEmail: invite.customerEmail, deliveryAddress: resolvedAddress, orderDate: invite.weekFrom, status: "processing", fulfillmentType: resolvedFulfillment as "delivery" | "collection", isManual: true, isTuesday: false });
-          for (const sel of satSels) { if (!sel.productName?.trim()) continue; await storage.createOrderItem({ orderId: satOrder.id, productId: null, productName: sel.productName, quantity: parseInt(sel.quantity, 10) || 1, price: "7.50" }); }
+          for (const sel of satSels) { if (!sel.productName?.trim()) continue; await storage.createOrderItem({ orderId: satOrder.id, productId: null, productName: sel.productName, quantity: parseInt(sel.quantity, 10) || 1, price: "7.75" }); }
           for (const ext of satExtList) { if (!ext.productName?.trim()) continue; await storage.createOrderItem({ orderId: satOrder.id, productId: null, productName: ext.productName, quantity: parseInt(ext.quantity, 10) || 1, price: "0" }); }
           await storage.setSubscriptionInviteSelectionsOrder(id, satOrder.id);
         }
@@ -2442,11 +2442,11 @@ export async function registerRoutes(
         if (tueOrderId) {
           await storage.updateOrder(tueOrderId, { orderDate: invite.weekFrom, deliveryAddress: resolvedAddress, fulfillmentType: resolvedFulfillment as "delivery" | "collection" });
           await storage.deleteOrderItemsByOrderId(tueOrderId);
-          for (const sel of tueSels) { if (!sel.productName?.trim()) continue; await storage.createOrderItem({ orderId: tueOrderId, productId: null, productName: sel.productName, quantity: parseInt(sel.quantity, 10) || 1, price: "7.50" }); }
+          for (const sel of tueSels) { if (!sel.productName?.trim()) continue; await storage.createOrderItem({ orderId: tueOrderId, productId: null, productName: sel.productName, quantity: parseInt(sel.quantity, 10) || 1, price: "7.75" }); }
           for (const ext of tueExtList) { if (!ext.productName?.trim()) continue; await storage.createOrderItem({ orderId: tueOrderId, productId: null, productName: ext.productName, quantity: parseInt(ext.quantity, 10) || 1, price: "0" }); }
         } else {
           const tueOrder = await storage.createOrder({ customerName: invite.customerName, customerEmail: invite.customerEmail, deliveryAddress: resolvedAddress, orderDate: invite.weekFrom, status: "processing", fulfillmentType: resolvedFulfillment as "delivery" | "collection", isManual: true, isTuesday: true });
-          for (const sel of tueSels) { if (!sel.productName?.trim()) continue; await storage.createOrderItem({ orderId: tueOrder.id, productId: null, productName: sel.productName, quantity: parseInt(sel.quantity, 10) || 1, price: "7.50" }); }
+          for (const sel of tueSels) { if (!sel.productName?.trim()) continue; await storage.createOrderItem({ orderId: tueOrder.id, productId: null, productName: sel.productName, quantity: parseInt(sel.quantity, 10) || 1, price: "7.75" }); }
           for (const ext of tueExtList) { if (!ext.productName?.trim()) continue; await storage.createOrderItem({ orderId: tueOrder.id, productId: null, productName: ext.productName, quantity: parseInt(ext.quantity, 10) || 1, price: "0" }); }
           await storage.setSubscriptionInviteTuesdayOrder(id, tueOrder.id);
         }
@@ -2496,7 +2496,7 @@ export async function registerRoutes(
             productId: null,
             productName: sel.productName,
             quantity: parseInt(sel.quantity, 10) || 1,
-            price: "7.50",
+            price: "7.75",
           });
         }
         for (const extra of extrasList) {
@@ -2526,7 +2526,7 @@ export async function registerRoutes(
             productId: null,
             productName: sel.productName,
             quantity: parseInt(sel.quantity, 10) || 1,
-            price: "7.50",
+            price: "7.75",
           });
         }
         for (const extra of extrasList) {
@@ -3104,7 +3104,7 @@ export async function registerRoutes(
     try {
       const week = getWeekRange(0);
       const prevWeek = getWeekRange(-1);
-      const STANDARD_PRICE = 7.50;
+      const STANDARD_PRICE = 7.75;
 
       // Resolve current week's menu
       const { categoryName } = await getCurrentWeekInfo();
@@ -3252,7 +3252,7 @@ export async function registerRoutes(
           }
 
           for (const { product, qty } of usedMeals.values()) {
-            resolved.push({ productName: product.name, quantity: qty, price: product.price || "7.50", productId: product.id });
+            resolved.push({ productName: product.name, quantity: qty, price: product.price || "7.75", productId: product.id });
           }
         }
 
@@ -3335,7 +3335,7 @@ export async function registerRoutes(
           const daysAgo = Math.round((Date.now() - new Date(lastOrder.orderDate).getTime()) / 86400000);
           details.push(`${ro.customerName} (${ro.isTuesday ? "Tue" : "Sat"}): based on order from ${daysAgo}d ago (${new Date(lastOrder.orderDate).toLocaleDateString("en-GB")})`);
         } else {
-          // Fall back to stored template — treat all template items as £7.50 meals
+          // Fall back to stored template — treat all template items as £7.75 meals
           const templateItems = await storage.getRecurringOrderItems(ro.id);
           if (templateItems.length === 0) {
             skipped++;
@@ -3343,7 +3343,7 @@ export async function registerRoutes(
             continue;
           }
           newItems = resolveItems(
-            templateItems.map(i => ({ productName: i.productName, quantity: i.quantity, price: "7.50" })),
+            templateItems.map(i => ({ productName: i.productName, quantity: i.quantity, price: "7.75" })),
             menuMeals,
             menuExtras,
           );
@@ -3556,7 +3556,7 @@ export async function registerRoutes(
         for (const p of allProducts) {
           productPriceByName.set(p.name.toLowerCase(), parseFloat(p.price || "0"));
         }
-        const STANDARD_PRICE = 7.50;
+        const STANDARD_PRICE = 7.75;
         const selections = await storage.getSubscriptionSelections(invite.id);
         const extraItems: Array<{ name: string; pricePence: number; quantity: number }> = [];
         for (const sel of selections) {

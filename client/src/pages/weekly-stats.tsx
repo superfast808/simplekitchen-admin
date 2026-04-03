@@ -77,7 +77,7 @@ function filterItems(
     const price = parseFloat(item.price || "0");
     if (hideAddDelivery && /add.*delivery/i.test(name)) return false;
     if (hideSubscriptionBase && /meal\s+subscription/i.test(item.productName)) return false;
-    if (hideAddons && price > 0 && price <= 4.05) return false;
+    if (hideAddons && price > 0 && price <= 4.50) return false;
     return true;
   });
 }
@@ -218,7 +218,7 @@ export default function WeeklyStatsPage() {
   }, [rawOrders, hideAddons, hideAddDelivery, hideSubscriptionBase, includeDelivery]);
 
   const filters = [
-    { id: "hideAddons", label: "Hide addons (≤ £4 items)", checked: hideAddons, onChange: setHideAddons },
+    { id: "hideAddons", label: "Hide addons (≤ £4.50 items)", checked: hideAddons, onChange: setHideAddons },
     { id: "hideAddDelivery", label: "Hide Add Delivery (£5.49)", checked: hideAddDelivery, onChange: setHideAddDelivery },
     { id: "hideSubscriptionBase", label: "Hide subscription base orders", checked: hideSubscriptionBase, onChange: setHideSubscriptionBase },
     { id: "includeDelivery", label: "Include delivery in revenue", checked: includeDelivery, onChange: setIncludeDelivery },

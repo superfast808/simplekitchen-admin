@@ -129,7 +129,7 @@ function MealSelectorPanel({
             <CardContent className="p-4 flex items-center justify-between gap-3">
               <div className="flex-1 min-w-0">
                 <p className="font-medium text-sm truncate">{meal.name}</p>
-                <p className="text-xs text-muted-foreground">£7.50</p>
+                <p className="text-xs text-muted-foreground">£7.75</p>
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 {isSelected ? (
@@ -598,7 +598,7 @@ export default function SubscribePage({ params }: { params: { token: string } })
                 <CardContent className="p-4 flex items-center justify-between gap-3">
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-sm truncate">{meal.name}</p>
-                    <p className="text-xs text-muted-foreground">£7.50</p>
+                    <p className="text-xs text-muted-foreground">£7.75</p>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     {isSelected ? (
