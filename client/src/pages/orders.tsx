@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from "@/components/ui/table";
-import { RefreshCw, Trash2, Plus, ShoppingCart, Download, Tag, Pencil, CalendarCheck, Banknote, MessageSquare, UserCheck, ChevronDown, ChevronUp, ChevronsUpDown, Stamp, Search, X, UserPlus, ArrowUpFromLine, CheckCircle2, AlertCircle } from "lucide-react";
+import { RefreshCw, Trash2, Plus, ShoppingCart, Download, Tag, Pencil, CalendarCheck, Banknote, MessageSquare, UserCheck, ChevronDown, ChevronUp, ChevronsUpDown, Stamp, Search, X, UserPlus, ArrowUpFromLine, CheckCircle2, AlertCircle, ChevronLeft, ChevronRight } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -252,6 +252,18 @@ export default function OrdersPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
       toast({ title: "Order deleted" });
+    },
+  });
+
+  const moveWeekMutation = useMutation({
+    mutationFn: ({ id, orderDate }: { id: number; orderDate: string }) =>
+      apiRequest("PATCH", `/api/orders/${id}`, { orderDate }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      toast({ title: "Order moved to new week" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to move order", description: error.message, variant: "destructive" });
     },
   });
 
@@ -834,16 +846,45 @@ export default function OrdersPage() {
                               </TooltipProvider>
                             );
                           })()}
-                          {order.isManual && (
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              onClick={() => setEditingOrder(order)}
-                              data-testid={`button-edit-order-${order.id}`}
-                            >
-                              <Pencil className="w-4 h-4 text-muted-foreground" />
-                            </Button>
-                          )}
+                          {order.isManual && (() => {
+                            const shiftWeek = (weeks: number) => {
+                              const d = new Date(order.orderDate);
+                              d.setDate(d.getDate() + weeks * 7);
+                              moveWeekMutation.mutate({ id: order.id, orderDate: d.toISOString() });
+                            };
+                            return (
+                              <>
+                                <TooltipProvider>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <Button size="icon" variant="ghost" onClick={() => shiftWeek(-1)} data-testid={`button-prev-week-${order.id}`}>
+                                        <ChevronLeft className="w-4 h-4 text-muted-foreground" />
+                                      </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="top">Move to previous week</TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
+                                <TooltipProvider>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <Button size="icon" variant="ghost" onClick={() => shiftWeek(1)} data-testid={`button-next-week-${order.id}`}>
+                                        <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                                      </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="top">Move to next week</TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  onClick={() => setEditingOrder(order)}
+                                  data-testid={`button-edit-order-${order.id}`}
+                                >
+                                  <Pencil className="w-4 h-4 text-muted-foreground" />
+                                </Button>
+                              </>
+                            );
+                          })()}
                           <Button
                             size="icon"
                             variant="ghost"

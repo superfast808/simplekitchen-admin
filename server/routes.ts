@@ -854,6 +854,7 @@ export async function registerRoutes(
       if (updates.notes !== undefined) orderUpdate.notes = updates.notes;
       if (updates.cashAmount !== undefined) orderUpdate.cashAmount = updates.cashAmount;
       if (updates.paymentMethod !== undefined) orderUpdate.paymentMethod = updates.paymentMethod;
+      if (updates.orderDate !== undefined) orderUpdate.orderDate = new Date(updates.orderDate);
 
       const updated = await storage.updateOrder(id, orderUpdate);
 
