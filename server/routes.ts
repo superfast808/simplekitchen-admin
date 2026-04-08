@@ -3105,17 +3105,23 @@ export async function registerRoutes(
     try {
       const week = getWeekRange(0);
       const prevWeek = getWeekRange(-1);
-      const STANDARD_PRICE = 7.75;
+      // Meal price floor: anything at or above this price is a "meal" (included in subscription).
+      // Using a floor rather than an exact price makes the stamp robust across price changes
+      // (e.g. £7.50 → £7.75) without needing a code deploy each time.
+      const MEAL_PRICE_FLOOR = 6.00;
 
       // Resolve current week's menu
       const { categoryName } = await getCurrentWeekInfo();
       const allProducts = await storage.getProducts();
       const weekProducts = allProducts.filter(p => p.category === categoryName);
       const menuProducts = weekProducts.length > 0 ? weekProducts : allProducts;
-      const menuMeals = menuProducts.filter(p => Math.abs(parseFloat(p.price || "0") - STANDARD_PRICE) < 0.01);
+      const menuMeals = menuProducts.filter(p => {
+        const pr = parseFloat(p.price || "0");
+        return pr >= MEAL_PRICE_FLOOR;
+      });
       const menuExtras = menuProducts.filter(p => {
         const pr = parseFloat(p.price || "0");
-        return pr > 0 && Math.abs(pr - STANDARD_PRICE) >= 0.01;
+        return pr > 0 && pr < MEAL_PRICE_FLOOR;
       });
 
       // Active recurring customers
@@ -3181,14 +3187,15 @@ export async function registerRoutes(
         }
 
         // Separate meals vs extras using the effective (catalogue-resolved) price.
-        // This ensures oats stored at £0 are still recognised as extras, not meals.
+        // Price floor approach: anything >= MEAL_PRICE_FLOOR is a meal, otherwise an extra.
+        // Unknown price (0) defaults to meal — safer than dropping items.
         const mealSrc = src.filter(i => {
           const pr = effectivePrice(i);
-          return pr <= 0 || Math.abs(pr - STANDARD_PRICE) < 0.01;
+          return pr <= 0 || pr >= MEAL_PRICE_FLOOR;
         });
         const extraSrc = src.filter(i => {
           const pr = effectivePrice(i);
-          return pr > 0 && Math.abs(pr - STANDARD_PRICE) >= 0.01;
+          return pr > 0 && pr < MEAL_PRICE_FLOOR;
         });
 
         const totalMealQty = mealSrc.reduce((s, i) => s + i.quantity, 0);
