@@ -3833,9 +3833,12 @@ export async function registerRoutes(
       }
 
       const items = await storage.getOrderItems(link.orderId);
-      const products = await storage.getProducts();
+      const { categoryName } = await getCurrentWeekInfo();
+      const allProducts = await storage.getProducts();
+      const weekProducts = allProducts.filter(p => p.category === categoryName);
       const SKIP_PAT = /subscription|add delivery|meal sub/i;
-      const availableProducts = products.filter(p => !SKIP_PAT.test(p.name) && parseFloat(p.price ?? "0") > 0);
+      const availableProducts = (weekProducts.length > 0 ? weekProducts : allProducts)
+        .filter(p => !SKIP_PAT.test(p.name) && parseFloat(p.price ?? "0") > 0);
       res.json({
         order: {
           id: order.id,
