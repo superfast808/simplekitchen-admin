@@ -3952,6 +3952,138 @@ export async function registerRoutes(
     }
   });
 
+  // ─── Addon receipt (email + PDF) ────────────────────────────────────────────
+  async function buildAddonReceiptData(orderId: number) {
+    const order = await storage.getOrder(orderId);
+    if (!order) return null;
+    const allItems = await storage.getOrderItems(orderId);
+    const addonItems = allItems.filter(i => i.portalAdded);
+    const total = addonItems.reduce((s, i) => s + parseFloat(i.price ?? "0"), 0);
+    return { order, addonItems, total };
+  }
+
+  app.post("/api/orders/:id/addon-receipt/email", async (req, res) => {
+    if (!req.session.userId) return res.status(401).json({ message: "Unauthorized" });
+    try {
+      const orderId = parseInt(req.params.id);
+      const data = await buildAddonReceiptData(orderId);
+      if (!data) return res.status(404).json({ message: "Order not found" });
+      const { order, addonItems, total } = data;
+      if (!order.customerEmail) return res.status(400).json({ message: "No email address on this order" });
+      if (addonItems.length === 0) return res.status(400).json({ message: "No add-on items on this order" });
+
+      const transporter = await getSmtpTransporter();
+      const fromEmail = await getSmtpFromEmail();
+      if (!transporter || !fromEmail) return res.status(503).json({ message: "Email not configured" });
+
+      const firstName = order.customerName.split(" ")[0];
+      const itemRows = addonItems.map(i =>
+        `<tr>
+          <td style="padding:6px 12px;border-bottom:1px solid #eee;">${i.productName}</td>
+          <td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:center;">${i.quantity}</td>
+          <td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:right;">£${parseFloat(i.price ?? "0").toFixed(2)}</td>
+        </tr>`
+      ).join("");
+
+      const html = `
+<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;color:#333;">
+  <h2 style="color:#059669;">Payment Receipt – Simple Kitchen Prep</h2>
+  <p>Hi ${firstName},</p>
+  <p>Here is your receipt for your add-on extras this week.</p>
+  <table style="width:100%;border-collapse:collapse;margin:20px 0;">
+    <thead>
+      <tr style="background:#f3f4f6;">
+        <th style="padding:8px 12px;text-align:left;">Item</th>
+        <th style="padding:8px 12px;text-align:center;">Qty</th>
+        <th style="padding:8px 12px;text-align:right;">Amount</th>
+      </tr>
+    </thead>
+    <tbody>${itemRows}</tbody>
+    <tfoot>
+      <tr>
+        <td colspan="2" style="padding:8px 12px;font-weight:bold;text-align:right;">Total paid:</td>
+        <td style="padding:8px 12px;font-weight:bold;text-align:right;">£${total.toFixed(2)}</td>
+      </tr>
+    </tfoot>
+  </table>
+  <p style="color:#6b7280;font-size:13px;">Your meals will be ready for collection/delivery as usual this week. If you have any questions, just reply to this email.</p>
+  <p style="color:#6b7280;font-size:13px;">— Simple Kitchen Prep</p>
+</div>`;
+
+      await transporter.sendMail({
+        from: fromEmail,
+        to: order.customerEmail,
+        subject: `Payment receipt – £${total.toFixed(2)} – Simple Kitchen Prep`,
+        html,
+      });
+      res.json({ ok: true });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/orders/:id/addon-receipt/pdf", async (req, res) => {
+    if (!req.session.userId) return res.status(401).json({ message: "Unauthorized" });
+    try {
+      const orderId = parseInt(req.params.id);
+      const data = await buildAddonReceiptData(orderId);
+      if (!data) return res.status(404).json({ message: "Order not found" });
+      const { order, addonItems, total } = data;
+      if (addonItems.length === 0) return res.status(400).json({ message: "No add-on items on this order" });
+
+      const doc = new PDFDocument({ size: "A4", margin: 50 });
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="receipt-order-${orderId}.pdf"`);
+      doc.pipe(res);
+
+      // Header
+      doc.fontSize(20).fillColor("#059669").text("Simple Kitchen Prep", { align: "left" });
+      doc.fontSize(14).fillColor("#111827").text("Add-on Receipt", { align: "left" });
+      doc.moveDown(0.5);
+      doc.fontSize(10).fillColor("#6b7280")
+        .text(`Customer: ${order.customerName}`)
+        .text(`Date: ${new Date(order.orderDate).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}`)
+        .text(`Order #${orderId}`);
+      doc.moveDown(1);
+
+      // Table header
+      const col1 = 50, col2 = 340, col3 = 420, col4 = 500;
+      doc.fontSize(10).fillColor("#374151");
+      doc.rect(50, doc.y, 495, 20).fill("#f3f4f6");
+      const headerY = doc.y + 5;
+      doc.fillColor("#374151")
+        .text("Item", col1, headerY)
+        .text("Qty", col2, headerY, { width: 60, align: "right" })
+        .text("Unit price", col3, headerY, { width: 60, align: "right" })
+        .text("Total", col4, headerY, { width: 60, align: "right" });
+      doc.moveDown(1.5);
+
+      // Rows
+      for (const item of addonItems) {
+        const y = doc.y;
+        const unitPrice = parseFloat(item.price ?? "0") / item.quantity;
+        doc.fontSize(10).fillColor("#111827")
+          .text(item.productName, col1, y, { width: 270 })
+          .text(String(item.quantity), col2, y, { width: 60, align: "right" })
+          .text(`£${unitPrice.toFixed(2)}`, col3, y, { width: 60, align: "right" })
+          .text(`£${parseFloat(item.price ?? "0").toFixed(2)}`, col4, y, { width: 60, align: "right" });
+        doc.moveDown(0.3);
+        doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor("#e5e7eb").stroke();
+        doc.moveDown(0.3);
+      }
+
+      // Total
+      doc.moveDown(0.5);
+      doc.fontSize(11).fillColor("#111827")
+        .text("Total paid:", col3 - 80, doc.y, { width: 140, align: "right" })
+        .text(`£${total.toFixed(2)}`, col4, doc.y - doc.currentLineHeight(), { width: 60, align: "right" });
+
+      doc.end();
+    } catch (error: any) {
+      if (!res.headersSent) res.status(500).json({ message: error.message });
+    }
+  });
+
   startAutoSync();
 
   return httpServer;

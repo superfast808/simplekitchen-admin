@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from "@/components/ui/table";
-import { RefreshCw, Trash2, Plus, ShoppingCart, Download, Tag, Pencil, CalendarCheck, Banknote, MessageSquare, UserCheck, ChevronDown, ChevronUp, ChevronsUpDown, Stamp, Search, X, UserPlus, ArrowUpFromLine, CheckCircle2, AlertCircle, ChevronLeft, ChevronRight, Link2 } from "lucide-react";
+import { RefreshCw, Trash2, Plus, ShoppingCart, Download, Tag, Pencil, CalendarCheck, Banknote, MessageSquare, UserCheck, ChevronDown, ChevronUp, ChevronsUpDown, Stamp, Search, X, UserPlus, ArrowUpFromLine, CheckCircle2, AlertCircle, ChevronLeft, ChevronRight, Link2, Mail, FileDown } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -284,6 +284,32 @@ export default function OrdersPage() {
       toast({ title: "Failed to generate link", description: error.message, variant: "destructive" });
     },
   });
+
+  const sendReceiptMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await apiRequest("POST", `/api/orders/${id}/addon-receipt/email`);
+      if (!res.ok) { const e = await res.json(); throw new Error(e.message); }
+      return res.json();
+    },
+    onSuccess: () => toast({ title: "Receipt email sent" }),
+    onError: (error: Error) => toast({ title: "Failed to send receipt", description: error.message, variant: "destructive" }),
+  });
+
+  async function downloadAddonReceiptPdf(orderId: number, customerName: string) {
+    try {
+      const res = await fetch(`/api/orders/${orderId}/addon-receipt/pdf`, { credentials: "include" });
+      if (!res.ok) { const e = await res.json(); throw new Error(e.message); }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `receipt-${customerName.replace(/\s+/g, "-").toLowerCase()}-addon.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      toast({ title: "Failed to download receipt", description: e.message, variant: "destructive" });
+    }
+  }
 
   const allProductNames = Array.from(new Set((orders || []).flatMap(o => o.items.map(i => i.productName))))
     .sort((a, b) => {
@@ -729,6 +755,39 @@ export default function OrdersPage() {
                               </TooltipTrigger>
                               <TooltipContent>Generate add-on payment link</TooltipContent>
                             </Tooltip>
+                          )}
+                          {order.items.some(i => i.portalAdded) && (
+                            <>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    className="w-5 h-5 text-emerald-600 hover:text-emerald-700"
+                                    onClick={() => sendReceiptMutation.mutate(order.id)}
+                                    disabled={sendReceiptMutation.isPending}
+                                    data-testid={`button-send-receipt-${order.id}`}
+                                  >
+                                    <Mail className="w-3 h-3" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Send add-on receipt email</TooltipContent>
+                              </Tooltip>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    className="w-5 h-5 text-emerald-600 hover:text-emerald-700"
+                                    onClick={() => downloadAddonReceiptPdf(order.id, order.customerName)}
+                                    data-testid={`button-download-receipt-${order.id}`}
+                                  >
+                                    <FileDown className="w-3 h-3" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Download add-on receipt PDF</TooltipContent>
+                              </Tooltip>
+                            </>
                           )}
                           {!order.isTuesday && (() => {
                             const delivDate = getDeliveryDateForOrder(order.orderDate, false);
