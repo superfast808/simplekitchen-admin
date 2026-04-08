@@ -3803,6 +3803,35 @@ export async function registerRoutes(
       if (link.completedAt) return res.status(410).json({ message: "This link has already been used" });
       const order = await storage.getOrder(link.orderId);
       if (!order) return res.status(404).json({ message: "Order not found" });
+      // Return only validity info — no order details until email is verified
+      res.json({
+        valid: true,
+        expiresAt: link.expiresAt,
+        requiresEmail: !!order.customerEmail,
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/addon/:token/verify", async (req, res) => {
+    try {
+      const link = await storage.getAddonLink(req.params.token);
+      if (!link) return res.status(404).json({ message: "Link not found" });
+      if (new Date() > new Date(link.expiresAt)) return res.status(410).json({ message: "Link has expired" });
+      if (link.completedAt) return res.status(410).json({ message: "This link has already been used" });
+      const order = await storage.getOrder(link.orderId);
+      if (!order) return res.status(404).json({ message: "Order not found" });
+
+      // Validate email if the order has one on record
+      if (order.customerEmail) {
+        const submitted = (req.body.email || "").trim().toLowerCase();
+        const expected = order.customerEmail.trim().toLowerCase();
+        if (submitted !== expected) {
+          return res.status(403).json({ message: "Email address doesn't match our records" });
+        }
+      }
+
       const items = await storage.getOrderItems(link.orderId);
       const products = await storage.getProducts();
       const SKIP_PAT = /subscription|add delivery|meal sub/i;

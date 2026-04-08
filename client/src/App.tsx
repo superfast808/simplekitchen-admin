@@ -28,6 +28,29 @@ import PaymentSuccessPage from "@/pages/payment-success";
 import AddonPage from "@/pages/addon";
 import LoginPage from "@/pages/login";
 
+function isPublicRoute(location: string) {
+  return (
+    location.startsWith("/subscribe/") ||
+    location.startsWith("/addon/")
+  );
+}
+
+function PublicRoutes() {
+  return (
+    <Switch>
+      <Route path="/subscribe/:token/payment-success">
+        {(params) => <PaymentSuccessPage params={params} />}
+      </Route>
+      <Route path="/subscribe/:token">
+        {(params) => <SubscribePage params={params} />}
+      </Route>
+      <Route path="/addon/:token">
+        {(params) => <AddonPage params={params} />}
+      </Route>
+    </Switch>
+  );
+}
+
 function PageRouter() {
   return (
     <Switch>
@@ -79,13 +102,7 @@ function AuthenticatedApp({ username, onLogout }: { username: string; onLogout: 
   );
 }
 
-function AppContent() {
-  const [location] = useLocation();
-
-  const isPublicSubscribe = location.startsWith("/subscribe/");
-  const isPublicPayment = isPublicSubscribe && location.includes("/payment-success");
-  const isPublicAddon = location.startsWith("/addon/");
-
+function PortalApp() {
   const { data: user, isLoading, refetch } = useQuery<{ id: string; username: string } | null>({
     queryKey: ["/api/auth/me"],
     queryFn: async () => {
@@ -96,35 +113,9 @@ function AppContent() {
     },
     retry: false,
     staleTime: Infinity,
-    enabled: !isPublicSubscribe && !isPublicPayment && !isPublicAddon,
   });
 
-  if (isPublicSubscribe || isPublicPayment) {
-    return (
-      <Switch>
-        <Route path="/subscribe/:token/payment-success">
-          {(params) => <PaymentSuccessPage params={params} />}
-        </Route>
-        <Route path="/subscribe/:token">
-          {(params) => <SubscribePage params={params} />}
-        </Route>
-      </Switch>
-    );
-  }
-
-  if (isPublicAddon) {
-    return (
-      <Switch>
-        <Route path="/addon/:token">
-          {(params) => <AddonPage params={params} />}
-        </Route>
-      </Switch>
-    );
-  }
-
-  const handleLogin = () => {
-    refetch();
-  };
+  const handleLogin = () => refetch();
 
   const handleLogout = async () => {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -145,6 +136,16 @@ function AppContent() {
   }
 
   return <AuthenticatedApp username={user.username} onLogout={handleLogout} />;
+}
+
+function AppContent() {
+  const [location] = useLocation();
+
+  if (isPublicRoute(location)) {
+    return <PublicRoutes />;
+  }
+
+  return <PortalApp />;
 }
 
 export default function App() {
