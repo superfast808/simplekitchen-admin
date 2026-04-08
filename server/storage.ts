@@ -420,10 +420,24 @@ export class DatabaseStorage implements IStorage {
   }
 
   async upsertStandardIngredient(name: string, costPerG: string, unit: string): Promise<StandardIngredient> {
+    const trimmed = name.trim();
+    // Case-insensitive lookup so "Chicken" and "chicken" resolve to the same entry
+    const existing = await db
+      .select()
+      .from(standardIngredients)
+      .where(sql`LOWER(${standardIngredients.name}) = LOWER(${trimmed})`)
+      .limit(1);
+    if (existing.length > 0) {
+      const [updated] = await db
+        .update(standardIngredients)
+        .set({ costPerG, unit })
+        .where(eq(standardIngredients.id, existing[0].id))
+        .returning();
+      return updated;
+    }
     const [row] = await db
       .insert(standardIngredients)
-      .values({ name, costPerG, unit })
-      .onConflictDoUpdate({ target: standardIngredients.name, set: { costPerG, unit } })
+      .values({ name: trimmed, costPerG, unit })
       .returning();
     return row;
   }

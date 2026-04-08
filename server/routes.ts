@@ -1014,12 +1014,14 @@ export async function registerRoutes(
       for (const ingredient of allIngredients) {
         const productName = nameByProductId[ingredient.productId];
         if (!productName) continue;
-        const dedupeKey = `${productName}|${ingredient.name}|${ingredient.unit}`;
+        const ingNameNorm = ingredient.name.toLowerCase().trim();
+        const ingUnitNorm = ingredient.unit.toLowerCase().trim();
+        const dedupeKey = `${productName}|${ingNameNorm}|${ingUnitNorm}`;
         if (seenIngredient.has(dedupeKey)) continue;
         seenIngredient.add(dedupeKey);
         const productQty = quantsByName[productName] || 0;
         if (productQty > 0) {
-          const key = `${ingredient.name}_${ingredient.unit}`;
+          const key = `${ingNameNorm}_${ingUnitNorm}`;
           const needed = productQty * parseFloat(ingredient.quantityPerUnit);
           if (!summary[key]) {
             summary[key] = { name: ingredient.name, totalQuantity: 0, unit: ingredient.unit };
@@ -1078,7 +1080,7 @@ export async function registerRoutes(
         const product = allProducts.find(p => p.id === ing.productId);
         if (!product) continue;
         const productName = product.name.toLowerCase().trim();
-        const dedupe = `${productName}|${ing.name}|${ing.unit}`;
+        const dedupe = `${productName}|${ing.name.toLowerCase().trim()}|${ing.unit.toLowerCase().trim()}`;
         if (seenIngredientKeys.has(dedupe)) continue;
         seenIngredientKeys.add(dedupe);
         if (!ingredientsByProductName[productName]) ingredientsByProductName[productName] = [];
@@ -1114,7 +1116,7 @@ export async function registerRoutes(
           orderedQuantity: orderedQty,
           ingredients: pIngredients.map(ing => {
             const totalNeeded = orderedQty * parseFloat(ing.quantityPerUnit);
-            const key = `${ing.name}_${ing.unit}`;
+            const key = `${ing.name.toLowerCase().trim()}_${ing.unit.toLowerCase().trim()}`;
             const costPerG = (ing as any).costPerG != null ? String((ing as any).costPerG) : null;
             const costPerMeal = costPerG != null ? parseFloat(costPerG) * parseFloat(ing.quantityPerUnit) : null;
             const totalCost = costPerG != null ? totalNeeded * parseFloat(costPerG) : null;
@@ -1159,8 +1161,17 @@ export async function registerRoutes(
         storage.getAllIngredients(),
         storage.getStandardIngredients(),
       ]);
-      const uniqueNames = Array.from(new Set(allIngredients.map(i => i.name))).sort();
-      const uniqueUnits = Array.from(new Set(allIngredients.map(i => i.unit))).sort();
+      // Deduplicate case-insensitively, preserving first-seen display name
+      const nameMap = new Map<string, string>();
+      const unitMap = new Map<string, string>();
+      for (const i of allIngredients) {
+        const nk = i.name.toLowerCase().trim();
+        if (!nameMap.has(nk)) nameMap.set(nk, i.name.trim());
+        const uk = i.unit.toLowerCase().trim();
+        if (!unitMap.has(uk)) unitMap.set(uk, i.unit.trim());
+      }
+      const uniqueNames = Array.from(nameMap.values()).sort();
+      const uniqueUnits = Array.from(unitMap.values()).sort();
       res.json({ names: uniqueNames, units: uniqueUnits, standards });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
