@@ -1,12 +1,12 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useState, useRef, useEffect, useMemo } from "react";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
-import { RefreshCw, Package, ChevronRight, X, Plus, Save, ArrowDownToLine } from "lucide-react";
+import { RefreshCw, Package, ChevronRight, X, Plus, Save, ArrowDownToLine, Pencil, Trash2, Check, ChevronDown, ChevronUp } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { Product, Ingredient } from "@shared/schema";
@@ -96,6 +96,180 @@ function AutocompleteInput({
         </div>
       )}
     </div>
+  );
+}
+
+type StandardIngredient = { id: number; name: string; costPerG: string; unit: string };
+
+function StandardIngredientsLibrary() {
+  const { toast } = useToast();
+  const [expanded, setExpanded] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editValues, setEditValues] = useState<{ name: string; costPerG: string; unit: string }>({ name: "", costPerG: "", unit: "" });
+  const [newRow, setNewRow] = useState<{ name: string; costPerG: string; unit: string } | null>(null);
+
+  const { data: standards, isLoading } = useQuery<StandardIngredient[]>({
+    queryKey: ["/api/standard-ingredients"],
+    enabled: expanded,
+  });
+
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ["/api/standard-ingredients"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/ingredient-names"] });
+  };
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, ...data }: { id: number; name: string; costPerG: string; unit: string }) =>
+      apiRequest("PUT", `/api/standard-ingredients/${id}`, data),
+    onSuccess: () => { invalidate(); setEditingId(null); toast({ title: "Saved" }); },
+    onError: (e: Error) => toast({ title: "Save failed", description: e.message, variant: "destructive" }),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => apiRequest("DELETE", `/api/standard-ingredients/${id}`),
+    onSuccess: () => { invalidate(); toast({ title: "Deleted" }); },
+    onError: (e: Error) => toast({ title: "Delete failed", description: e.message, variant: "destructive" }),
+  });
+
+  const addMutation = useMutation({
+    mutationFn: (data: { name: string; costPerG: string; unit: string }) =>
+      apiRequest("POST", "/api/standard-ingredients", data),
+    onSuccess: () => { invalidate(); setNewRow(null); toast({ title: "Added to library" }); },
+    onError: (e: Error) => toast({ title: "Add failed", description: e.message, variant: "destructive" }),
+  });
+
+  const startEdit = (s: StandardIngredient) => {
+    setEditingId(s.id);
+    setEditValues({ name: s.name, costPerG: s.costPerG ?? "", unit: s.unit });
+  };
+
+  const cancelEdit = () => setEditingId(null);
+
+  const saveEdit = () => {
+    if (!editingId) return;
+    updateMutation.mutate({ id: editingId, ...editValues });
+  };
+
+  const saveNew = () => {
+    if (!newRow || !newRow.name.trim() || !newRow.costPerG.trim() || !newRow.unit.trim()) {
+      toast({ title: "All fields required", variant: "destructive" }); return;
+    }
+    addMutation.mutate(newRow);
+  };
+
+  return (
+    <Card data-testid="card-ingredients-library">
+      <CardHeader
+        className="cursor-pointer select-none py-4"
+        onClick={() => setExpanded(v => !v)}
+      >
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-base font-medium">Standard Ingredients Library</CardTitle>
+          {expanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+        </div>
+        <p className="text-sm text-muted-foreground">£/g costs shared across all products</p>
+      </CardHeader>
+
+      {expanded && (
+        <CardContent className="pt-0">
+          {isLoading ? (
+            <Skeleton className="h-32 w-full" />
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-muted-foreground text-xs">
+                    <th className="text-left py-2 pr-4 font-medium w-1/2">Name</th>
+                    <th className="text-left py-2 pr-4 font-medium">£/g</th>
+                    <th className="text-left py-2 pr-4 font-medium">Unit</th>
+                    <th className="w-20" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {(standards ?? []).map(s => (
+                    <tr key={s.id} className="border-b last:border-0 group" data-testid={`row-library-${s.id}`}>
+                      {editingId === s.id ? (
+                        <>
+                          <td className="py-1.5 pr-2">
+                            <Input value={editValues.name} onChange={e => setEditValues(v => ({ ...v, name: e.target.value }))} className="h-7 text-sm" data-testid="input-library-edit-name" />
+                          </td>
+                          <td className="py-1.5 pr-2">
+                            <Input type="number" value={editValues.costPerG} onChange={e => setEditValues(v => ({ ...v, costPerG: e.target.value }))} className="h-7 text-sm w-28" step="0.000001" data-testid="input-library-edit-cost" />
+                          </td>
+                          <td className="py-1.5 pr-2">
+                            <Input value={editValues.unit} onChange={e => setEditValues(v => ({ ...v, unit: e.target.value }))} className="h-7 text-sm w-20" data-testid="input-library-edit-unit" />
+                          </td>
+                          <td className="py-1.5">
+                            <div className="flex gap-1">
+                              <Button size="icon" variant="ghost" className="h-7 w-7" onClick={saveEdit} disabled={updateMutation.isPending} data-testid="button-library-save-edit">
+                                <Check className="w-3.5 h-3.5 text-green-600" />
+                              </Button>
+                              <Button size="icon" variant="ghost" className="h-7 w-7" onClick={cancelEdit} data-testid="button-library-cancel-edit">
+                                <X className="w-3.5 h-3.5" />
+                              </Button>
+                            </div>
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td className="py-2 pr-4 font-medium" data-testid={`text-library-name-${s.id}`}>{s.name}</td>
+                          <td className="py-2 pr-4 text-muted-foreground" data-testid={`text-library-cost-${s.id}`}>{s.costPerG ? `£${parseFloat(s.costPerG).toFixed(6)}` : "—"}</td>
+                          <td className="py-2 pr-4 text-muted-foreground">{s.unit}</td>
+                          <td className="py-2">
+                            <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => startEdit(s)} data-testid={`button-library-edit-${s.id}`}>
+                                <Pencil className="w-3.5 h-3.5" />
+                              </Button>
+                              <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => deleteMutation.mutate(s.id)} disabled={deleteMutation.isPending} data-testid={`button-library-delete-${s.id}`}>
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </Button>
+                            </div>
+                          </td>
+                        </>
+                      )}
+                    </tr>
+                  ))}
+
+                  {/* New row */}
+                  {newRow ? (
+                    <tr className="border-t">
+                      <td className="py-1.5 pr-2">
+                        <Input value={newRow.name} onChange={e => setNewRow(v => v ? { ...v, name: e.target.value } : v)} placeholder="Ingredient name" className="h-7 text-sm" data-testid="input-library-new-name" />
+                      </td>
+                      <td className="py-1.5 pr-2">
+                        <Input type="number" value={newRow.costPerG} onChange={e => setNewRow(v => v ? { ...v, costPerG: e.target.value } : v)} placeholder="0.0000" className="h-7 text-sm w-28" step="0.000001" data-testid="input-library-new-cost" />
+                      </td>
+                      <td className="py-1.5 pr-2">
+                        <Input value={newRow.unit} onChange={e => setNewRow(v => v ? { ...v, unit: e.target.value } : v)} placeholder="g" className="h-7 text-sm w-20" data-testid="input-library-new-unit" />
+                      </td>
+                      <td className="py-1.5">
+                        <div className="flex gap-1">
+                          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={saveNew} disabled={addMutation.isPending} data-testid="button-library-save-new">
+                            <Check className="w-3.5 h-3.5 text-green-600" />
+                          </Button>
+                          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setNewRow(null)} data-testid="button-library-cancel-new">
+                            <X className="w-3.5 h-3.5" />
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : (
+                    <tr>
+                      <td colSpan={4} className="pt-3">
+                        <Button size="sm" variant="outline" onClick={() => setNewRow({ name: "", costPerG: "", unit: "g" })} data-testid="button-library-add-new">
+                          <Plus className="w-3 h-3 mr-1" />
+                          Add ingredient
+                        </Button>
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      )}
+    </Card>
   );
 }
 
@@ -190,6 +364,8 @@ export default function ProductsPage() {
         </div>
       )}
 
+      <StandardIngredientsLibrary />
+
       {selectedProduct && (
         <IngredientsDialog
           product={selectedProduct}
@@ -209,7 +385,6 @@ function IngredientsDialog({ product, open, onOpenChange }: { product: Product; 
     enabled: open,
   });
 
-  type StandardIngredient = { id: number; name: string; costPerG: string; unit: string };
   const { data: knownIngredients } = useQuery<{ names: string[]; units: string[]; standards: StandardIngredient[] }>({
     queryKey: ["/api/ingredient-names"],
     enabled: open,

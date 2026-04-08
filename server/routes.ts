@@ -1200,8 +1200,12 @@ export async function registerRoutes(
   app.put("/api/standard-ingredients/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const { costPerG, unit } = req.body;
-      const updated = await storage.updateStandardIngredient(id, { costPerG, unit });
+      const { name, costPerG, unit } = req.body;
+      const updated = await storage.updateStandardIngredient(id, {
+        ...(name !== undefined ? { name: name.trim() } : {}),
+        ...(costPerG !== undefined ? { costPerG } : {}),
+        ...(unit !== undefined ? { unit } : {}),
+      });
       if (!updated) return res.status(404).json({ message: "Not found" });
       res.json(updated);
     } catch (error: any) {
