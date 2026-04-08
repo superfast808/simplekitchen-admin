@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { eq, gte, lte, and, sql, desc, isNotNull } from "drizzle-orm";
+import { eq, gte, lte, and, sql, desc, isNotNull, isNull } from "drizzle-orm";
 import {
   products, ingredients, orders, orderItems, manualQuantities, settings, users,
   subscriptionInvites, subscriptionSelections, recurringOrders, recurringOrderItems,
@@ -93,6 +93,8 @@ export interface IStorage {
   getPortalAddedItems(orderId: number): Promise<OrderItem[]>;
   createAddonLink(token: string, orderId: number, expiresAt: Date): Promise<AddonLink>;
   getAddonLink(token: string): Promise<AddonLink | undefined>;
+  getAddonLinkByOrderId(orderId: number): Promise<AddonLink | undefined>;
+  getPendingAddonLinks(): Promise<AddonLink[]>;
   updateAddonLink(token: string, data: { stripeSessionId?: string; pendingItems?: string; completedAt?: Date }): Promise<void>;
 }
 
@@ -469,6 +471,19 @@ export class DatabaseStorage implements IStorage {
   async getAddonLink(token: string): Promise<AddonLink | undefined> {
     const [link] = await db.select().from(addonLinks).where(eq(addonLinks.token, token));
     return link;
+  }
+
+  async getAddonLinkByOrderId(orderId: number): Promise<AddonLink | undefined> {
+    const [link] = await db.select().from(addonLinks)
+      .where(eq(addonLinks.orderId, orderId))
+      .orderBy(desc(addonLinks.createdAt))
+      .limit(1);
+    return link;
+  }
+
+  async getPendingAddonLinks(): Promise<AddonLink[]> {
+    return db.select().from(addonLinks)
+      .where(and(isNotNull(addonLinks.stripeSessionId), isNull(addonLinks.completedAt)));
   }
 
   async updateAddonLink(token: string, data: { stripeSessionId?: string; pendingItems?: string; completedAt?: Date }): Promise<void> {

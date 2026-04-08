@@ -751,6 +751,10 @@ export async function registerRoutes(
       );
       applyAddDeliveryUpgrades(ordersWithItems);
 
+      // Annotate orders with pending (paid but unprocessed) addon links
+      const pendingLinks = await storage.getPendingAddonLinks();
+      const pendingByOrderId = new Map(pendingLinks.map(l => [l.orderId, l.token]));
+
       // Build subscription-stamp annotation: map stamped order ID → parent WooCommerce order total
       const allInvites = await storage.getSubscriptionInvites();
       const stampedToParentId = new Map<number, number>();
@@ -777,6 +781,7 @@ export async function registerRoutes(
           ...o,
           isSubscriptionStamped: stampedToParentId.has(o.id),
           parentOrderTotal: parentId != null ? (parentIdToTotal.get(parentId) ?? null) : null,
+          pendingAddonToken: pendingByOrderId.get(o.id) ?? null,
         };
       });
 
@@ -3915,6 +3920,58 @@ export async function registerRoutes(
     }
   });
 
+  async function sendAddonReceiptEmail(orderId: number, items: Array<{ productName: string; quantity: number; price: string }>) {
+    try {
+      const order = await storage.getOrder(orderId);
+      if (!order?.customerEmail) return;
+      const transporter = await getSmtpTransporter();
+      const fromEmail = await getSmtpFromEmail();
+      if (!transporter || !fromEmail) return;
+      const firstName = order.customerName.split(" ")[0];
+      const total = items.reduce((s, i) => s + parseFloat(i.price), 0);
+      const itemRows = items.map(i =>
+        `<tr>
+          <td style="padding:6px 12px;border-bottom:1px solid #eee;">${i.productName}</td>
+          <td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:center;">${i.quantity}</td>
+          <td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:right;">£${parseFloat(i.price).toFixed(2)}</td>
+        </tr>`
+      ).join("");
+      const html = `
+<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;color:#333;">
+  <h2 style="color:#059669;">Payment Receipt – Simple Kitchen Prep</h2>
+  <p>Hi ${firstName},</p>
+  <p>Thank you for your payment! Here's your receipt for your add-on extras this week.</p>
+  <table style="width:100%;border-collapse:collapse;margin:20px 0;">
+    <thead>
+      <tr style="background:#f3f4f6;">
+        <th style="padding:8px 12px;text-align:left;">Item</th>
+        <th style="padding:8px 12px;text-align:center;">Qty</th>
+        <th style="padding:8px 12px;text-align:right;">Amount</th>
+      </tr>
+    </thead>
+    <tbody>${itemRows}</tbody>
+    <tfoot>
+      <tr>
+        <td colspan="2" style="padding:8px 12px;font-weight:bold;text-align:right;">Total paid:</td>
+        <td style="padding:8px 12px;font-weight:bold;text-align:right;">£${total.toFixed(2)}</td>
+      </tr>
+    </tfoot>
+  </table>
+  <p style="color:#6b7280;font-size:13px;">Your meals will be ready for collection/delivery as usual this week. If you have any questions, just reply to this email.</p>
+  <p style="color:#6b7280;font-size:13px;">— Simple Kitchen Prep</p>
+</div>`;
+      await transporter.sendMail({
+        from: fromEmail,
+        to: order.customerEmail,
+        subject: `Payment receipt – £${total.toFixed(2)} – Simple Kitchen Prep`,
+        html,
+      });
+      log(`Receipt email sent to ${order.customerEmail} for order ${orderId}`, "addon");
+    } catch (e: any) {
+      log(`Receipt email failed for order ${orderId}: ${e.message}`, "addon");
+    }
+  }
+
   app.get("/api/addon/:token/success", async (req, res) => {
     try {
       const link = await storage.getAddonLink(req.params.token);
@@ -3933,20 +3990,61 @@ export async function registerRoutes(
       const pendingItems: Array<{ productId: number; productName: string; quantity: number; price: string }> =
         JSON.parse(link.pendingItems ?? "[]");
 
+      const insertedItems: Array<{ productName: string; quantity: number; price: string }> = [];
       for (const item of pendingItems) {
-        const product = await storage.getProduct(item.productId);
+        const lineTotal = String(parseFloat(item.price) * item.quantity);
         await storage.createOrderItem({
           orderId: link.orderId,
           productId: item.productId,
           productName: item.productName,
           quantity: item.quantity,
-          price: String(parseFloat(item.price) * item.quantity),
+          price: lineTotal,
           portalAdded: true,
         });
+        insertedItems.push({ productName: item.productName, quantity: item.quantity, price: lineTotal });
       }
 
       await storage.updateAddonLink(link.token, { completedAt: new Date() });
+      sendAddonReceiptEmail(link.orderId, insertedItems);
       res.json({ success: true, orderId: link.orderId });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // ─── Admin: reprocess a pending (paid but unprocessed) addon link ───────────
+  app.post("/api/orders/:id/addon-link/reprocess", async (req, res) => {
+    if (!req.session.userId) return res.status(401).json({ message: "Unauthorized" });
+    try {
+      const orderId = parseInt(req.params.id);
+      const link = await storage.getAddonLinkByOrderId(orderId);
+      if (!link) return res.status(404).json({ message: "No addon link found for this order" });
+      if (link.completedAt) return res.status(409).json({ message: "Already processed" });
+      if (!link.stripeSessionId) return res.status(400).json({ message: "No Stripe session on this link" });
+
+      const stripe = await getUncachableStripeClient(await getActiveStripeSecretKey());
+      const session = await stripe.checkout.sessions.retrieve(link.stripeSessionId);
+      if (session.payment_status !== "paid") return res.status(402).json({ message: "Stripe payment not confirmed" });
+
+      const pendingItems: Array<{ productId: number; productName: string; quantity: number; price: string }> =
+        JSON.parse(link.pendingItems ?? "[]");
+      const insertedItems: Array<{ productName: string; quantity: number; price: string }> = [];
+      for (const item of pendingItems) {
+        const lineTotal = String(parseFloat(item.price) * item.quantity);
+        await storage.createOrderItem({
+          orderId: link.orderId,
+          productId: item.productId,
+          productName: item.productName,
+          quantity: item.quantity,
+          price: lineTotal,
+          portalAdded: true,
+        });
+        insertedItems.push({ productName: item.productName, quantity: item.quantity, price: lineTotal });
+      }
+      await storage.updateAddonLink(link.token, { completedAt: new Date() });
+      log(`Admin reprocessed addon link ${link.token} for order ${orderId} — ${pendingItems.length} items added`, "addon");
+      sendAddonReceiptEmail(orderId, insertedItems);
+      res.json({ ok: true, itemsAdded: pendingItems.length });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }

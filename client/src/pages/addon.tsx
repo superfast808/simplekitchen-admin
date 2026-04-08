@@ -322,3 +322,78 @@ export default function AddonPage({ params }: { params: { token: string } }) {
     </div>
   );
 }
+
+export function AddonSuccessPage({ params }: { params: { token: string } }) {
+  const token = params.token;
+  const sessionId = new URLSearchParams(window.location.search).get("session_id") ?? "";
+
+  const { data, isLoading, error } = useQuery<{ success?: boolean; alreadyCompleted?: boolean; orderId?: number }>({
+    queryKey: ["/api/addon", token, "success", sessionId],
+    queryFn: async () => {
+      const url = `/api/addon/${token}/success${sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ""}`;
+      const res = await fetch(url);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message || "Could not confirm payment");
+      }
+      return res.json();
+    },
+    retry: false,
+    enabled: !!sessionId,
+  });
+
+  if (!sessionId) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
+        <div className="text-center max-w-sm">
+          <AlertTriangle className="w-12 h-12 text-amber-500 mx-auto mb-3" />
+          <h2 className="text-lg font-semibold text-gray-900 mb-1">Missing payment info</h2>
+          <p className="text-gray-500 text-sm">This link looks incomplete. Please contact us if you believe you were charged.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <Loader2 className="w-10 h-10 animate-spin text-green-600 mx-auto mb-4" />
+          <p className="text-gray-600 text-sm">Confirming your payment…</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
+        <div className="text-center max-w-sm">
+          <AlertTriangle className="w-12 h-12 text-amber-500 mx-auto mb-3" />
+          <h2 className="text-lg font-semibold text-gray-900 mb-2">Something went wrong</h2>
+          <p className="text-gray-500 text-sm mb-2">{(error as Error).message}</p>
+          <p className="text-gray-400 text-xs">If you were charged, don't worry — please contact us and we'll sort it out.</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
+      <div className="text-center max-w-sm">
+        <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4">
+          <CheckCircle className="w-9 h-9 text-green-600" />
+        </div>
+        <h1 className="text-xl font-bold text-gray-900 mb-2">
+          {data?.alreadyCompleted ? "Already confirmed" : "Payment confirmed!"}
+        </h1>
+        <p className="text-gray-500 text-sm leading-relaxed">
+          {data?.alreadyCompleted
+            ? "Your items were already added to your order."
+            : "Your items have been added to your order. You'll receive a receipt by email shortly."}
+        </p>
+        <p className="text-gray-400 text-xs mt-4">Simple Kitchen Prep</p>
+      </div>
+    </div>
+  );
+}

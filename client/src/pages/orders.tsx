@@ -285,6 +285,19 @@ export default function OrdersPage() {
     },
   });
 
+  const reprocessAddonMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await apiRequest("POST", `/api/orders/${id}/addon-link/reprocess`);
+      if (!res.ok) { const e = await res.json(); throw new Error(e.message); }
+      return res.json() as Promise<{ itemsAdded: number }>;
+    },
+    onSuccess: ({ itemsAdded }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      toast({ title: `Payment recovered — ${itemsAdded} item${itemsAdded !== 1 ? "s" : ""} added to order` });
+    },
+    onError: (error: Error) => toast({ title: "Recovery failed", description: error.message, variant: "destructive" }),
+  });
+
   const sendReceiptMutation = useMutation({
     mutationFn: async (id: number) => {
       const res = await apiRequest("POST", `/api/orders/${id}/addon-receipt/email`);
@@ -754,6 +767,23 @@ export default function OrdersPage() {
                                 </Button>
                               </TooltipTrigger>
                               <TooltipContent>Generate add-on payment link</TooltipContent>
+                            </Tooltip>
+                          )}
+                          {(order as any).pendingAddonToken && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className="w-5 h-5 text-amber-500 hover:text-amber-600 animate-pulse"
+                                  onClick={() => reprocessAddonMutation.mutate(order.id)}
+                                  disabled={reprocessAddonMutation.isPending}
+                                  data-testid={`button-recover-addon-${order.id}`}
+                                >
+                                  <AlertCircle className="w-3 h-3" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>Recover unprocessed addon payment — click to add items</TooltipContent>
                             </Tooltip>
                           )}
                           {order.items.some(i => i.portalAdded) && (

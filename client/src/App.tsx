@@ -25,7 +25,7 @@ import TuesdayOrdersPage from "@/pages/tuesday-orders";
 import SaturdayOrdersPage from "@/pages/saturday-orders";
 import SubscribePage from "@/pages/subscribe";
 import PaymentSuccessPage from "@/pages/payment-success";
-import AddonPage from "@/pages/addon";
+import AddonPage, { AddonSuccessPage } from "@/pages/addon";
 import LoginPage from "@/pages/login";
 
 function isPublicRoute(location: string) {
@@ -43,6 +43,9 @@ function PublicRoutes() {
       </Route>
       <Route path="/subscribe/:token">
         {(params) => <SubscribePage params={params} />}
+      </Route>
+      <Route path="/addon/:token/success">
+        {(params) => <AddonSuccessPage params={params} />}
       </Route>
       <Route path="/addon/:token">
         {(params) => <AddonPage params={params} />}
