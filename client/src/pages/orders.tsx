@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from "@/components/ui/table";
-import { RefreshCw, Trash2, Plus, ShoppingCart, Download, Tag, Pencil, CalendarCheck, Banknote, MessageSquare, UserCheck, ChevronDown, ChevronUp, ChevronsUpDown, Stamp, Search, X, UserPlus, ArrowUpFromLine, CheckCircle2, AlertCircle, ChevronLeft, ChevronRight } from "lucide-react";
+import { RefreshCw, Trash2, Plus, ShoppingCart, Download, Tag, Pencil, CalendarCheck, Banknote, MessageSquare, UserCheck, ChevronDown, ChevronUp, ChevronsUpDown, Stamp, Search, X, UserPlus, ArrowUpFromLine, CheckCircle2, AlertCircle, ChevronLeft, ChevronRight, Link2 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -264,6 +264,24 @@ export default function OrdersPage() {
     },
     onError: (error: Error) => {
       toast({ title: "Failed to move order", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const addonLinkMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await apiRequest("POST", `/api/orders/${id}/addon-link`);
+      return res.json() as Promise<{ url: string }>;
+    },
+    onSuccess: async ({ url }) => {
+      try {
+        await navigator.clipboard.writeText(url);
+        toast({ title: "Link copied to clipboard", description: url });
+      } catch {
+        toast({ title: "Addon link generated", description: url });
+      }
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to generate link", description: error.message, variant: "destructive" });
     },
   });
 
@@ -694,6 +712,23 @@ export default function OrdersPage() {
                           <span data-testid={`text-customer-${order.id}`}>{order.customerName}</span>
                           {order.isManual && (
                             <Badge variant="outline" className="text-xs">Manual</Badge>
+                          )}
+                          {!order.isManual && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className="w-5 h-5 text-muted-foreground/50 hover:text-primary"
+                                  onClick={() => addonLinkMutation.mutate(order.id)}
+                                  disabled={addonLinkMutation.isPending}
+                                  data-testid={`button-addon-link-${order.id}`}
+                                >
+                                  <Link2 className="w-3 h-3" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>Generate add-on payment link</TooltipContent>
+                            </Tooltip>
                           )}
                           {!order.isTuesday && (() => {
                             const delivDate = getDeliveryDateForOrder(order.orderDate, false);

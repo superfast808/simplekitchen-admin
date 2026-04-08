@@ -457,6 +457,8 @@ async function performSync() {
           orderData.notes = null;
         }
         await storage.updateOrder(existing.id, orderData);
+        // Preserve any portal-added items before clearing WooCommerce items
+        const portalItems = await storage.getPortalAddedItems(existing.id);
         await storage.deleteOrderItemsByOrderId(existing.id);
         for (const item of wo.line_items || []) {
           let product = await storage.getProductByWooId(item.product_id);
@@ -467,6 +469,16 @@ async function performSync() {
             productName: decodeHtmlEntities(item.name),
             quantity: item.quantity,
             price: String(item.total || "0"),
+          });
+        }
+        for (const pi of portalItems) {
+          await storage.createOrderItem({
+            orderId: existing.id,
+            productId: pi.productId,
+            productName: pi.productName,
+            quantity: pi.quantity,
+            price: pi.price ?? "0",
+            portalAdded: true,
           });
         }
         updated++;
@@ -1280,6 +1292,8 @@ export async function registerRoutes(
             orderData.deliveryLng = null;
           }
           await storage.updateOrder(existing.id, orderData);
+          // Preserve any portal-added items before clearing WooCommerce items
+          const portalItems = await storage.getPortalAddedItems(existing.id);
           await storage.deleteOrderItemsByOrderId(existing.id);
           for (const item of wo.line_items || []) {
             const product = await storage.getProductByWooId(item.product_id);
@@ -1289,6 +1303,16 @@ export async function registerRoutes(
               productName: decodeHtmlEntities(item.name),
               quantity: item.quantity,
               price: String(item.total || "0"),
+            });
+          }
+          for (const pi of portalItems) {
+            await storage.createOrderItem({
+              orderId: existing.id,
+              productId: pi.productId,
+              productName: pi.productName,
+              quantity: pi.quantity,
+              price: pi.price ?? "0",
+              portalAdded: true,
             });
           }
           updated++;
@@ -3747,6 +3771,135 @@ export async function registerRoutes(
         amountTotal: session.amount_total,
         lineItems: session.line_items,
       });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // ── Addon Order Links ──────────────────────────────────────────────────────
+  // Admin creates a one-time payment link to append extra items to an existing order.
+
+  app.post("/api/orders/:id/addon-link", async (req, res) => {
+    if (!req.session.userId) return res.status(401).json({ message: "Unauthorized" });
+    try {
+      const orderId = parseInt(req.params.id);
+      const order = await storage.getOrder(orderId);
+      if (!order) return res.status(404).json({ message: "Order not found" });
+      const token = crypto.randomBytes(24).toString("hex");
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+      await storage.createAddonLink(token, orderId, expiresAt);
+      const baseUrl = await getPortalBaseUrl();
+      res.json({ url: `${baseUrl}/addon/${token}` });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/addon/:token", async (req, res) => {
+    try {
+      const link = await storage.getAddonLink(req.params.token);
+      if (!link) return res.status(404).json({ message: "Link not found" });
+      if (new Date() > new Date(link.expiresAt)) return res.status(410).json({ message: "Link has expired" });
+      if (link.completedAt) return res.status(410).json({ message: "This link has already been used" });
+      const order = await storage.getOrder(link.orderId);
+      if (!order) return res.status(404).json({ message: "Order not found" });
+      const items = await storage.getOrderItems(link.orderId);
+      const products = await storage.getProducts();
+      const SKIP_PAT = /subscription|add delivery|meal sub/i;
+      const availableProducts = products.filter(p => !SKIP_PAT.test(p.name) && parseFloat(p.price ?? "0") > 0);
+      res.json({
+        order: {
+          id: order.id,
+          customerName: order.customerName,
+          orderDate: order.orderDate,
+          items: items.filter(i => !i.portalAdded),
+        },
+        products: availableProducts,
+        expiresAt: link.expiresAt,
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/addon/:token/checkout", async (req, res) => {
+    try {
+      const link = await storage.getAddonLink(req.params.token);
+      if (!link) return res.status(404).json({ message: "Link not found" });
+      if (new Date() > new Date(link.expiresAt)) return res.status(410).json({ message: "Link has expired" });
+      if (link.completedAt) return res.status(410).json({ message: "This link has already been used" });
+
+      const { items } = req.body as { items: Array<{ productId: number; quantity: number }> };
+      if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ message: "No items selected" });
+
+      const allProducts = await storage.getProducts();
+      const lineItems: Array<{ productId: number; productName: string; quantity: number; price: string; pricePence: number }> = [];
+      for (const sel of items) {
+        const product = allProducts.find(p => p.id === sel.productId);
+        if (!product) return res.status(400).json({ message: `Product ${sel.productId} not found` });
+        if (sel.quantity < 1) continue;
+        const pricePence = Math.round(parseFloat(product.price ?? "0") * 100);
+        lineItems.push({ productId: product.id, productName: product.name, quantity: sel.quantity, price: product.price ?? "0", pricePence });
+      }
+      if (lineItems.length === 0) return res.status(400).json({ message: "No valid items" });
+
+      const order = await storage.getOrder(link.orderId);
+      const pendingJson = JSON.stringify(lineItems);
+      await storage.updateAddonLink(link.token, { pendingItems: pendingJson });
+
+      const baseUrl = await getPortalBaseUrl();
+      const stripe = await getUncachableStripeClient(await getActiveStripeSecretKey());
+      const session = await stripe.checkout.sessions.create({
+        payment_method_types: ["card"],
+        line_items: lineItems.map(i => ({
+          price_data: { currency: "gbp", unit_amount: i.pricePence, product_data: { name: i.productName } },
+          quantity: i.quantity,
+        })),
+        mode: "payment",
+        customer_email: order?.customerEmail ?? undefined,
+        success_url: `${baseUrl}/addon/${link.token}/success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${baseUrl}/addon/${link.token}`,
+        metadata: { orderId: String(link.orderId), addonToken: link.token },
+      });
+      await storage.updateAddonLink(link.token, { stripeSessionId: session.id, pendingItems: pendingJson });
+      res.json({ checkoutUrl: session.url });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/addon/:token/success", async (req, res) => {
+    try {
+      const link = await storage.getAddonLink(req.params.token);
+      if (!link) return res.status(404).json({ message: "Link not found" });
+      if (link.completedAt) return res.json({ alreadyCompleted: true });
+
+      const sessionId = req.query.session_id as string;
+      if (!sessionId || link.stripeSessionId !== sessionId) {
+        return res.status(400).json({ message: "Invalid session" });
+      }
+
+      const stripe = await getUncachableStripeClient(await getActiveStripeSecretKey());
+      const session = await stripe.checkout.sessions.retrieve(sessionId);
+      if (session.payment_status !== "paid") return res.status(402).json({ message: "Payment not completed" });
+
+      const pendingItems: Array<{ productId: number; productName: string; quantity: number; price: string }> =
+        JSON.parse(link.pendingItems ?? "[]");
+
+      for (const item of pendingItems) {
+        const product = await storage.getProduct(item.productId);
+        await storage.createOrderItem({
+          orderId: link.orderId,
+          productId: item.productId,
+          productName: item.productName,
+          quantity: item.quantity,
+          price: String(parseFloat(item.price) * item.quantity),
+          portalAdded: true,
+        });
+      }
+
+      await storage.updateAddonLink(link.token, { completedAt: new Date() });
+      res.json({ success: true, orderId: link.orderId });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }

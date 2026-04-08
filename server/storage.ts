@@ -3,7 +3,7 @@ import { eq, gte, lte, and, sql, desc, isNotNull } from "drizzle-orm";
 import {
   products, ingredients, orders, orderItems, manualQuantities, settings, users,
   subscriptionInvites, subscriptionSelections, recurringOrders, recurringOrderItems,
-  standardIngredients,
+  standardIngredients, addonLinks,
   type Product, type InsertProduct,
   type Ingredient, type InsertIngredient,
   type Order, type InsertOrder,
@@ -15,6 +15,7 @@ import {
   type RecurringOrder, type InsertRecurringOrder,
   type RecurringOrderItem, type InsertRecurringOrderItem,
   type StandardIngredient, type InsertStandardIngredient,
+  type AddonLink,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -88,6 +89,11 @@ export interface IStorage {
   updateStandardIngredient(id: number, data: Partial<InsertStandardIngredient>): Promise<StandardIngredient | undefined>;
   deleteStandardIngredient(id: number): Promise<void>;
   deleteSubscriptionInvite(id: number): Promise<void>;
+
+  getPortalAddedItems(orderId: number): Promise<OrderItem[]>;
+  createAddonLink(token: string, orderId: number, expiresAt: Date): Promise<AddonLink>;
+  getAddonLink(token: string): Promise<AddonLink | undefined>;
+  updateAddonLink(token: string, data: { stripeSessionId?: string; pendingItems?: string; completedAt?: Date }): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -433,6 +439,26 @@ export class DatabaseStorage implements IStorage {
 
   async deleteSubscriptionInvite(id: number): Promise<void> {
     await db.delete(subscriptionInvites).where(eq(subscriptionInvites.id, id));
+  }
+
+  async getPortalAddedItems(orderId: number): Promise<OrderItem[]> {
+    return db.select().from(orderItems).where(
+      and(eq(orderItems.orderId, orderId), eq(orderItems.portalAdded, true))
+    );
+  }
+
+  async createAddonLink(token: string, orderId: number, expiresAt: Date): Promise<AddonLink> {
+    const [created] = await db.insert(addonLinks).values({ token, orderId, expiresAt }).returning();
+    return created;
+  }
+
+  async getAddonLink(token: string): Promise<AddonLink | undefined> {
+    const [link] = await db.select().from(addonLinks).where(eq(addonLinks.token, token));
+    return link;
+  }
+
+  async updateAddonLink(token: string, data: { stripeSessionId?: string; pendingItems?: string; completedAt?: Date }): Promise<void> {
+    await db.update(addonLinks).set(data).where(eq(addonLinks.token, token));
   }
 }
 

@@ -25,6 +25,7 @@ import TuesdayOrdersPage from "@/pages/tuesday-orders";
 import SaturdayOrdersPage from "@/pages/saturday-orders";
 import SubscribePage from "@/pages/subscribe";
 import PaymentSuccessPage from "@/pages/payment-success";
+import AddonPage from "@/pages/addon";
 import LoginPage from "@/pages/login";
 
 function PageRouter() {
@@ -83,6 +84,7 @@ function AppContent() {
 
   const isPublicSubscribe = location.startsWith("/subscribe/");
   const isPublicPayment = isPublicSubscribe && location.includes("/payment-success");
+  const isPublicAddon = location.startsWith("/addon/");
 
   const { data: user, isLoading, refetch } = useQuery<{ id: string; username: string } | null>({
     queryKey: ["/api/auth/me"],
@@ -94,7 +96,7 @@ function AppContent() {
     },
     retry: false,
     staleTime: Infinity,
-    enabled: !isPublicSubscribe && !isPublicPayment,
+    enabled: !isPublicSubscribe && !isPublicPayment && !isPublicAddon,
   });
 
   if (isPublicSubscribe || isPublicPayment) {
@@ -105,6 +107,16 @@ function AppContent() {
         </Route>
         <Route path="/subscribe/:token">
           {(params) => <SubscribePage params={params} />}
+        </Route>
+      </Switch>
+    );
+  }
+
+  if (isPublicAddon) {
+    return (
+      <Switch>
+        <Route path="/addon/:token">
+          {(params) => <AddonPage params={params} />}
         </Route>
       </Switch>
     );

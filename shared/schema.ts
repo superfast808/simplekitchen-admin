@@ -54,6 +54,18 @@ export const orderItems = pgTable("order_items", {
   productName: text("product_name").notNull(),
   quantity: integer("quantity").notNull().default(1),
   price: decimal("price", { precision: 10, scale: 2 }).default("0"),
+  portalAdded: boolean("portal_added").notNull().default(false),
+});
+
+export const addonLinks = pgTable("addon_links", {
+  id: serial("id").primaryKey(),
+  token: text("token").notNull().unique(),
+  orderId: integer("order_id").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  expiresAt: timestamp("expires_at").notNull(),
+  stripeSessionId: text("stripe_session_id"),
+  pendingItems: text("pending_items"),
+  completedAt: timestamp("completed_at"),
 });
 
 export const manualQuantities = pgTable("manual_quantities", {
@@ -140,6 +152,7 @@ export const insertSubscriptionSelectionSchema = createInsertSchema(subscription
 export const insertRecurringOrderSchema = createInsertSchema(recurringOrders).omit({ id: true });
 export const insertRecurringOrderItemSchema = createInsertSchema(recurringOrderItems).omit({ id: true });
 export const insertStandardIngredientSchema = createInsertSchema(standardIngredients).omit({ id: true });
+export const insertAddonLinkSchema = createInsertSchema(addonLinks).omit({ id: true, createdAt: true });
 
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
@@ -164,3 +177,5 @@ export type RecurringOrderItem = typeof recurringOrderItems.$inferSelect;
 export type InsertRecurringOrderItem = z.infer<typeof insertRecurringOrderItemSchema>;
 export type StandardIngredient = typeof standardIngredients.$inferSelect;
 export type InsertStandardIngredient = z.infer<typeof insertStandardIngredientSchema>;
+export type AddonLink = typeof addonLinks.$inferSelect;
+export type InsertAddonLink = z.infer<typeof insertAddonLinkSchema>;
