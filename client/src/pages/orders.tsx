@@ -69,7 +69,7 @@ export default function OrdersPage() {
 
   const { from, to } = dateFilter;
 
-  const { data: allOrders, isLoading } = useQuery<OrderWithItems[]>({
+  const { data: allOrders, isLoading, isFetching } = useQuery<OrderWithItems[]>({
     queryKey: ["/api/orders", `?from=${from.toISOString()}&to=${to.toISOString()}`],
   });
 
@@ -1048,7 +1048,10 @@ export default function OrdersPage() {
                       </TableCell>
                     ))}
                     <TableCell className="text-center font-bold text-sm" data-testid="text-grand-total-items">
-                      {(orders || []).reduce((sum, o) => sum + o.items.filter(i => !i.productName.toLowerCase().includes("add delivery") && !/meal\s+subscription/i.test(i.productName)).reduce((s, i) => s + i.quantity, 0), 0)}
+                      <span className="inline-flex items-center gap-1">
+                        {(orders || []).reduce((sum, o) => sum + o.items.filter(i => !i.productName.toLowerCase().includes("add delivery") && !/meal\s+subscription/i.test(i.productName)).reduce((s, i) => s + i.quantity, 0), 0)}
+                        {isFetching && !isLoading && <RefreshCw className="w-3 h-3 animate-spin text-muted-foreground" />}
+                      </span>
                     </TableCell>
                     <TableCell></TableCell>
                     <TableCell></TableCell>

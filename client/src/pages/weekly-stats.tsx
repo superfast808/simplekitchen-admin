@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import {
   ChevronLeft, ChevronRight, UtensilsCrossed, PoundSterling, Receipt,
   Truck, UserPlus, UserCheck, TrendingUp, TrendingDown, Globe, Stamp, Package,
-  Banknote, CreditCard, ShoppingBag,
+  Banknote, CreditCard, ShoppingBag, RefreshCw,
 } from "lucide-react";
 import { DeliveryDatePills, getOrderWindow } from "@/components/date-filter";
 
@@ -141,7 +141,7 @@ export default function WeeklyStatsPage() {
   const effectiveRange = isCurrent && !canViewCurrent ? getWeekRange(-1) : { from, to };
   const displayRange = effectiveRange;
 
-  const { data: rawOrders, isLoading } = useQuery<OrderWithItems[]>({
+  const { data: rawOrders, isLoading, isFetching } = useQuery<OrderWithItems[]>({
     queryKey: ["/api/orders", `?from=${effectiveRange.from.toISOString()}&to=${effectiveRange.to.toISOString()}`],
   });
 
@@ -289,7 +289,10 @@ export default function WeeklyStatsPage() {
                       <Icon className={`w-4 h-4 ${card.iconColor}`} />
                       <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{card.label}</span>
                     </div>
-                    <p className="text-2xl font-bold tabular-nums" data-testid={`text-stat-${card.key}`}>{card.fmt(value)}</p>
+                    <p className="text-2xl font-bold tabular-nums inline-flex items-center gap-1.5" data-testid={`text-stat-${card.key}`}>
+                      {card.fmt(value)}
+                      {isFetching && !isLoading && <RefreshCw className="w-3.5 h-3.5 animate-spin text-muted-foreground" />}
+                    </p>
                     {card.note ? <p className="text-[10px] text-muted-foreground mt-0.5">{card.note}</p> : null}
                   </CardContent>
                 </Card>
