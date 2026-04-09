@@ -469,6 +469,22 @@ function IngredientsDialog({ product, open, onOpenChange }: { product: Product; 
                 </Button>
               </div>
             ))}
+            {(() => {
+              const total = ingredientLines.reduce((sum, l) => {
+                const v = parseFloat(l.totalCost);
+                return sum + (isNaN(v) ? 0 : v);
+              }, 0);
+              const anyHasCost = ingredientLines.some(l => parseFloat(l.costPerG) > 0 || parseFloat(l.totalCost) > 0);
+              if (!anyHasCost) return null;
+              return (
+                <div className="flex justify-end items-center gap-2 pt-1 border-t">
+                  <span className="text-sm text-muted-foreground">Total ingredient cost:</span>
+                  <span className="text-sm font-semibold tabular-nums" data-testid="text-total-ingredient-cost">
+                    £{total.toFixed(4)}
+                  </span>
+                </div>
+              );
+            })()}
             <div className="flex gap-2 flex-wrap">
               <Button size="sm" variant="outline" onClick={addLine} data-testid="button-add-ingredient">
                 <Plus className="w-3 h-3 mr-1" />
