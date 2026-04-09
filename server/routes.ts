@@ -2040,7 +2040,13 @@ export async function registerRoutes(
               computedAddonAmountPence += Math.round(price * 100) * sel.quantity;
             }
           }
-          return { ...invite, selections, computedAddonAmountPence };
+          // Flag if the customer chose meals but the manual order was deleted
+          let orderMissing = false;
+          if (invite.selectionsOrderId) {
+            const existingOrder = await storage.getOrder(invite.selectionsOrderId);
+            orderMissing = !existingOrder;
+          }
+          return { ...invite, selections, computedAddonAmountPence, orderMissing };
         })
       );
       res.json(result);
@@ -2740,6 +2746,56 @@ export async function registerRoutes(
       }
 
       res.json({ success: true, emailSent, deletedOrderId });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // ─── Recover a missing manual order from saved selections ─────────────────
+  app.post("/api/subscription-invites/:id/recover-order", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const invite = await storage.getSubscriptionInviteById(id);
+      if (!invite) return res.status(404).json({ message: "Invite not found" });
+      if (invite.status !== "completed") return res.status(400).json({ message: "Invite is not completed" });
+
+      const selections = await storage.getSubscriptionSelections(id);
+      if (selections.length === 0) return res.status(400).json({ message: "No selections saved for this invite" });
+
+      // Safety check: if the existing order is still there, don't duplicate it
+      if (invite.selectionsOrderId) {
+        const existingOrder = await storage.getOrder(invite.selectionsOrderId);
+        if (existingOrder) return res.status(400).json({ message: "Order already exists" });
+      }
+
+      // Resolve delivery address from the invite or order history
+      let resolvedAddress = invite.deliveryAddress || null;
+      let resolvedFulfillment = (invite.fulfillmentType as "delivery" | "collection") || "delivery";
+      if (!resolvedAddress) {
+        const pastAddr = await storage.getCustomerDeliveryAddress(invite.customerEmail || "", invite.customerName);
+        if (pastAddr?.deliveryAddress) {
+          resolvedAddress = pastAddr.deliveryAddress;
+          resolvedFulfillment = (pastAddr.fulfillmentType as "delivery" | "collection") || "delivery";
+        }
+      }
+
+      const order = await storage.createOrder({
+        customerName: invite.customerName,
+        customerEmail: invite.customerEmail,
+        deliveryAddress: resolvedAddress || null,
+        orderDate: invite.weekFrom,
+        status: "processing",
+        fulfillmentType: resolvedFulfillment,
+        isManual: true,
+      });
+
+      for (const sel of selections.filter(s => !s.deliveryDay || s.deliveryDay === "sat")) {
+        if (!sel.productName?.trim()) continue;
+        await storage.createOrderItem({ orderId: order.id, productId: null, productName: sel.productName, quantity: sel.quantity, price: "7.75" });
+      }
+
+      await storage.setSubscriptionInviteSelectionsOrder(id, order.id);
+      res.json({ success: true, orderId: order.id });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }

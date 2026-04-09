@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Send, CheckCircle2, Clock, Mail, Pencil, Minus, Plus, UtensilsCrossed, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, RotateCcw, CreditCard, ExternalLink, Trash2, X } from "lucide-react";
+import { Send, CheckCircle2, Clock, Mail, Pencil, Minus, Plus, UtensilsCrossed, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, RotateCcw, CreditCard, ExternalLink, Trash2, X, ListPlus } from "lucide-react";
 import { format, addWeeks } from "date-fns";
 
 type Selection = {
@@ -24,6 +24,8 @@ type Selection = {
 type Invite = {
   id: number;
   orderId: number | null;
+  selectionsOrderId?: number | null;
+  orderMissing?: boolean;
   customerEmail: string;
   customerName: string;
   token: string;
@@ -93,6 +95,7 @@ export default function SubscriptionOverviewPage() {
   const [receiptingId, setReceiptingId] = useState<number | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [recoveringId, setRecoveringId] = useState<number | null>(null);
 
   const weekRange = getCurrentWeekRange(weekOffset);
   const isCurrentWeek = weekOffset === 0;
@@ -210,6 +213,27 @@ export default function SubscriptionOverviewPage() {
       toast({ title: "Failed to reset", description, variant: "destructive" });
       setResettingId(null);
       setConfirmResetId(null);
+    },
+  });
+
+  const recoverOrderMutation = useMutation({
+    mutationFn: async (inviteId: number) => {
+      return apiRequest("POST", `/api/subscription-invites/${inviteId}/recover-order`, {});
+    },
+    onSuccess: async (res) => {
+      const data = await res.json();
+      toast({ title: "Order recovered", description: `Manual order #${data.orderId} created from saved selections.` });
+      setRecoveringId(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/subscription-invites"] });
+    },
+    onError: (err: Error) => {
+      let description = err.message;
+      try {
+        const parsed = JSON.parse(err.message.replace(/^\d+:\s*/, ""));
+        if (parsed?.message) description = parsed.message;
+      } catch {}
+      toast({ title: "Failed to recover order", description, variant: "destructive" });
+      setRecoveringId(null);
     },
   });
 
@@ -469,6 +493,24 @@ export default function SubscriptionOverviewPage() {
                           >
                             <RotateCcw className={`w-3 h-3 ${resendingId === invite.id && resendMutation.isPending ? "animate-spin" : ""}`} />
                           </Button>
+                          {isComplete && invite.orderMissing && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 text-xs px-2 border-amber-400 text-amber-700 dark:border-amber-600 dark:text-amber-400"
+                              title="Meals chosen but order is missing — click to recreate it"
+                              disabled={recoveringId === invite.id && recoverOrderMutation.isPending}
+                              onClick={() => {
+                                setRecoveringId(invite.id);
+                                recoverOrderMutation.mutate(invite.id);
+                              }}
+                              data-testid={`button-recover-order-${invite.id}`}
+                            >
+                              {recoveringId === invite.id && recoverOrderMutation.isPending
+                                ? <RotateCcw className="w-3 h-3 animate-spin" />
+                                : <ListPlus className="w-3 h-3" />}
+                            </Button>
+                          )}
                           {isComplete && invite.addonPaid && (
                             <Button
                               size="sm"
