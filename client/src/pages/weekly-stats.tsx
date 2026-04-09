@@ -124,9 +124,13 @@ function computeGroup(
     }
 
     for (const item of items) {
-      mealsSold += item.quantity;
-      if (!NO_PACKAGING_RE.test(item.productName)) packagableMeals += item.quantity;
-      mealCounts[item.productName] = (mealCounts[item.productName] || 0) + item.quantity;
+      const isSubBase = /meal\s+subscription/i.test(item.productName);
+      const isDelivery = /add.*delivery/i.test(item.productName);
+      if (!isSubBase && !isDelivery) {
+        mealsSold += item.quantity;
+        if (!NO_PACKAGING_RE.test(item.productName)) packagableMeals += item.quantity;
+        mealCounts[item.productName] = (mealCounts[item.productName] || 0) + item.quantity;
+      }
     }
   }
   const orderCount = orders.length;
