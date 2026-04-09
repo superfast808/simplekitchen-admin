@@ -248,9 +248,10 @@ function IngredientsDialog({ product, open, onOpenChange }: { product: Product; 
 
   const nameSuggestions = useMemo<SuggestionItem[]>(() => {
     const libItems: SuggestionItem[] = (knownIngredients?.standards ?? []).map(s => {
-      const cost = s.costPerG ? `£${parseFloat(s.costPerG).toPrecision(4).replace(/\.?0+$/, "")}/g` : null;
+      const hasCost = !!s.costPerG && parseFloat(s.costPerG) > 0;
+      const cost = hasCost ? `£${parseFloat(s.costPerG).toPrecision(4).replace(/\.?0+$/, "")}/g` : null;
       const meta = [cost, s.unit].filter(Boolean).join(" · ");
-      return { value: s.name, meta, isLibrary: true };
+      return { value: s.name, meta: meta || undefined, isLibrary: hasCost };
     });
     const libNames = new Set(libItems.map(s => (s as { value: string }).value.toLowerCase()));
     const extra: SuggestionItem[] = (knownIngredients?.names ?? []).filter(n => !libNames.has(n.toLowerCase()));
