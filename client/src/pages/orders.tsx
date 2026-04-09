@@ -351,7 +351,7 @@ export default function OrdersPage() {
     return [...orders].sort((a, b) => {
       let av: number | string, bv: number | string;
       if (orderSortCol === "customer") { av = a.customerName?.toLowerCase() ?? ""; bv = b.customerName?.toLowerCase() ?? ""; }
-      else if (orderSortCol === "total") { av = a.items.filter(i => !i.productName.toLowerCase().includes("add delivery")).reduce((s, i) => s + i.quantity, 0); bv = b.items.filter(i => !i.productName.toLowerCase().includes("add delivery")).reduce((s, i) => s + i.quantity, 0); }
+      else if (orderSortCol === "total") { av = a.items.filter(i => !i.productName.toLowerCase().includes("add delivery") && !/meal\s+subscription/i.test(i.productName)).reduce((s, i) => s + i.quantity, 0); bv = b.items.filter(i => !i.productName.toLowerCase().includes("add delivery") && !/meal\s+subscription/i.test(i.productName)).reduce((s, i) => s + i.quantity, 0); }
       else if (orderSortCol === "spend") { av = effectiveSpend(a, subCustomers); bv = effectiveSpend(b, subCustomers); }
       else if (orderSortCol === "type") { av = a.fulfillmentType ?? ""; bv = b.fulfillmentType ?? ""; }
       else { av = a.status ?? ""; bv = b.status ?? ""; }
@@ -858,7 +858,7 @@ export default function OrdersPage() {
                         );
                       })}
                       <TableCell className="text-center font-bold text-sm" data-testid={`text-total-items-${order.id}`}>
-                        {order.items.filter(i => !i.productName.toLowerCase().includes("add delivery")).reduce((s, i) => s + i.quantity, 0)}
+                        {order.items.filter(i => !i.productName.toLowerCase().includes("add delivery") && !/meal\s+subscription/i.test(i.productName)).reduce((s, i) => s + i.quantity, 0)}
                       </TableCell>
                       <TableCell>
                         <span className="text-sm" data-testid={`text-address-${order.id}`}>
@@ -1048,7 +1048,7 @@ export default function OrdersPage() {
                       </TableCell>
                     ))}
                     <TableCell className="text-center font-bold text-sm" data-testid="text-grand-total-items">
-                      {(orders || []).reduce((sum, o) => sum + o.items.filter(i => !i.productName.toLowerCase().includes("add delivery")).reduce((s, i) => s + i.quantity, 0), 0)}
+                      {(orders || []).reduce((sum, o) => sum + o.items.filter(i => !i.productName.toLowerCase().includes("add delivery") && !/meal\s+subscription/i.test(i.productName)).reduce((s, i) => s + i.quantity, 0), 0)}
                     </TableCell>
                     <TableCell></TableCell>
                     <TableCell></TableCell>
