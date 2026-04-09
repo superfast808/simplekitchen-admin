@@ -11,6 +11,12 @@ import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { Product, Ingredient } from "@shared/schema";
 
+type SuggestionItem = string | { value: string; meta?: string; isLibrary?: boolean };
+
+function getSuggestionValue(s: SuggestionItem): string {
+  return typeof s === "string" ? s : s.value;
+}
+
 function AutocompleteInput({
   value,
   onChange,
@@ -21,7 +27,7 @@ function AutocompleteInput({
 }: {
   value: string;
   onChange: (v: string) => void;
-  suggestions: string[];
+  suggestions: SuggestionItem[];
   placeholder: string;
   className?: string;
   "data-testid"?: string;
@@ -31,8 +37,20 @@ function AutocompleteInput({
   const wrapperRef = useRef<HTMLDivElement>(null);
 
   const filtered = value.trim()
-    ? suggestions.filter(s => s.toLowerCase().includes(value.toLowerCase()) && s.toLowerCase() !== value.toLowerCase())
+    ? suggestions.filter(s => {
+        const v = getSuggestionValue(s);
+        return v.toLowerCase().includes(value.toLowerCase()) && v.toLowerCase() !== value.toLowerCase();
+      })
     : [];
+
+  // Library items first, then others
+  const sorted = [...filtered].sort((a, b) => {
+    const aLib = typeof a !== "string" && a.isLibrary;
+    const bLib = typeof b !== "string" && b.isLibrary;
+    if (aLib && !bLib) return -1;
+    if (!aLib && bLib) return 1;
+    return 0;
+  });
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -45,16 +63,16 @@ function AutocompleteInput({
   }, []);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (!showDropdown || filtered.length === 0) return;
+    if (!showDropdown || sorted.length === 0) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setFocusedIdx(prev => Math.min(prev + 1, filtered.length - 1));
+      setFocusedIdx(prev => Math.min(prev + 1, sorted.length - 1));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setFocusedIdx(prev => Math.max(prev - 1, 0));
     } else if (e.key === "Enter" && focusedIdx >= 0) {
       e.preventDefault();
-      onChange(filtered[focusedIdx]);
+      onChange(getSuggestionValue(sorted[focusedIdx]));
       setShowDropdown(false);
       setFocusedIdx(-1);
     } else if (e.key === "Escape") {
@@ -76,23 +94,31 @@ function AutocompleteInput({
         placeholder={placeholder}
         data-testid={testId}
       />
-      {showDropdown && filtered.length > 0 && (
-        <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-popover border rounded-md shadow-md max-h-40 overflow-y-auto">
-          {filtered.map((item, i) => (
-            <button
-              key={item}
-              type="button"
-              className={`w-full text-left px-3 py-1.5 text-sm ${i === focusedIdx ? "bg-accent" : ""}`}
-              onMouseDown={(e) => {
-                e.preventDefault();
-                onChange(item);
-                setShowDropdown(false);
-              }}
-              data-testid={`option-autocomplete-${i}`}
-            >
-              {item}
-            </button>
-          ))}
+      {showDropdown && sorted.length > 0 && (
+        <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-popover border rounded-md shadow-md max-h-52 overflow-y-auto">
+          {sorted.map((item, i) => {
+            const val = getSuggestionValue(item);
+            const meta = typeof item !== "string" ? item.meta : undefined;
+            const isLib = typeof item !== "string" && item.isLibrary;
+            return (
+              <button
+                key={val}
+                type="button"
+                className={`w-full text-left px-3 py-1.5 text-sm flex items-center justify-between gap-2 ${i === focusedIdx ? "bg-accent" : "hover:bg-muted/50"} ${isLib ? "border-l-2 border-primary/40" : ""}`}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  onChange(val);
+                  setShowDropdown(false);
+                }}
+                data-testid={`option-autocomplete-${i}`}
+              >
+                <span>{val}</span>
+                {meta && (
+                  <span className="text-xs text-muted-foreground shrink-0 tabular-nums">{meta}</span>
+                )}
+              </button>
+            );
+          })}
         </div>
       )}
     </div>
@@ -219,6 +245,17 @@ function IngredientsDialog({ product, open, onOpenChange }: { product: Product; 
     () => new Map((knownIngredients?.standards ?? []).map(s => [s.name.toLowerCase(), s])),
     [knownIngredients?.standards],
   );
+
+  const nameSuggestions = useMemo<SuggestionItem[]>(() => {
+    const libItems: SuggestionItem[] = (knownIngredients?.standards ?? []).map(s => {
+      const cost = s.costPerG ? `£${parseFloat(s.costPerG).toPrecision(4).replace(/\.?0+$/, "")}/g` : null;
+      const meta = [cost, s.unit].filter(Boolean).join(" · ");
+      return { value: s.name, meta, isLibrary: true };
+    });
+    const libNames = new Set(libItems.map(s => (s as { value: string }).value.toLowerCase()));
+    const extra: SuggestionItem[] = (knownIngredients?.names ?? []).filter(n => !libNames.has(n.toLowerCase()));
+    return [...libItems, ...extra];
+  }, [knownIngredients]);
 
   type IngredientLine = { name: string; quantityPerUnit: string; unit: string; costPerG: string; totalCost: string; costSource: "perG" | "total" | null };
   const [ingredientLines, setIngredientLines] = useState<IngredientLine[]>([]);
@@ -378,7 +415,7 @@ function IngredientsDialog({ product, open, onOpenChange }: { product: Product; 
                 <AutocompleteInput
                   value={line.name}
                   onChange={(v) => updateLine(idx, "name", v)}
-                  suggestions={knownIngredients?.names || []}
+                  suggestions={nameSuggestions}
                   placeholder="Ingredient name"
                   className="flex-1 min-w-[140px]"
                   data-testid={`input-ingredient-name-${idx}`}
