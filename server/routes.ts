@@ -2469,18 +2469,20 @@ export async function registerRoutes(
           await storage.createSubscriptionSelection({ inviteId: id, productName: sel.productName, quantity: parseInt(sel.quantity, 10) || 1, deliveryDay: 'tue' } as any);
         }
 
-        // Update or create Saturday order
-        if (invite.selectionsOrderId) {
-          await storage.updateOrder(invite.selectionsOrderId, { orderDate: invite.weekFrom, deliveryAddress: resolvedAddress, fulfillmentType: resolvedFulfillment as "delivery" | "collection" });
-          await storage.deleteOrderItemsByOrderId(invite.selectionsOrderId);
-          for (const sel of satSels) { if (!sel.productName?.trim()) continue; await storage.createOrderItem({ orderId: invite.selectionsOrderId!, productId: null, productName: sel.productName, quantity: parseInt(sel.quantity, 10) || 1, price: "7.75" }); }
-          for (const ext of satExtList) { if (!ext.productName?.trim()) continue; await storage.createOrderItem({ orderId: invite.selectionsOrderId!, productId: null, productName: ext.productName, quantity: parseInt(ext.quantity, 10) || 1, price: "0" }); }
-        } else {
-          const satOrder = await storage.createOrder({ customerName: invite.customerName, customerEmail: invite.customerEmail, deliveryAddress: resolvedAddress, orderDate: invite.weekFrom, status: "processing", fulfillmentType: resolvedFulfillment as "delivery" | "collection", isManual: true, isTuesday: false });
-          for (const sel of satSels) { if (!sel.productName?.trim()) continue; await storage.createOrderItem({ orderId: satOrder.id, productId: null, productName: sel.productName, quantity: parseInt(sel.quantity, 10) || 1, price: "7.75" }); }
-          for (const ext of satExtList) { if (!ext.productName?.trim()) continue; await storage.createOrderItem({ orderId: satOrder.id, productId: null, productName: ext.productName, quantity: parseInt(ext.quantity, 10) || 1, price: "0" }); }
-          await storage.setSubscriptionInviteSelectionsOrder(id, satOrder.id);
+        // Update or create Saturday order — recover if stored order was deleted
+        let satOrderId: number | null = invite.selectionsOrderId ?? null;
+        if (satOrderId) {
+          const upd = await storage.updateOrder(satOrderId, { orderDate: invite.weekFrom, deliveryAddress: resolvedAddress, fulfillmentType: resolvedFulfillment as "delivery" | "collection" });
+          if (!upd) satOrderId = null;
         }
+        if (!satOrderId) {
+          const satOrder = await storage.createOrder({ customerName: invite.customerName, customerEmail: invite.customerEmail, deliveryAddress: resolvedAddress, orderDate: invite.weekFrom, status: "processing", fulfillmentType: resolvedFulfillment as "delivery" | "collection", isManual: true, isTuesday: false });
+          satOrderId = satOrder.id;
+          await storage.setSubscriptionInviteSelectionsOrder(id, satOrderId);
+        }
+        await storage.deleteOrderItemsByOrderId(satOrderId);
+        for (const sel of satSels) { if (!sel.productName?.trim()) continue; await storage.createOrderItem({ orderId: satOrderId!, productId: null, productName: sel.productName, quantity: parseInt(sel.quantity, 10) || 1, price: "7.75" }); }
+        for (const ext of satExtList) { if (!ext.productName?.trim()) continue; await storage.createOrderItem({ orderId: satOrderId!, productId: null, productName: ext.productName, quantity: parseInt(ext.quantity, 10) || 1, price: "0" }); }
 
         // Update or create Tuesday order
         const tueOrderId = (invite as any).tuesdaySelectionsOrderId as number | null;
@@ -2526,65 +2528,52 @@ export async function registerRoutes(
         } as any);
       }
 
-      if (invite.selectionsOrderId) {
-        // Ensure the order date and delivery details are correct (fix any legacy wrong-date orders)
-        await storage.updateOrder(invite.selectionsOrderId, {
+      // Resolve which order to write items into. If the stored order was deleted, create a fresh one.
+      let targetOrderId: number | null = invite.selectionsOrderId ?? null;
+      if (targetOrderId) {
+        const updated = await storage.updateOrder(targetOrderId, {
           orderDate: invite.weekFrom,
           deliveryAddress: resolvedAddress,
           fulfillmentType: resolvedFulfillment as "delivery" | "collection",
         });
-        await storage.deleteOrderItemsByOrderId(invite.selectionsOrderId);
-        for (const sel of selections) {
-          if (!sel.productName?.trim()) continue;
-          await storage.createOrderItem({
-            orderId: invite.selectionsOrderId,
-            productId: null,
-            productName: sel.productName,
-            quantity: parseInt(sel.quantity, 10) || 1,
-            price: "7.75",
-          });
+        if (!updated) {
+          // Order was deleted — fall through to create path
+          targetOrderId = null;
         }
-        for (const extra of extrasList) {
-          if (!extra.productName?.trim()) continue;
-          await storage.createOrderItem({
-            orderId: invite.selectionsOrderId,
-            productId: null,
-            productName: extra.productName,
-            quantity: parseInt(extra.quantity, 10) || 1,
-            price: "0",
-          });
-        }
-      } else {
+      }
+      if (!targetOrderId) {
         const order = await storage.createOrder({
           customerName: invite.customerName,
           customerEmail: invite.customerEmail,
-          deliveryAddress: invite.deliveryAddress || null,
+          deliveryAddress: resolvedAddress || null,
           orderDate: invite.weekFrom,
           status: "processing",
-          fulfillmentType: (invite.fulfillmentType as "delivery" | "collection") || "delivery",
+          fulfillmentType: (resolvedFulfillment as "delivery" | "collection") || "delivery",
           isManual: true,
         });
-        for (const sel of selections) {
-          if (!sel.productName?.trim()) continue;
-          await storage.createOrderItem({
-            orderId: order.id,
-            productId: null,
-            productName: sel.productName,
-            quantity: parseInt(sel.quantity, 10) || 1,
-            price: "7.75",
-          });
-        }
-        for (const extra of extrasList) {
-          if (!extra.productName?.trim()) continue;
-          await storage.createOrderItem({
-            orderId: order.id,
-            productId: null,
-            productName: extra.productName,
-            quantity: parseInt(extra.quantity, 10) || 1,
-            price: "0",
-          });
-        }
-        await storage.setSubscriptionInviteSelectionsOrder(id, order.id);
+        targetOrderId = order.id;
+        await storage.setSubscriptionInviteSelectionsOrder(id, targetOrderId);
+      }
+      await storage.deleteOrderItemsByOrderId(targetOrderId);
+      for (const sel of selections) {
+        if (!sel.productName?.trim()) continue;
+        await storage.createOrderItem({
+          orderId: targetOrderId,
+          productId: null,
+          productName: sel.productName,
+          quantity: parseInt(sel.quantity, 10) || 1,
+          price: "7.75",
+        });
+      }
+      for (const extra of extrasList) {
+        if (!extra.productName?.trim()) continue;
+        await storage.createOrderItem({
+          orderId: targetOrderId,
+          productId: null,
+          productName: extra.productName,
+          quantity: parseInt(extra.quantity, 10) || 1,
+          price: "0",
+        });
       }
 
       await storage.updateSubscriptionInviteStatus(id, "completed");
