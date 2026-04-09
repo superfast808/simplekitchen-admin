@@ -26,6 +26,7 @@ import SaturdayOrdersPage from "@/pages/saturday-orders";
 import SubscribePage from "@/pages/subscribe";
 import PaymentSuccessPage from "@/pages/payment-success";
 import AddonPage, { AddonSuccessPage } from "@/pages/addon";
+import IngredientLibraryPage from "@/pages/ingredient-library";
 import LoginPage from "@/pages/login";
 
 function isPublicRoute(location: string) {
@@ -68,6 +69,7 @@ function PageRouter() {
       <Route path="/subscriptions" component={SubscriptionOverviewPage} />
       <Route path="/tuesday" component={TuesdayOrdersPage} />
       <Route path="/saturday" component={SaturdayOrdersPage} />
+      <Route path="/ingredient-library" component={IngredientLibraryPage} />
       <Route path="/settings" component={SettingsPage} />
       <Route path="/help" component={HelpPage} />
       <Route component={NotFound} />
