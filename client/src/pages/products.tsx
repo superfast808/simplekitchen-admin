@@ -471,8 +471,12 @@ function IngredientsDialog({ product, open, onOpenChange }: { product: Product; 
             ))}
             {(() => {
               const total = ingredientLines.reduce((sum, l) => {
-                const v = parseFloat(l.totalCost);
-                return sum + (isNaN(v) ? 0 : v);
+                const t = parseFloat(l.totalCost);
+                if (!isNaN(t) && t > 0) return sum + t;
+                const c = parseFloat(l.costPerG);
+                const q = parseFloat(l.quantityPerUnit);
+                if (!isNaN(c) && !isNaN(q)) return sum + c * q;
+                return sum;
               }, 0);
               const anyHasCost = ingredientLines.some(l => parseFloat(l.costPerG) > 0 || parseFloat(l.totalCost) > 0);
               if (!anyHasCost) return null;
