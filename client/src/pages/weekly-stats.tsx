@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { format, subDays, addDays } from "date-fns";
+import { format } from "date-fns";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -10,7 +10,7 @@ import {
   Truck, UserPlus, UserCheck, TrendingUp, TrendingDown, Globe, Stamp, Package,
   Banknote, CreditCard, ShoppingBag,
 } from "lucide-react";
-import { DeliveryDatePills } from "@/components/date-filter";
+import { DeliveryDatePills, getOrderWindow } from "@/components/date-filter";
 
 type OrderItem = { productName: string; quantity: number; price: string };
 type OrderWithItems = {
@@ -36,24 +36,7 @@ type GroupStats = {
 };
 
 function getWeekRange(offset: number): { from: Date; to: Date; isCurrent: boolean } {
-  const now = new Date();
-  const ukNow = new Date(now.toLocaleString("en-US", { timeZone: "Europe/London" }));
-  const dayOfWeek = ukNow.getDay();
-
-  let saturdayDate: Date;
-  if (dayOfWeek === 6) {
-    saturdayDate = new Date(ukNow);
-  } else {
-    const daysBack = dayOfWeek === 0 ? 1 : dayOfWeek + 1;
-    saturdayDate = subDays(ukNow, daysBack);
-  }
-  if (offset !== 0) saturdayDate = addDays(saturdayDate, offset * 7);
-
-  const from = new Date(saturdayDate);
-  from.setHours(0, 0, 0, 0);
-  const friday = addDays(saturdayDate, 6);
-  const to = new Date(friday);
-  to.setHours(23, 59, 59, 999);
+  const { from, to } = getOrderWindow(offset);
   return { from, to, isCurrent: offset === 0 };
 }
 
