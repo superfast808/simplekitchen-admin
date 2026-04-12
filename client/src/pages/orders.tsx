@@ -11,7 +11,7 @@ import { RefreshCw, Trash2, Plus, ShoppingCart, Download, Tag, Pencil, CalendarC
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -1146,6 +1146,65 @@ export default function OrdersPage() {
   );
 }
 
+function ProductSelect({ value, onChange, products, testId }: {
+  value: string;
+  onChange: (v: string) => void;
+  products: any[] | undefined;
+  testId?: string;
+}) {
+  const grouped = useMemo(() => {
+    if (!products) return [];
+    const map = new Map<string, string[]>();
+    for (const p of products) {
+      const cat = p.category || "Other";
+      if (!map.has(cat)) map.set(cat, []);
+      map.get(cat)!.push(p.name);
+    }
+    return Array.from(map.entries()).sort(([a], [b]) => {
+      const numA = parseInt(a.replace(/\D/g, "")) || 999;
+      const numB = parseInt(b.replace(/\D/g, "")) || 999;
+      return numA - numB;
+    });
+  }, [products]);
+
+  const knownNames = useMemo(() => new Set(products?.map(p => p.name) ?? []), [products]);
+  const isCustom = value && !knownNames.has(value);
+
+  return (
+    <div className="flex-1 flex flex-col gap-1">
+      <Select value={isCustom ? "__custom__" : (value || "")} onValueChange={(v) => { if (v !== "__custom__") onChange(v); }}>
+        <SelectTrigger data-testid={testId}>
+          <SelectValue placeholder="Select a product…">
+            {isCustom ? <span className="text-muted-foreground italic">Custom: {value}</span> : undefined}
+          </SelectValue>
+        </SelectTrigger>
+        <SelectContent>
+          {grouped.map(([cat, names]) => (
+            <SelectGroup key={cat}>
+              <SelectLabel className="text-xs font-semibold text-muted-foreground">── {cat} ──</SelectLabel>
+              {names.map(name => (
+                <SelectItem key={name} value={name}>{name}</SelectItem>
+              ))}
+            </SelectGroup>
+          ))}
+          <SelectGroup>
+            <SelectLabel className="text-xs font-semibold text-muted-foreground">── Other ──</SelectLabel>
+            <SelectItem value="__custom__">Type custom name…</SelectItem>
+          </SelectGroup>
+        </SelectContent>
+      </Select>
+      {(isCustom || value === "__custom__") && (
+        <Input
+          value={isCustom ? value : ""}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="Enter product name"
+          autoFocus
+        />
+      )}
+    </div>
+  );
+}
+
 function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const { toast } = useToast();
   const [customerName, setCustomerName] = useState("");
@@ -1158,8 +1217,7 @@ function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
   const [saveAsConsistent, setSaveAsConsistent] = useState(true);
   const [itemLines, setItemLines] = useState([{ productName: "", quantity: 1 }]);
 
-  const { data: products } = useQuery<any[]>({ queryKey: ["/api/products/current-week"] });
-  const { data: currentWeek } = useQuery<{ weekNumber: number; categoryName: string }>({ queryKey: ["/api/current-week"] });
+  const { data: products } = useQuery<any[]>({ queryKey: ["/api/products"] });
 
   const createMutation = useMutation({
     mutationFn: (data: any) => apiRequest("POST", "/api/orders", data),
@@ -1301,18 +1359,16 @@ function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
           <div className="space-y-2">
             <Label>Items</Label>
             {itemLines.map((line, idx) => (
-              <div key={idx} className="flex gap-2">
-                <Input
+              <div key={idx} className="flex gap-2 items-start">
+                <ProductSelect
                   value={line.productName}
-                  onChange={(e) => {
+                  onChange={(v) => {
                     const newLines = [...itemLines];
-                    newLines[idx].productName = e.target.value;
+                    newLines[idx].productName = v;
                     setItemLines(newLines);
                   }}
-                  placeholder="Product name"
-                  className="flex-1"
-                  list="product-suggestions"
-                  data-testid={`input-manual-item-${idx}`}
+                  products={products}
+                  testId={`select-manual-item-${idx}`}
                 />
                 <Input
                   type="number"
@@ -1322,20 +1378,12 @@ function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
                     newLines[idx].quantity = parseInt(e.target.value) || 1;
                     setItemLines(newLines);
                   }}
-                  className="w-20"
+                  className="w-20 shrink-0"
                   min={1}
                   data-testid={`input-manual-qty-${idx}`}
                 />
               </div>
             ))}
-            {currentWeek && (
-              <p className="text-xs text-muted-foreground">Showing {currentWeek.categoryName} products in suggestions</p>
-            )}
-            <datalist id="product-suggestions">
-              {(products || []).map(p => (
-                <option key={p.id} value={p.name} />
-              ))}
-            </datalist>
             <Button
               size="sm"
               variant="outline"
@@ -1503,18 +1551,16 @@ function EditOrderDialog({ order, open, onOpenChange }: { order: OrderWithItems;
           <div className="space-y-2">
             <Label>Items</Label>
             {itemLines.map((line, idx) => (
-              <div key={idx} className="flex gap-2">
-                <Input
+              <div key={idx} className="flex gap-2 items-start">
+                <ProductSelect
                   value={line.productName}
-                  onChange={(e) => {
+                  onChange={(v) => {
                     const newLines = [...itemLines];
-                    newLines[idx].productName = e.target.value;
+                    newLines[idx].productName = v;
                     setItemLines(newLines);
                   }}
-                  placeholder="Product name"
-                  className="flex-1"
-                  list="edit-product-suggestions"
-                  data-testid={`input-edit-item-${idx}`}
+                  products={products}
+                  testId={`select-edit-item-${idx}`}
                 />
                 <Input
                   type="number"
@@ -1524,17 +1570,12 @@ function EditOrderDialog({ order, open, onOpenChange }: { order: OrderWithItems;
                     newLines[idx].quantity = parseInt(e.target.value) || 1;
                     setItemLines(newLines);
                   }}
-                  className="w-20"
+                  className="w-20 shrink-0"
                   min={1}
                   data-testid={`input-edit-qty-${idx}`}
                 />
               </div>
             ))}
-            <datalist id="edit-product-suggestions">
-              {(products || []).map((p: any) => (
-                <option key={p.id} value={p.name} />
-              ))}
-            </datalist>
             <Button
               size="sm"
               variant="outline"
