@@ -322,9 +322,16 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getSubscriptionOriginOrderIds(): Promise<Set<number>> {
-    const rows = await db.select({ id: subscriptionInvites.selectionsOrderId }).from(subscriptionInvites)
-      .where(isNotNull(subscriptionInvites.selectionsOrderId));
-    return new Set(rows.map(r => r.id as number));
+    const rows = await db.select({
+      satId: subscriptionInvites.selectionsOrderId,
+      tueId: (subscriptionInvites as any).tuesdaySelectionsOrderId,
+    }).from(subscriptionInvites);
+    const ids = new Set<number>();
+    for (const r of rows) {
+      if (r.satId) ids.add(r.satId as number);
+      if (r.tueId) ids.add(r.tueId as number);
+    }
+    return ids;
   }
 
   async updateSubscriptionInviteStatus(id: number, status: string): Promise<void> {

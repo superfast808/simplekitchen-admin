@@ -3014,16 +3014,28 @@ export async function registerRoutes(
 
   // Delete all manual (stamped) orders for the current week.
   // MUST be registered before the generic /:id route so Express doesn't swallow it.
+  // Subscription orders (linked via selections_order_id / tuesday_selections_order_id) are protected.
   app.delete("/api/recurring-orders/stamps-this-week", async (req, res) => {
     try {
       const week = getWeekRange(0);
       const thisWeekOrders = await storage.getOrders(week.from, week.to);
       const manualOrders = thisWeekOrders.filter(o => o.isManual);
+
+      // Collect all order IDs that belong to subscription invites — never delete these
+      const subscriptionOrderIds = await storage.getSubscriptionOriginOrderIds();
+
+      let deleted = 0;
+      let skipped = 0;
       for (const o of manualOrders) {
+        if (subscriptionOrderIds.has(o.id)) {
+          skipped++;
+          continue;
+        }
         await storage.deleteOrderItemsByOrderId(o.id);
         await storage.deleteOrder(o.id);
+        deleted++;
       }
-      res.json({ deleted: manualOrders.length });
+      res.json({ deleted, skipped });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
