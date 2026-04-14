@@ -327,8 +327,10 @@ export class DatabaseStorage implements IStorage {
 
   async getSubscriptionInvites(from?: Date, to?: Date): Promise<SubscriptionInvite[]> {
     const conditions = [];
+    // Filter by weekFrom for both bounds so the query is immune to server-side
+    // week_to boundary changes (e.g. Thu 07:00 UK vs Wed 23:59 UTC mismatches).
     if (from) conditions.push(gte(subscriptionInvites.weekFrom, from));
-    if (to) conditions.push(lte(subscriptionInvites.weekTo, to));
+    if (to) conditions.push(lte(subscriptionInvites.weekFrom, to));
     return db.select().from(subscriptionInvites)
       .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(subscriptionInvites.customerName);
