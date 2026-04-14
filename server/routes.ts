@@ -3208,11 +3208,10 @@ export async function registerRoutes(
 
 
   // Smart stamp: create this week's orders for all active recurring customers,
-  // using last week's actual orders as the item template and mapping to the current week's menu.
+  // using each customer's most recent actual order as the template and mapping to the current week's menu.
   app.post("/api/recurring-orders/smart-stamp-all", async (req, res) => {
     try {
       const week = getWeekRange(0);
-      const prevWeek = getWeekRange(-1);
       // Meal price floor: anything at or above this price is a "meal" (included in subscription).
       // Using a floor rather than an exact price makes the stamp robust across price changes
       // (e.g. £7.50 → £7.75) without needing a code deploy each time.
@@ -3240,11 +3239,16 @@ export async function registerRoutes(
       // This week's manual orders (for dedup check)
       const thisWeekOrders = await storage.getOrders(week.from, week.to);
 
-      // Search back up to 3 weeks to find the most recent order per customer.
-      // This handles: isTuesday null vs false boundary issues, week-boundary edge cases,
-      // and customers who may have missed a week.
-      const threeWeeksAgo = getWeekRange(-3);
-      const recentOrders = await storage.getOrders(threeWeeksAgo.from, prevWeek.to);
+      // Search back up to 52 weeks for the most recent order per customer.
+      // We stop at the start of the current week (week.from) so we never use a
+      // just-created stamp as the basis for itself — the dedup check above covers
+      // orders that already exist this week.
+      // Searching a full year means customers who skipped several weeks (or placed
+      // an order between windows, e.g. Thursday afternoon after the Thu-07:00 cutoff)
+      // are always found rather than falling back to the stale template.
+      const oneYearAgo = new Date(week.from);
+      oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+      const recentOrders = await storage.getOrders(oneYearAgo, week.from);
       const recentWithItems = await Promise.all(
         recentOrders.map(async o => ({ ...o, items: await storage.getOrderItems(o.id) }))
       );
