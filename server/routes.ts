@@ -176,7 +176,13 @@ const smtpTransporter = process.env.SMTP_HOST ? nodemailer.createTransport({
 // Base URL captured from first incoming HTTP request (used by auto-send emails)
 let capturedBaseUrl = "";
 
-// Module-level week range helper (used by both sync and send endpoint)
+// Module-level week range helper (used by both sync and send endpoint).
+// Window: Saturday 00:00 → Thursday 07:00 UK time (5 days later).
+// This matches the client-side getOrderWindow so the meal count is always consistent
+// between the orders table, weekly stats, and smart-stamp product lookups.
+// Previously ended Wednesday 23:59, which created a Thu–Fri gap where orders
+// were invisible to smart-stamp-all, causing it to fall back to stale templates
+// and stamp products from the wrong week's menu.
 function getWeekRange(offset = 0): { from: Date; to: Date } {
   const now = new Date();
   const ukNow = new Date(now.toLocaleString("en-US", { timeZone: "Europe/London" }));
@@ -194,9 +200,10 @@ function getWeekRange(offset = 0): { from: Date; to: Date } {
   }
   const from = new Date(saturdayDate);
   from.setHours(0, 0, 0, 0);
+  // Thursday 07:00 UK = Saturday + 5 days + 7 hours
   const to = new Date(saturdayDate);
-  to.setDate(to.getDate() + 4);
-  to.setHours(23, 59, 59, 999);
+  to.setDate(to.getDate() + 5);
+  to.setHours(7, 0, 0, 0);
   return { from, to };
 }
 
