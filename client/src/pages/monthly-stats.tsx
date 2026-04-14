@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { format, startOfMonth, endOfMonth, subMonths, addMonths } from "date-fns";
+import { format, startOfMonth, endOfMonth, addMonths } from "date-fns";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -111,9 +111,11 @@ function StatMini({ label, value }: { label: string; value: string }) {
 
 function getMonthRange(monthOffset: number): { from: Date; to: Date; label: string; isCurrent: boolean } {
   const now = new Date();
-  const base = monthOffset === 0 ? now : addMonths(startOfMonth(now), monthOffset);
+  const base = addMonths(startOfMonth(now), monthOffset);
   const from = startOfMonth(base);
-  const to = monthOffset === 0 ? now : endOfMonth(base);
+  // Always use end-of-month so the query key is stable throughout the day.
+  // For the current month this gives MTD (future dates simply have no orders yet).
+  const to = endOfMonth(base);
   const label = format(from, "MMMM yyyy");
   return { from, to, label, isCurrent: monthOffset === 0 };
 }
