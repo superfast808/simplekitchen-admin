@@ -44,13 +44,14 @@ function getWeekRange(offset: number): { from: Date; to: Date; isCurrent: boolea
   return { from, to, isCurrent: offset === 0 };
 }
 
-function isVisibleCurrentWeek(): boolean {
+/** True after Thursday 07:00 UK — the production cutoff when this week's meal count is locked. */
+function isWeekFinalized(): boolean {
   const now = new Date();
   const ukNow = new Date(now.toLocaleString("en-US", { timeZone: "Europe/London" }));
-  const day = ukNow.getDay();
+  const day = ukNow.getDay(); // 4 = Thursday
   const hour = ukNow.getHours();
-  if (day === 6 && hour >= 12) return false;
-  return day !== 6 || hour < 12;
+  // Thursday 7am or later (but before Saturday when the new week starts)
+  return (day === 4 && hour >= 7) || day === 5; // Thu≥7am or Friday
 }
 
 function filterItems(
@@ -163,20 +164,18 @@ export default function WeeklyStatsPage() {
   const [includeDelivery, setIncludeDelivery] = useState(true);
 
   const { from, to, isCurrent } = getWeekRange(offset);
-  const canViewCurrent = isVisibleCurrentWeek();
-  const effectiveRange = isCurrent && !canViewCurrent ? getWeekRange(-1) : { from, to };
-  const displayRange = effectiveRange;
+  const weekFinalized = isCurrent && isWeekFinalized();
 
   const { data: rawOrders, isLoading, isFetching } = useQuery<OrderWithItems[]>({
-    queryKey: ["/api/orders", `?from=${effectiveRange.from.toISOString()}&to=${effectiveRange.to.toISOString()}`],
+    queryKey: ["/api/orders", `?from=${from.toISOString()}&to=${to.toISOString()}`],
   });
 
   const { data: legacyStats } = useQuery<{ newCustomers: number; returningCustomers: number }>({
-    queryKey: ["/api/weekly-stats", effectiveRange.from.toISOString(), effectiveRange.to.toISOString()],
+    queryKey: ["/api/weekly-stats", from.toISOString(), to.toISOString()],
     queryFn: async () => {
       const params = new URLSearchParams({
-        from: effectiveRange.from.toISOString(),
-        to: effectiveRange.to.toISOString(),
+        from: from.toISOString(),
+        to: to.toISOString(),
       });
       const res = await fetch(`/api/weekly-stats?${params}`, { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch stats");
@@ -245,12 +244,12 @@ export default function WeeklyStatsPage() {
         <div>
           <h1 className="text-2xl font-bold" data-testid="text-weekly-stats-title">Weekly Stats</h1>
           <p className="text-sm text-muted-foreground" data-testid="text-weekly-stats-range">
-            {format(displayRange.from, "EEE, MMM d")} – {format(displayRange.to, "EEE, MMM d, yyyy")}
+            {format(from, "EEE, MMM d")} – {format(to, "EEE d MMM, yyyy")} 07:00
           </p>
-          <DeliveryDatePills weekStart={displayRange.from} />
-          {isCurrent && !canViewCurrent && offset === 0 && (
-            <p className="text-xs text-amber-600 dark:text-amber-400 mt-1" data-testid="text-stats-cutoff-notice">
-              Current week stats hidden after Saturday noon — showing previous week
+          <DeliveryDatePills weekStart={from} />
+          {weekFinalized && (
+            <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1 font-medium" data-testid="text-stats-cutoff-notice">
+              ✓ Meals finalised — orders locked as of Thu 7am
             </p>
           )}
         </div>
@@ -259,7 +258,7 @@ export default function WeeklyStatsPage() {
             <ChevronLeft className="w-4 h-4" />
           </Button>
           <Button size="sm" variant="outline" onClick={() => setOffset(0)} data-testid="button-stats-current">
-            {canViewCurrent ? "This Week" : "Latest"}
+            This Week
           </Button>
           <Button size="icon" variant="ghost" onClick={() => setOffset(o => o + 1)} disabled={offset >= 0} data-testid="button-stats-next">
             <ChevronRight className="w-4 h-4" />

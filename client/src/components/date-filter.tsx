@@ -27,9 +27,12 @@ export function getOrderWindow(offset: number): { from: Date; to: Date } {
   const from = new Date(saturdayDate);
   from.setHours(0, 0, 0, 0);
 
-  const friday = addDays(saturdayDate, 6);
-  const to = new Date(friday);
-  to.setHours(23, 59, 59, 999);
+  // Orders are finalised at Thursday 07:00 UK time — 5 days after the Saturday window start.
+  // This is the kitchen's production cutoff: both the orders table and weekly stats use this
+  // boundary so the meal count is always consistent between the two views.
+  const thursday = addDays(saturdayDate, 5);
+  const to = new Date(thursday);
+  to.setHours(7, 0, 0, 0);
 
   return { from, to };
 }
@@ -111,7 +114,7 @@ export function DateFilter({
           onClick={() => { setMode("window"); setWindowOffset(0); }}
           data-testid={`button-${testIdPrefix}-mode-week`}
         >
-          Sat–Fri
+          Sat–Thu
         </Button>
         {showMonth && (
           <Button
