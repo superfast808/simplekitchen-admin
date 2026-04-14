@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { eq, gte, lte, and, sql, desc, isNotNull, isNull } from "drizzle-orm";
+import { eq, gte, lte, and, sql, desc, isNotNull, isNull, inArray } from "drizzle-orm";
 import {
   products, ingredients, orders, orderItems, manualQuantities, settings, users,
   subscriptionInvites, subscriptionSelections, recurringOrders, recurringOrderItems,
@@ -41,6 +41,7 @@ export interface IStorage {
   deleteOrder(id: number): Promise<void>;
 
   getOrderItems(orderId: number): Promise<OrderItem[]>;
+  getOrderItemsBatch(orderIds: number[]): Promise<Map<number, OrderItem[]>>;
   getOrderItemsByDateRange(from?: Date, to?: Date): Promise<(OrderItem & { orderId: number; isManual: boolean; isTuesday: boolean; customerName: string })[]>;
   createOrderItem(item: InsertOrderItem): Promise<OrderItem>;
   deleteOrderItemsByOrderId(orderId: number): Promise<void>;
@@ -205,6 +206,18 @@ export class DatabaseStorage implements IStorage {
 
   async getOrderItems(orderId: number): Promise<OrderItem[]> {
     return db.select().from(orderItems).where(eq(orderItems.orderId, orderId));
+  }
+
+  async getOrderItemsBatch(orderIds: number[]): Promise<Map<number, OrderItem[]>> {
+    const map = new Map<number, OrderItem[]>();
+    if (orderIds.length === 0) return map;
+    const rows = await db.select().from(orderItems).where(inArray(orderItems.orderId, orderIds));
+    for (const row of rows) {
+      const list = map.get(row.orderId) ?? [];
+      list.push(row);
+      map.set(row.orderId, list);
+    }
+    return map;
   }
 
   async getOrderItemsByDateRange(from?: Date, to?: Date): Promise<(OrderItem & { orderId: number; isManual: boolean; isTuesday: boolean })[]> {

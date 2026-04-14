@@ -750,12 +750,13 @@ export async function registerRoutes(
       const from = req.query.from ? new Date(req.query.from as string) : undefined;
       const to = req.query.to ? new Date(req.query.to as string) : undefined;
       const ordersList = await storage.getOrders(from, to);
-      const ordersWithItems = await Promise.all(
-        ordersList.map(async (order) => {
-          const items = await storage.getOrderItems(order.id);
-          return { ...order, items };
-        })
-      );
+
+      // Batch-fetch all items in a single query instead of one per order (N+1 → 1)
+      const itemsMap = await storage.getOrderItemsBatch(ordersList.map(o => o.id));
+      const ordersWithItems = ordersList.map(order => ({
+        ...order,
+        items: itemsMap.get(order.id) ?? [],
+      }));
       applyAddDeliveryUpgrades(ordersWithItems);
 
       // Annotate orders with pending (paid but unprocessed) addon links
@@ -773,9 +774,12 @@ export async function registerRoutes(
           stampedToParentId.set((invite as any).tuesdaySelectionsOrderId, invite.orderId);
         }
       }
+      // Batch-fetch parent order items for subscription-stamp annotation
+      const parentIds = [...new Set(stampedToParentId.values())];
+      const parentItemsMap = await storage.getOrderItemsBatch(parentIds);
       const parentIdToTotal = new Map<number, number>();
-      for (const parentId of new Set(stampedToParentId.values())) {
-        const parentItems = await storage.getOrderItems(parentId);
+      for (const parentId of parentIds) {
+        const parentItems = parentItemsMap.get(parentId) ?? [];
         const parentOrder = ordersList.find(o => o.id === parentId);
         const itemsTotal = parentItems.reduce((s, i) => s + parseFloat(i.price || "0"), 0);
         const shipping = parseFloat((parentOrder as any)?.shippingTotal || "0");
