@@ -20,6 +20,7 @@ import SaturdayDeliveryRoutesPage from "@/pages/saturday-delivery-routes";
 import SettingsPage from "@/pages/settings";
 import HelpPage from "@/pages/help";
 import WeeklyStatsPage from "@/pages/weekly-stats";
+import MonthlyStatsPage from "@/pages/monthly-stats";
 import SubscriptionOverviewPage from "@/pages/subscription-overview";
 import TuesdayOrdersPage from "@/pages/tuesday-orders";
 import SaturdayOrdersPage from "@/pages/saturday-orders";
@@ -66,6 +67,7 @@ function PageRouter() {
       <Route path="/routes/tuesday" component={TuesdayDeliveryRoutesPage} />
       <Route path="/routes/saturday" component={SaturdayDeliveryRoutesPage} />
       <Route path="/weekly-stats" component={WeeklyStatsPage} />
+      <Route path="/monthly-stats" component={MonthlyStatsPage} />
       <Route path="/subscriptions" component={SubscriptionOverviewPage} />
       <Route path="/tuesday" component={TuesdayOrdersPage} />
       <Route path="/saturday" component={SaturdayOrdersPage} />

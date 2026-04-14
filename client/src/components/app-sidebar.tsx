@@ -25,6 +25,7 @@ const menuItems = [
   { title: "Sat Routes", url: "/routes/saturday", icon: MapPin },
   { title: "Subscriptions", url: "/subscriptions", icon: Mail },
   { title: "Weekly Stats", url: "/weekly-stats", icon: Activity },
+  { title: "Monthly Stats", url: "/monthly-stats", icon: CalendarDays },
   { title: "Ingredient Library", url: "/ingredient-library", icon: BookOpen },
   { title: "Products", url: "/products", icon: Package },
   { title: "Settings", url: "/settings", icon: Settings },
