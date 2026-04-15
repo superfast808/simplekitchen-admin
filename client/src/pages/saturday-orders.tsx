@@ -742,6 +742,14 @@ function EditManualOrderDialog({ order, open, onOpenChange }: { order: OrderWith
                   onChange={(e) => { const n = [...itemLines]; n[idx].quantity = parseInt(e.target.value) || 1; setItemLines(n); }}
                   className="w-20" min={1} data-testid={`input-edit-manual-qty-${idx}`}
                 />
+                <Button
+                  size="icon" variant="ghost"
+                  onClick={() => setItemLines(itemLines.filter((_, i) => i !== idx))}
+                  disabled={itemLines.length <= 1}
+                  data-testid={`button-remove-item-${idx}`}
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                </Button>
               </div>
             ))}
             <datalist id="sat-edit-manual-product-suggestions">
