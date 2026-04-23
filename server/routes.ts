@@ -808,10 +808,22 @@ export async function registerRoutes(
       if (!orderData.customerName || typeof orderData.customerName !== "string") {
         return res.status(400).json({ message: "Customer name is required" });
       }
+      // When no explicit orderDate is provided, default to now — but if we're past the
+      // Thursday 07:00 cutoff the current time falls in the gap between weeks and the
+      // order would be invisible. Snap it back to the current week's Saturday so it
+      // always appears in the expected week view.
+      let resolvedOrderDate: Date;
+      if (orderData.orderDate) {
+        resolvedOrderDate = new Date(orderData.orderDate);
+      } else {
+        const now = new Date();
+        const week = getWeekRange(0);
+        resolvedOrderDate = now > week.to ? week.from : now;
+      }
       const order = await storage.createOrder({
         ...orderData,
         isManual: true,
-        orderDate: orderData.orderDate ? new Date(orderData.orderDate) : new Date(),
+        orderDate: resolvedOrderDate,
       });
       if (items && Array.isArray(items)) {
         for (const item of items) {
