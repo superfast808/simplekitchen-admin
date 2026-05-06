@@ -464,29 +464,32 @@ async function performSync() {
           orderData.notes = null;
         }
         await storage.updateOrder(existing.id, orderData);
-        // Preserve any portal-added items before clearing WooCommerce items
-        const portalItems = await storage.getPortalAddedItems(existing.id);
-        await storage.deleteOrderItemsByOrderId(existing.id);
-        for (const item of wo.line_items || []) {
-          let product = await storage.getProductByWooId(item.product_id);
-          if (!product && item.variation_id) product = await storage.getProductByWooId(item.variation_id);
-          await storage.createOrderItem({
-            orderId: existing.id,
-            productId: product?.id || null,
-            productName: decodeHtmlEntities(item.name),
-            quantity: item.quantity,
-            price: String(item.total || "0"),
-          });
-        }
-        for (const pi of portalItems) {
-          await storage.createOrderItem({
-            orderId: existing.id,
-            productId: pi.productId,
-            productName: pi.productName,
-            quantity: pi.quantity,
-            price: pi.price ?? "0",
-            portalAdded: true,
-          });
+        // If admin has manually corrected this order's items, preserve them — skip WC re-import
+        if (!(existing as any).portalOverridden) {
+          // Preserve any portal-added items before clearing WooCommerce items
+          const portalItems = await storage.getPortalAddedItems(existing.id);
+          await storage.deleteOrderItemsByOrderId(existing.id);
+          for (const item of wo.line_items || []) {
+            let product = await storage.getProductByWooId(item.product_id);
+            if (!product && item.variation_id) product = await storage.getProductByWooId(item.variation_id);
+            await storage.createOrderItem({
+              orderId: existing.id,
+              productId: product?.id || null,
+              productName: decodeHtmlEntities(item.name),
+              quantity: item.quantity,
+              price: String(item.total || "0"),
+            });
+          }
+          for (const pi of portalItems) {
+            await storage.createOrderItem({
+              orderId: existing.id,
+              productId: pi.productId,
+              productName: pi.productName,
+              quantity: pi.quantity,
+              price: pi.price ?? "0",
+              portalAdded: true,
+            });
+          }
         }
         updated++;
       } else {
@@ -918,6 +921,53 @@ export async function registerRoutes(
     }
   });
 
+  app.patch("/api/orders/:id/items", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { items } = req.body;
+
+      if (!Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ message: "At least one item required" });
+      }
+
+      const order = await storage.getOrder(id);
+      if (!order) return res.status(404).json({ message: "Order not found" });
+
+      const addonItems = await storage.getPortalAddedItems(id);
+
+      await storage.deleteOrderItemsByOrderId(id);
+
+      for (const item of items) {
+        if (!item.productName?.trim()) continue;
+        await storage.createOrderItem({
+          orderId: id,
+          productId: null,
+          productName: item.productName.trim(),
+          quantity: parseInt(item.quantity, 10) || 1,
+          price: String(item.price ?? "7.75"),
+        });
+      }
+
+      for (const addon of addonItems) {
+        await storage.createOrderItem({
+          orderId: id,
+          productId: addon.productId,
+          productName: addon.productName,
+          quantity: addon.quantity,
+          price: addon.price ?? "0",
+          portalAdded: true,
+        });
+      }
+
+      await storage.setOrderPortalOverridden(id, true);
+
+      const updatedItems = await storage.getOrderItems(id);
+      res.json({ success: true, items: updatedItems });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   app.patch("/api/orders/:id/packing", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
@@ -1335,28 +1385,31 @@ export async function registerRoutes(
             orderData.deliveryLng = null;
           }
           await storage.updateOrder(existing.id, orderData);
-          // Preserve any portal-added items before clearing WooCommerce items
-          const portalItems = await storage.getPortalAddedItems(existing.id);
-          await storage.deleteOrderItemsByOrderId(existing.id);
-          for (const item of wo.line_items || []) {
-            const product = await storage.getProductByWooId(item.product_id);
-            await storage.createOrderItem({
-              orderId: existing.id,
-              productId: product?.id || null,
-              productName: decodeHtmlEntities(item.name),
-              quantity: item.quantity,
-              price: String(item.total || "0"),
-            });
-          }
-          for (const pi of portalItems) {
-            await storage.createOrderItem({
-              orderId: existing.id,
-              productId: pi.productId,
-              productName: pi.productName,
-              quantity: pi.quantity,
-              price: pi.price ?? "0",
-              portalAdded: true,
-            });
+          // If admin has manually corrected this order's items, preserve them — skip WC re-import
+          if (!(existing as any).portalOverridden) {
+            // Preserve any portal-added items before clearing WooCommerce items
+            const portalItems = await storage.getPortalAddedItems(existing.id);
+            await storage.deleteOrderItemsByOrderId(existing.id);
+            for (const item of wo.line_items || []) {
+              const product = await storage.getProductByWooId(item.product_id);
+              await storage.createOrderItem({
+                orderId: existing.id,
+                productId: product?.id || null,
+                productName: decodeHtmlEntities(item.name),
+                quantity: item.quantity,
+                price: String(item.total || "0"),
+              });
+            }
+            for (const pi of portalItems) {
+              await storage.createOrderItem({
+                orderId: existing.id,
+                productId: pi.productId,
+                productName: pi.productName,
+                quantity: pi.quantity,
+                price: pi.price ?? "0",
+                portalAdded: true,
+              });
+            }
           }
           updated++;
         } else {

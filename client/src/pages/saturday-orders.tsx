@@ -11,7 +11,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from "@/components/ui/table";
-import { Plus, Pencil, Trash2, Play, CalendarDays, ShoppingCart, Globe, Copy, CheckCircle2, AlertCircle } from "lucide-react";
+import { Plus, Pencil, Trash2, Play, CalendarDays, ShoppingCart, Globe, Copy, CheckCircle2, AlertCircle, Minus, RotateCcw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useDateFilter, DateFilter, DateRangeLabel, getDeliveryDatesForWindow } from "@/components/date-filter";
 import { format } from "date-fns";
@@ -40,6 +40,7 @@ export default function SaturdayOrdersPage() {
   const [showTemplates, setShowTemplates] = useState(false);
   const [editingOrder, setEditingOrder] = useState<RecurringOrderWithItems | null>(null);
   const [editingManualOrder, setEditingManualOrder] = useState<OrderWithItems | null>(null);
+  const [editingItemsOrder, setEditingItemsOrder] = useState<OrderWithItems | null>(null);
   const dateFilter = useDateFilter();
   const { from, to, mode } = dateFilter;
   const deliverySat = mode === "window" ? getDeliveryDatesForWindow(from).saturday : null;
@@ -552,6 +553,7 @@ export default function SaturdayOrdersPage() {
                       <TableHead className="w-[50px] text-right">Qty</TableHead>
                       <TableHead className="w-[90px] text-right">Total</TableHead>
                       <TableHead className="w-[60px] text-center">Pack</TableHead>
+                      <TableHead className="w-[44px]"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -559,6 +561,7 @@ export default function SaturdayOrdersPage() {
                       const orderTotal = order.items.reduce((sum, i) => sum + (parseFloat(i.price) || 0), 0);
                       const orderMeals = order.items.filter(i => !OATS_RE.test(i.productName)).reduce((s, i) => s + i.quantity, 0);
                       const orderOats = order.items.filter(i => OATS_RE.test(i.productName)).reduce((s, i) => s + i.quantity, 0);
+                      const isOverridden = (order as any).portalOverridden === true;
                       return (
                         <TableRow key={order.id} data-testid={`row-website-${order.id}`}>
                           <TableCell className="font-medium" data-testid={`text-website-customer-${order.id}`}>
@@ -570,6 +573,9 @@ export default function SaturdayOrdersPage() {
                                 return (i > 0 ? ", " : "") + `${item.quantity > 1 ? item.quantity + "× " : ""}${item.productName}`;
                               }).join("")}
                             </div>
+                            {isOverridden && (
+                              <span className="text-xs text-amber-600 dark:text-amber-400 font-medium">✎ corrected</span>
+                            )}
                           </TableCell>
                           <TableCell>
                             <span className="text-sm text-muted-foreground" data-testid={`text-website-address-${order.id}`}>
@@ -599,6 +605,18 @@ export default function SaturdayOrdersPage() {
                               onCheckedChange={(checked) => packingMutation.mutate({ id: order.id, data: { readyToPack: !!checked } })}
                               data-testid={`checkbox-pack-website-${order.id}`}
                             />
+                          </TableCell>
+                          <TableCell>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-7 w-7"
+                              title="Correct items"
+                              onClick={() => setEditingItemsOrder(order)}
+                              data-testid={`button-correct-items-${order.id}`}
+                            >
+                              <Pencil className="w-3.5 h-3.5 text-muted-foreground" />
+                            </Button>
                           </TableCell>
                         </TableRow>
                       );
@@ -644,6 +662,14 @@ export default function SaturdayOrdersPage() {
         />
       )}
 
+      {editingItemsOrder && (
+        <EditOrderItemsDialog
+          order={editingItemsOrder}
+          open={!!editingItemsOrder}
+          onOpenChange={(v) => { if (!v) setEditingItemsOrder(null); }}
+        />
+      )}
+
       {editingManualOrder && (
         <EditManualOrderDialog
           order={editingManualOrder}
@@ -652,6 +678,81 @@ export default function SaturdayOrdersPage() {
         />
       )}
     </div>
+  );
+}
+
+function EditOrderItemsDialog({ order, open, onOpenChange }: { order: OrderWithItems; open: boolean; onOpenChange: (v: boolean) => void }) {
+  const { toast } = useToast();
+  const [itemLines, setItemLines] = useState(
+    order.items.filter(i => !i.portalAdded).map(i => ({ productName: i.productName, quantity: i.quantity }))
+  );
+  const { data: products } = useQuery<any[]>({ queryKey: ["/api/products"] });
+
+  const saveMutation = useMutation({
+    mutationFn: (items: Array<{ productName: string; quantity: number }>) =>
+      apiRequest("PATCH", `/api/orders/${order.id}/items`, { items }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      toast({ title: "Items corrected", description: "The order will not be overwritten by future syncs." });
+      onOpenChange(false);
+    },
+    onError: (err: Error) => {
+      toast({ title: "Failed to save", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const handleSave = () => {
+    const valid = itemLines.filter(i => i.productName.trim() && i.quantity > 0);
+    if (valid.length === 0) { toast({ title: "Add at least one item", variant: "destructive" }); return; }
+    saveMutation.mutate(valid);
+  };
+
+  const mealProducts = (products || []).filter((p: any) => !/subscription|add\s+delivery/i.test(p.name));
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Pencil className="w-4 h-4" />
+            Correct Items — {order.customerName}
+          </DialogTitle>
+        </DialogHeader>
+        <p className="text-xs text-muted-foreground -mt-1">
+          Changes here will lock this order against future WooCommerce syncs and mark it as corrected.
+        </p>
+        <div className="space-y-2">
+          {itemLines.map((line, idx) => (
+            <div key={idx} className="flex gap-2 items-center">
+              <Input
+                value={line.productName}
+                onChange={(e) => { const n = [...itemLines]; n[idx].productName = e.target.value; setItemLines(n); }}
+                placeholder="Product name"
+                className="flex-1 text-sm"
+                list="sat-correct-items-suggestions"
+                data-testid={`input-correct-item-name-${idx}`}
+              />
+              <Button size="icon" variant="outline" className="h-8 w-8 shrink-0" onClick={() => { const n = [...itemLines]; n[idx].quantity = Math.max(1, n[idx].quantity - 1); setItemLines(n); }} data-testid={`button-correct-qty-minus-${idx}`}><Minus className="w-3 h-3" /></Button>
+              <span className="w-6 text-center text-sm font-semibold">{line.quantity}</span>
+              <Button size="icon" variant="outline" className="h-8 w-8 shrink-0" onClick={() => { const n = [...itemLines]; n[idx].quantity = n[idx].quantity + 1; setItemLines(n); }} data-testid={`button-correct-qty-plus-${idx}`}><Plus className="w-3 h-3" /></Button>
+              <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0" onClick={() => setItemLines(itemLines.filter((_, i) => i !== idx))} disabled={itemLines.length <= 1} data-testid={`button-correct-remove-${idx}`}><Trash2 className="w-3 h-3 text-destructive" /></Button>
+            </div>
+          ))}
+          <datalist id="sat-correct-items-suggestions">
+            {mealProducts.map((p: any) => <option key={p.id} value={p.name} />)}
+          </datalist>
+          <Button size="sm" variant="outline" onClick={() => setItemLines([...itemLines, { productName: "", quantity: 1 }])} data-testid="button-correct-add-item">
+            <Plus className="w-3 h-3 mr-1" /> Add Item
+          </Button>
+        </div>
+        <div className="border-t pt-3 mt-1 flex gap-2">
+          <Button variant="outline" onClick={() => onOpenChange(false)} className="flex-1" data-testid="button-correct-cancel">Cancel</Button>
+          <Button onClick={handleSave} disabled={saveMutation.isPending} className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white" data-testid="button-correct-save">
+            {saveMutation.isPending ? <RotateCcw className="w-4 h-4 animate-spin" /> : "Save Correction"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

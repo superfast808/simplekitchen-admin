@@ -31,6 +31,11 @@ export async function runStartupMigrations() {
         )
     `);
 
+    // Add portal_overridden column to orders if not exists
+    await client.query(`
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS portal_overridden boolean NOT NULL DEFAULT false
+    `);
+
     // Create standard_ingredients table if it doesn't exist
     await client.query(`
       CREATE TABLE IF NOT EXISTS standard_ingredients (

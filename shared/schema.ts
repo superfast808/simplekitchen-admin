@@ -45,6 +45,7 @@ export const orders = pgTable("orders", {
   paymentMethod: varchar("payment_method"),
   shippingTotal: decimal("shipping_total", { precision: 10, scale: 2 }).default("0"),
   readyToPack: boolean("ready_to_pack").notNull().default(false),
+  portalOverridden: boolean("portal_overridden").notNull().default(false),
 });
 
 export const orderItems = pgTable("order_items", {

@@ -91,6 +91,7 @@ export interface IStorage {
   deleteStandardIngredient(id: number): Promise<void>;
   deleteSubscriptionInvite(id: number): Promise<void>;
 
+  setOrderPortalOverridden(id: number, value: boolean): Promise<void>;
   getPortalAddedItems(orderId: number): Promise<OrderItem[]>;
   createAddonLink(token: string, orderId: number, expiresAt: Date): Promise<AddonLink>;
   getAddonLink(token: string): Promise<AddonLink | undefined>;
@@ -477,6 +478,10 @@ export class DatabaseStorage implements IStorage {
 
   async deleteSubscriptionInvite(id: number): Promise<void> {
     await db.delete(subscriptionInvites).where(eq(subscriptionInvites.id, id));
+  }
+
+  async setOrderPortalOverridden(id: number, value: boolean): Promise<void> {
+    await db.update(orders).set({ portalOverridden: value } as any).where(eq(orders.id, id));
   }
 
   async getPortalAddedItems(orderId: number): Promise<OrderItem[]> {
