@@ -516,10 +516,67 @@ async function performSync() {
     if (upgraded > 0) log(`Auto-sync: persisted delivery upgrade for ${upgraded} order(s)`, "sync");
     // After sync, auto-send any subscription invite emails that are still pending
     await autoSendSubscriptionInvites();
+    // Background geocode any unresolved addresses for this week (fire-and-forget)
+    backgroundGeocodeOrders().catch(() => {});
   } catch (error: any) {
     log(`Auto-sync failed: ${error.message}`, "sync");
   } finally {
     syncInProgress = false;
+  }
+}
+
+let geocodeInProgress = false;
+
+async function backgroundGeocodeOrders() {
+  if (geocodeInProgress) return;
+  geocodeInProgress = true;
+  try {
+    // Geocode orders in a broad 3-week window: last week, this week, next week
+    const windowFrom = new Date();
+    windowFrom.setDate(windowFrom.getDate() - 14);
+    const windowTo = new Date();
+    windowTo.setDate(windowTo.getDate() + 14);
+
+    const ordersList = await storage.getOrders(windowFrom, windowTo);
+    const ungeocoded = ordersList.filter(
+      o => o.deliveryAddress && o.fulfillmentType !== "collection" && (!o.deliveryLat || !o.deliveryLng)
+    );
+
+    if (ungeocoded.length === 0) return;
+    log(`Geocoding ${ungeocoded.length} unresolved address(es) in background...`, "sync");
+
+    let resolved = 0;
+    for (const order of ungeocoded) {
+      try {
+        const variants = buildAddressVariants(order.deliveryAddress!);
+        let lat: number | null = null;
+        let lng: number | null = null;
+        for (const variant of variants) {
+          const response = await fetch(
+            `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(variant)}&limit=1`,
+            { headers: { "User-Agent": "PartnerPortal/1.0" } }
+          );
+          const data = await response.json();
+          if (data && data.length > 0) {
+            lat = parseFloat(data[0].lat);
+            lng = parseFloat(data[0].lon);
+            break;
+          }
+          await new Promise(r => setTimeout(r, 1100));
+        }
+        if (lat !== null && lng !== null) {
+          await storage.updateOrder(order.id, { deliveryLat: String(lat), deliveryLng: String(lng) });
+          resolved++;
+        }
+        // Nominatim rate limit: 1 req/sec
+        await new Promise(r => setTimeout(r, 1100));
+      } catch {
+        // skip individual failures silently
+      }
+    }
+    if (resolved > 0) log(`Background geocoding complete: ${resolved}/${ungeocoded.length} resolved`, "sync");
+  } finally {
+    geocodeInProgress = false;
   }
 }
 
@@ -544,6 +601,8 @@ async function startAutoSync() {
     startupTimeout = setTimeout(performSync, 5000);
   } else {
     log("Auto-sync disabled", "sync");
+    // Even when sync is off, still pre-geocode unresolved addresses at startup
+    setTimeout(() => backgroundGeocodeOrders().catch(() => {}), 8000);
   }
 }
 
