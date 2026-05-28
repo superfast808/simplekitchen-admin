@@ -174,19 +174,19 @@ export class DatabaseStorage implements IStorage {
     return order;
   }
 
-  async getCustomerDeliveryAddress(email: string, name: string): Promise<{ deliveryAddress: string | null; fulfillmentType: string | null } | undefined> {
+  async getCustomerDeliveryAddress(email: string, name: string): Promise<{ deliveryAddress: string | null; fulfillmentType: string | null; deliveryLat: string | null; deliveryLng: string | null } | undefined> {
     const byEmail = email
       ? await db.select().from(orders)
           .where(and(eq(orders.customerEmail, email), isNotNull(orders.deliveryAddress)))
           .orderBy(desc(orders.orderDate))
           .limit(1)
       : [];
-    if (byEmail.length > 0) return { deliveryAddress: byEmail[0].deliveryAddress, fulfillmentType: byEmail[0].fulfillmentType };
+    if (byEmail.length > 0) return { deliveryAddress: byEmail[0].deliveryAddress, fulfillmentType: byEmail[0].fulfillmentType, deliveryLat: byEmail[0].deliveryLat, deliveryLng: byEmail[0].deliveryLng };
     const byName = await db.select().from(orders)
       .where(and(eq(orders.customerName, name), isNotNull(orders.deliveryAddress)))
       .orderBy(desc(orders.orderDate))
       .limit(1);
-    if (byName.length > 0) return { deliveryAddress: byName[0].deliveryAddress, fulfillmentType: byName[0].fulfillmentType };
+    if (byName.length > 0) return { deliveryAddress: byName[0].deliveryAddress, fulfillmentType: byName[0].fulfillmentType, deliveryLat: byName[0].deliveryLat, deliveryLng: byName[0].deliveryLng };
     return undefined;
   }
 

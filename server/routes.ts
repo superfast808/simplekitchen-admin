@@ -493,9 +493,20 @@ async function performSync() {
         }
         updated++;
       } else {
-        orderData.deliveryLat = null;
-        orderData.deliveryLng = null;
         orderData.notes = wooNote;
+        // Reuse geocoords from the customer's most recent previous order if address matches
+        const prevAddr = await storage.getCustomerDeliveryAddress(
+          billing.email || "",
+          customerName
+        );
+        if (prevAddr?.deliveryLat && prevAddr?.deliveryLng &&
+            prevAddr.deliveryAddress?.trim().toLowerCase() === (address || "").trim().toLowerCase()) {
+          orderData.deliveryLat = prevAddr.deliveryLat;
+          orderData.deliveryLng = prevAddr.deliveryLng;
+        } else {
+          orderData.deliveryLat = null;
+          orderData.deliveryLng = null;
+        }
         const order = await storage.createOrder(orderData);
         for (const item of wo.line_items || []) {
           const product = await storage.getProductByWooId(item.product_id);
@@ -552,15 +563,24 @@ async function backgroundGeocodeOrders() {
         let lat: number | null = null;
         let lng: number | null = null;
         for (const variant of variants) {
-          const response = await fetch(
-            `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(variant)}&limit=1`,
-            { headers: { "User-Agent": "PartnerPortal/1.0" } }
-          );
-          const data = await response.json();
-          if (data && data.length > 0) {
-            lat = parseFloat(data[0].lat);
-            lng = parseFloat(data[0].lon);
-            break;
+          try {
+            const response = await fetch(
+              `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(variant)}&limit=1`,
+              { headers: { "User-Agent": "PartnerPortal/1.0" } }
+            );
+            const contentType = response.headers.get("content-type") || "";
+            if (!contentType.includes("application/json")) {
+              await new Promise(r => setTimeout(r, 2000));
+              continue;
+            }
+            const data = await response.json();
+            if (data && data.length > 0) {
+              lat = parseFloat(data[0].lat);
+              lng = parseFloat(data[0].lon);
+              break;
+            }
+          } catch {
+            // network error on this variant
           }
           await new Promise(r => setTimeout(r, 1100));
         }
@@ -1607,15 +1627,25 @@ export async function registerRoutes(
       let lng: number | null = null;
 
       for (const variant of variants) {
-        const response = await fetch(
-          `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(variant)}&limit=1`,
-          { headers: { "User-Agent": "PartnerPortal/1.0" } }
-        );
-        const data = await response.json();
-        if (data && data.length > 0) {
-          lat = parseFloat(data[0].lat);
-          lng = parseFloat(data[0].lon);
-          break;
+        try {
+          const response = await fetch(
+            `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(variant)}&limit=1`,
+            { headers: { "User-Agent": "PartnerPortal/1.0" } }
+          );
+          const contentType = response.headers.get("content-type") || "";
+          if (!contentType.includes("application/json")) {
+            // Nominatim returned HTML/XML error page — rate limited or server error, skip variant
+            await new Promise(r => setTimeout(r, 2000));
+            continue;
+          }
+          const data = await response.json();
+          if (data && data.length > 0) {
+            lat = parseFloat(data[0].lat);
+            lng = parseFloat(data[0].lon);
+            break;
+          }
+        } catch {
+          // network error on this variant — continue to next
         }
         await new Promise(r => setTimeout(r, 1100));
       }
