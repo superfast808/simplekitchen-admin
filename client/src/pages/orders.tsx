@@ -891,9 +891,10 @@ export default function OrdersPage() {
                                   <SelectItem value="none">—</SelectItem>
                                   <SelectItem value="cash">Cash</SelectItem>
                                   <SelectItem value="bank_transfer">Bank</SelectItem>
+                                  <SelectItem value="nil">Nil</SelectItem>
                                 </SelectContent>
                               </Select>
-                              {(order as any).paymentMethod && (order as any).paymentMethod !== "none" && (
+                              {(order as any).paymentMethod && (order as any).paymentMethod !== "none" && (order as any).paymentMethod !== "nil" && (
                                 <Input
                                   type="number"
                                   min="0"
@@ -1331,7 +1332,7 @@ function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
           </div>
           <div>
             <Label className="flex items-center gap-1"><Banknote className="w-4 h-4" />Payment Method (optional)</Label>
-            <Select value={paymentMethod || "none"} onValueChange={(v) => { setPaymentMethod(v === "none" ? "" : v as "cash" | "bank_transfer"); if (v === "none") setCashAmount(""); }}>
+            <Select value={paymentMethod || "none"} onValueChange={(v) => { setPaymentMethod(v === "none" ? "" : v as "cash" | "bank_transfer" | "nil"); if (v === "none" || v === "nil") setCashAmount(""); }}>
               <SelectTrigger data-testid="select-manual-payment-method">
                 <SelectValue />
               </SelectTrigger>
@@ -1339,10 +1340,11 @@ function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
                 <SelectItem value="none">Online / not specified</SelectItem>
                 <SelectItem value="cash">Cash</SelectItem>
                 <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+                <SelectItem value="nil">Nil</SelectItem>
               </SelectContent>
             </Select>
           </div>
-          {paymentMethod && (
+          {paymentMethod && paymentMethod !== "nil" && (
             <div>
               <Label>Amount received (£)</Label>
               <Input
@@ -1523,7 +1525,7 @@ function EditOrderDialog({ order, open, onOpenChange }: { order: OrderWithItems;
           </div>
           <div>
             <Label className="flex items-center gap-1"><Banknote className="w-4 h-4" />Payment Method (optional)</Label>
-            <Select value={paymentMethod || "none"} onValueChange={(v) => { setPaymentMethod(v === "none" ? "" : v as "cash" | "bank_transfer"); if (v === "none") setCashAmount(""); }}>
+            <Select value={paymentMethod || "none"} onValueChange={(v) => { setPaymentMethod(v === "none" ? "" : v as "cash" | "bank_transfer" | "nil"); if (v === "none" || v === "nil") setCashAmount(""); }}>
               <SelectTrigger data-testid="select-edit-payment-method">
                 <SelectValue />
               </SelectTrigger>
@@ -1531,10 +1533,11 @@ function EditOrderDialog({ order, open, onOpenChange }: { order: OrderWithItems;
                 <SelectItem value="none">Online / not specified</SelectItem>
                 <SelectItem value="cash">Cash</SelectItem>
                 <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+                <SelectItem value="nil">Nil</SelectItem>
               </SelectContent>
             </Select>
           </div>
-          {paymentMethod && (
+          {paymentMethod && paymentMethod !== "nil" && (
             <div>
               <Label>Amount received (£)</Label>
               <Input

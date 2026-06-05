@@ -454,9 +454,10 @@ export default function TuesdayOrdersPage() {
                                     <SelectItem value="none">—</SelectItem>
                                     <SelectItem value="cash">Cash</SelectItem>
                                     <SelectItem value="bank_transfer">Bank</SelectItem>
+                                    <SelectItem value="nil">Nil</SelectItem>
                                   </SelectContent>
                                 </Select>
-                                {(order as any).paymentMethod && (order as any).paymentMethod !== "none" && (
+                                {(order as any).paymentMethod && (order as any).paymentMethod !== "none" && (order as any).paymentMethod !== "nil" && (
                                   <Input
                                     type="number"
                                     min="0"
