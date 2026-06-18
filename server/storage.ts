@@ -39,6 +39,7 @@ export interface IStorage {
   createOrder(order: InsertOrder): Promise<Order>;
   updateOrder(id: number, order: Partial<InsertOrder>): Promise<Order | undefined>;
   deleteOrder(id: number): Promise<void>;
+  deduplicateWooOrders(): Promise<number>;
 
   getOrderItems(orderId: number): Promise<OrderItem[]>;
   getOrderItemsBatch(orderIds: number[]): Promise<Map<number, OrderItem[]>>;
@@ -193,6 +194,29 @@ export class DatabaseStorage implements IStorage {
   async createOrder(order: InsertOrder): Promise<Order> {
     const [created] = await db.insert(orders).values(order).returning();
     return created;
+  }
+
+  async deduplicateWooOrders(): Promise<number> {
+    // Find woo_ids that have been inserted more than once (multi-instance race condition)
+    const dupes = await db.execute(sql`
+      SELECT woo_id, array_agg(id ORDER BY id) as ids
+      FROM orders
+      WHERE woo_id IS NOT NULL
+      GROUP BY woo_id
+      HAVING COUNT(*) > 1
+    `);
+    const rows = dupes.rows as { woo_id: number; ids: number[] }[];
+    let removed = 0;
+    for (const row of rows) {
+      // Keep the lowest id (first created), delete the rest along with their items
+      const toDelete = row.ids.slice(1);
+      for (const id of toDelete) {
+        await db.delete(orderItems).where(eq(orderItems.orderId, id));
+        await db.delete(orders).where(eq(orders.id, id));
+        removed++;
+      }
+    }
+    return removed;
   }
 
   async updateOrder(id: number, order: Partial<InsertOrder>): Promise<Order | undefined> {

@@ -493,6 +493,13 @@ async function performSync() {
         }
         updated++;
       } else {
+        // Re-check immediately before insert — guards against concurrent syncs on multiple instances
+        const recheckExisting = await storage.getOrderByWooId(wo.id);
+        if (recheckExisting) {
+          // Another instance already created this order — skip to avoid duplicate
+          updated++;
+          continue;
+        }
         orderData.notes = wooNote;
         // Reuse geocoords from the customer's most recent previous order if address matches
         const prevAddr = await storage.getCustomerDeliveryAddress(
@@ -4407,6 +4414,11 @@ export async function registerRoutes(
       if (!res.headersSent) res.status(500).json({ message: error.message });
     }
   });
+
+  // Clean up any duplicate woo_id rows caused by multi-instance concurrent syncs
+  storage.deduplicateWooOrders().then(n => {
+    if (n > 0) log(`Startup dedup: removed ${n} duplicate WooCommerce order(s)`, "sync");
+  }).catch(() => {});
 
   startAutoSync();
 
