@@ -2251,15 +2251,16 @@ export async function registerRoutes(
       }
 
       const SKIP_PAT = /subscription|add\s+delivery/i;
-      const SPECIAL_PAT = /special/i;
       const OAT_PAT = /oat/i;
       const SOUP_PAT = /soup/i;
       const MEAL_PRICE = 7.75;
+      const SPECIAL_PRICE = 9.75;
 
       const productPool = weekProducts.length > 0 ? weekProducts : allProducts.filter(p => !SKIP_PAT.test(p.name));
 
-      // Helper to check product type
-      const isSpecial = (name: string) => SPECIAL_PAT.test(name) && !OAT_PAT.test(name) && !SOUP_PAT.test(name);
+      // Helper to check product type — specials are identified by price (£9.75), not name
+      const isSpecial = (p: { name: string; price?: string | null }) =>
+        Math.abs(parseFloat(p.price || "0") - SPECIAL_PRICE) < 0.01 && !OAT_PAT.test(p.name) && !SOUP_PAT.test(p.name);
       const isOatOrSoup = (name: string) => OAT_PAT.test(name) || SOUP_PAT.test(name);
       const isRegularMeal = (p: { name: string; price?: string | null }) =>
         Math.abs(parseFloat(p.price || "0") - MEAL_PRICE) < 0.01;
@@ -2271,12 +2272,12 @@ export async function registerRoutes(
       // Meals: regular £7.75 meals + specials (specials count toward meal quota; price shown is actual)
       const satAvailableMeals = productPool
         .filter(p => !SKIP_PAT.test(p.name))
-        .filter(p => isRegularMeal(p) || isSpecial(p.name))
+        .filter(p => isRegularMeal(p) || isSpecial(p))
         .sort((a, b) => a.name.localeCompare(b.name))
         .map(p => ({ name: p.name, popularity: 0, price: p.price || "7.75" }));
       // Extras: oats + soups (always add-ons, never count as meals) + any other non-standard non-special items
       const satAvailableExtras = productPool
-        .filter(p => !SKIP_PAT.test(p.name) && !isSpecial(p.name))
+        .filter(p => !SKIP_PAT.test(p.name) && !isSpecial(p))
         .filter(p => { const pr = parseFloat(p.price || "0"); return pr > 0 && Math.abs(pr - MEAL_PRICE) >= 0.01; })
         .sort((a, b) => a.name.localeCompare(b.name))
         .map(p => ({ name: p.name, popularity: 0, price: p.price || "0" }));
@@ -2284,7 +2285,7 @@ export async function registerRoutes(
       // --- Tuesday product lists ---
       // Meals: regular £7.75 only (no specials on Tuesdays)
       const tueAvailableMeals = productPool
-        .filter(p => !SKIP_PAT.test(p.name) && !isSpecial(p.name) && !isOatOrSoup(p.name))
+        .filter(p => !SKIP_PAT.test(p.name) && !isSpecial(p) && !isOatOrSoup(p.name))
         .filter(p => isRegularMeal(p))
         .sort((a, b) => a.name.localeCompare(b.name))
         .map(p => ({ name: p.name, popularity: 0, price: p.price || "7.75" }));
@@ -2383,15 +2384,15 @@ export async function registerRoutes(
         // Build addon charges:
         // - Sat specials selected as meals → charge (special_price - 7.75) surcharge
         // - Sat/Tue extras (oats, soups, other add-ons) → charge full price
-        const SPECIAL_PAT_POST = /special/i;
         const STANDARD_PRICE_POST = 7.75;
+        const SPECIAL_PRICE_POST = 9.75;
         let addonAmountPence = 0;
         const addonLineItems: Array<{ name: string; pricePence: number; quantity: number }> = [];
 
         for (const sel of satSels) {
           const qty = parseInt(sel.quantity, 10) || 1;
           const unitPrice = parseFloat(productPriceMap[sel.productName] || "0");
-          if (SPECIAL_PAT_POST.test(sel.productName) && unitPrice > STANDARD_PRICE_POST) {
+          if (Math.abs(unitPrice - SPECIAL_PRICE_POST) < 0.01) {
             const surchargePence = Math.round((unitPrice - STANDARD_PRICE_POST) * 100);
             addonAmountPence += surchargePence * qty;
             addonLineItems.push({ name: `${sel.productName} (special surcharge)`, pricePence: surchargePence, quantity: qty });
@@ -2442,7 +2443,7 @@ export async function registerRoutes(
           const qty = parseInt(sel.quantity, 10);
           const unitPrice = parseFloat(productPriceMap[sel.productName] || "7.75");
           // Specials stored at actual price; regular meals at £7.75
-          const itemPrice = SPECIAL_PAT_POST.test(sel.productName) && unitPrice > STANDARD_PRICE_POST
+          const itemPrice = Math.abs(unitPrice - SPECIAL_PRICE_POST) < 0.01
             ? String(unitPrice) : "7.75";
           await storage.createOrderItem({ orderId: satOrder.id, productId: null, productName: sel.productName, quantity: qty, price: itemPrice });
         }
