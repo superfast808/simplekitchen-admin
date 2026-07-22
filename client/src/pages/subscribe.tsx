@@ -27,6 +27,11 @@ type InviteData = {
   categoryName?: string;
   availableMeals: AvailableMeal[];
   availableExtras: AvailableMeal[];
+  // Day-specific lists for dual (and single-day) invites
+  satAvailableMeals?: AvailableMeal[];
+  satAvailableExtras?: AvailableMeal[];
+  tueAvailableMeals?: AvailableMeal[];
+  tueAvailableExtras?: AvailableMeal[];
   selections: Array<{ productName: string; quantity: number; deliveryDay?: string }>;
   satSelections?: Array<{ productName: string; quantity: number }>;
   tueSelections?: Array<{ productName: string; quantity: number }>;
@@ -120,6 +125,9 @@ function MealSelectorPanel({
       {availableMeals.map((meal) => {
         const qty = selections[meal.name] || 0;
         const isSelected = qty > 0;
+        const mealPrice = meal.price ? parseFloat(meal.price) : 7.75;
+        const isSpecialMeal = mealPrice > 7.75;
+        const surcharge = isSpecialMeal ? (mealPrice - 7.75).toFixed(2) : null;
         return (
           <Card
             key={meal.name}
@@ -129,7 +137,13 @@ function MealSelectorPanel({
             <CardContent className="p-4 flex items-center justify-between gap-3">
               <div className="flex-1 min-w-0">
                 <p className="font-medium text-sm truncate">{meal.name}</p>
-                <p className="text-xs text-muted-foreground">£7.75</p>
+                {isSpecialMeal ? (
+                  <p className="text-xs text-amber-600 dark:text-amber-400 font-medium">
+                    £{mealPrice.toFixed(2)} <span className="text-muted-foreground font-normal">(+£{surcharge} special)</span>
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">£7.75</p>
+                )}
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 {isSelected ? (
@@ -260,19 +274,21 @@ export default function SubscribePage({ params }: { params: { token: string } })
   // Pre-fill selections from server data
   useEffect(() => {
     if (!data) return;
-    const extraSet = new Set((data.availableExtras || []).map(e => e.name));
 
     if (data.isDual) {
+      // Use day-specific extra sets so specials stay in meals, oats/soups go into extras
+      const satExtraSet = new Set((data.satAvailableExtras || data.availableExtras || []).map(e => e.name));
+      const tueExtraSet = new Set((data.tueAvailableExtras || data.availableExtras || []).map(e => e.name));
       const satMeals: SelectionMap = {};
       const satExt: SelectionMap = {};
       const tueMeals: SelectionMap = {};
       const tueExt: SelectionMap = {};
       for (const sel of data.satSelections || []) {
-        if (extraSet.has(sel.productName)) satExt[sel.productName] = sel.quantity;
+        if (satExtraSet.has(sel.productName)) satExt[sel.productName] = sel.quantity;
         else satMeals[sel.productName] = sel.quantity;
       }
       for (const sel of data.tueSelections || []) {
-        if (extraSet.has(sel.productName)) tueExt[sel.productName] = sel.quantity;
+        if (tueExtraSet.has(sel.productName)) tueExt[sel.productName] = sel.quantity;
         else tueMeals[sel.productName] = sel.quantity;
       }
       if (Object.keys(satMeals).length) setSatSelections(satMeals);
@@ -280,6 +296,7 @@ export default function SubscribePage({ params }: { params: { token: string } })
       if (Object.keys(tueMeals).length) setTueSelections(tueMeals);
       if (Object.keys(tueExt).length) setTueExtras(tueExt);
     } else {
+      const extraSet = new Set((data.availableExtras || []).map(e => e.name));
       const mealSels: SelectionMap = {};
       const extSels: SelectionMap = {};
       for (const sel of data.selections || []) {
@@ -496,8 +513,8 @@ export default function SubscribePage({ params }: { params: { token: string } })
             <MealSelectorPanel
               label="Saturday Delivery"
               colorScheme="emerald"
-              availableMeals={data.availableMeals}
-              availableExtras={data.availableExtras}
+              availableMeals={data.satAvailableMeals || data.availableMeals}
+              availableExtras={data.satAvailableExtras || data.availableExtras}
               selections={satSelections}
               extras={satExtras}
               maxMeals={maxMeals}
@@ -517,8 +534,8 @@ export default function SubscribePage({ params }: { params: { token: string } })
             <MealSelectorPanel
               label="Tuesday Delivery"
               colorScheme="blue"
-              availableMeals={data.availableMeals}
-              availableExtras={data.availableExtras}
+              availableMeals={data.tueAvailableMeals || data.availableMeals}
+              availableExtras={data.tueAvailableExtras || data.availableExtras}
               selections={tueSelections}
               extras={tueExtras}
               maxMeals={maxMeals}
