@@ -732,16 +732,31 @@ export default function SubscribePage({ params }: { params: { token: string } })
                 );
               })}
             </div>
-            {totalExtras > 0 && (() => {
+            {(() => {
+              const specialsSurcharge = !data.isTuesday ? Object.entries(selections).reduce((sum, [name, qty]) => {
+                const mp = data.availableMeals.find(m => m.name === name);
+                const price = mp?.price ? parseFloat(mp.price) : 7.75;
+                return price > 7.75 ? sum + (price - 7.75) * qty : sum;
+              }, 0) : 0;
               const addonTotal = Object.entries(extras).reduce((sum, [name, qty]) => {
                 const ep = data.availableExtras.find(e => e.name === name);
                 const price = ep?.price ? parseFloat(ep.price) : 0;
                 return sum + price * qty;
               }, 0);
-              return addonTotal > 0 ? (
-                <p className="text-xs text-blue-700 dark:text-blue-300 mb-2 font-medium">
-                  Add-ons total: £{addonTotal.toFixed(2)} — payment required at checkout
-                </p>
+              const totalCharge = specialsSurcharge + addonTotal;
+              return totalCharge > 0 ? (
+                <div className="mb-2 space-y-0.5">
+                  {specialsSurcharge > 0 && (
+                    <p className="text-xs text-amber-700 dark:text-amber-400 font-medium">
+                      Premium meal surcharge: £{specialsSurcharge.toFixed(2)} — payment required at checkout
+                    </p>
+                  )}
+                  {addonTotal > 0 && (
+                    <p className="text-xs text-blue-700 dark:text-blue-300 font-medium">
+                      Add-ons total: £{addonTotal.toFixed(2)} — payment required at checkout
+                    </p>
+                  )}
+                </div>
               ) : null;
             })()}
             <Button
