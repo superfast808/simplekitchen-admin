@@ -4063,6 +4063,172 @@ export async function registerRoutes(
     }
   });
 
+  // ─── Stripe: preview recalculated payment for an invite (no side effects) ───
+  app.get("/api/subscription-invites/:id/regenerate-payment-preview", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const invite = await storage.getSubscriptionInviteById(id);
+      if (!invite) return res.status(404).json({ message: "Invite not found" });
+
+      const allProducts = await storage.getProducts();
+      const productPriceMap: Record<string, number> = {};
+      for (const p of allProducts) productPriceMap[p.name] = parseFloat(p.price || "0");
+
+      const OAT_PAT = /oat/i;
+      const SOUP_PAT = /soup/i;
+      const STANDARD_PRICE = 7.75;
+      const SPECIAL_PRICE = 9.75;
+      const isSpecial = (name: string, price: number) =>
+        Math.abs(price - SPECIAL_PRICE) < 0.01 && !OAT_PAT.test(name) && !SOUP_PAT.test(name);
+
+      const selections = await storage.getSubscriptionSelections(invite.id);
+      const lineItems: Array<{ name: string; pricePence: number; quantity: number; reason: string }> = [];
+      let newAmountPence = 0;
+
+      const isSaturday = !(invite as any).isTuesday;
+
+      for (const sel of selections) {
+        const price = productPriceMap[sel.productName] ?? 0;
+        if (Math.abs(price - STANDARD_PRICE) < 0.01) continue; // regular meal, no charge
+
+        if (isSaturday && isSpecial(sel.productName, price)) {
+          // Special within quota: charge surcharge only
+          const surchargePence = Math.round((price - STANDARD_PRICE) * 100);
+          newAmountPence += surchargePence * sel.quantity;
+          lineItems.push({
+            name: `${sel.productName} (premium surcharge)`,
+            pricePence: surchargePence,
+            quantity: sel.quantity,
+            reason: `£${price.toFixed(2)} meal − £${STANDARD_PRICE.toFixed(2)} base = £${(price - STANDARD_PRICE).toFixed(2)} each`,
+          });
+        } else if (price > 0) {
+          // Extras (oats, soups, other non-standard): full price
+          const pricePence = Math.round(price * 100);
+          newAmountPence += pricePence * sel.quantity;
+          lineItems.push({
+            name: sel.productName,
+            pricePence,
+            quantity: sel.quantity,
+            reason: `Add-on at full price`,
+          });
+        }
+      }
+
+      res.json({
+        oldAmountPence: (invite as any).addonAmountPence ?? 0,
+        newAmountPence,
+        lineItems,
+        hasExistingSession: !!((invite as any).addonPaymentToken),
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // ─── Stripe: cancel old session and issue corrected payment session ─────────
+  app.post("/api/subscription-invites/:id/regenerate-payment", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const invite = await storage.getSubscriptionInviteById(id);
+      if (!invite) return res.status(404).json({ message: "Invite not found" });
+
+      const allProducts = await storage.getProducts();
+      const productPriceMap: Record<string, number> = {};
+      for (const p of allProducts) productPriceMap[p.name] = parseFloat(p.price || "0");
+
+      const OAT_PAT = /oat/i;
+      const SOUP_PAT = /soup/i;
+      const STANDARD_PRICE = 7.75;
+      const SPECIAL_PRICE = 9.75;
+      const isSpecial = (name: string, price: number) =>
+        Math.abs(price - SPECIAL_PRICE) < 0.01 && !OAT_PAT.test(name) && !SOUP_PAT.test(name);
+
+      const selections = await storage.getSubscriptionSelections(invite.id);
+      const lineItems: Array<{ name: string; pricePence: number; quantity: number }> = [];
+      let newAmountPence = 0;
+      const isSaturday = !(invite as any).isTuesday;
+
+      for (const sel of selections) {
+        const price = productPriceMap[sel.productName] ?? 0;
+        if (Math.abs(price - STANDARD_PRICE) < 0.01) continue;
+
+        if (isSaturday && isSpecial(sel.productName, price)) {
+          const surchargePence = Math.round((price - STANDARD_PRICE) * 100);
+          newAmountPence += surchargePence * sel.quantity;
+          lineItems.push({ name: `${sel.productName} (premium surcharge)`, pricePence: surchargePence, quantity: sel.quantity });
+        } else if (price > 0) {
+          const pricePence = Math.round(price * 100);
+          newAmountPence += pricePence * sel.quantity;
+          lineItems.push({ name: sel.productName, pricePence, quantity: sel.quantity });
+        }
+      }
+
+      if (newAmountPence < 50) {
+        return res.status(400).json({ message: "Recalculated amount is below 50p — no payment needed." });
+      }
+
+      const stripeKey = await getActiveStripeSecretKey();
+      if (!stripeKey) return res.status(400).json({ message: "No Stripe API key configured." });
+
+      const stripe = await getUncachableStripeClient(stripeKey);
+
+      // Expire the old session if there is one
+      const oldToken = (invite as any).addonPaymentToken;
+      if (oldToken) {
+        try { await stripe.checkout.sessions.expire(oldToken); } catch (_) { /* already expired/paid – ignore */ }
+      }
+
+      const baseUrl = await getPortalBaseUrl();
+      const session = await stripe.checkout.sessions.create({
+        payment_method_types: ["card"],
+        line_items: lineItems.map(item => ({
+          price_data: { currency: "gbp", unit_amount: item.pricePence, product_data: { name: item.name } },
+          quantity: item.quantity,
+        })),
+        mode: "payment",
+        customer_email: invite.customerEmail || undefined,
+        success_url: `${baseUrl}/subscribe/${invite.token}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${baseUrl}/subscribe/${invite.token}`,
+        metadata: { inviteId: String(invite.id), customerName: invite.customerName },
+      });
+
+      await storage.updateSubscriptionInvitePayment(invite.id, {
+        addonAmountPence: newAmountPence,
+        addonPaid: false,
+        addonPaymentToken: session.id,
+      });
+
+      // Email the customer the corrected payment link
+      const toEmail = invite.customerEmail;
+      if (toEmail) {
+        const transporter = await getSmtpTransporter();
+        const fromEmail = await getSmtpFromEmail();
+        if (transporter && fromEmail) {
+          const firstName = invite.customerName.split(" ")[0];
+          const amountFormatted = `£${(newAmountPence / 100).toFixed(2)}`;
+          const itemsList = lineItems.map(i => `<li>${i.name} ×${i.quantity} — £${((i.pricePence * i.quantity) / 100).toFixed(2)}</li>`).join("");
+          await transporter.sendMail({
+            from: fromEmail,
+            to: toEmail,
+            subject: `Updated payment link for your add-ons – Simple Kitchen Prep`,
+            html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">
+              <h2 style="color:#059669;">Hi ${firstName},</h2>
+              <p>We've updated your payment for this week's extras to <strong>${amountFormatted}</strong>.</p>
+              <ul style="margin:16px 0;">${itemsList}</ul>
+              <p>Please click the button below to complete your payment securely:</p>
+              <a href="${session.url}" style="display:inline-block;background:#059669;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold;margin:12px 0;">Pay ${amountFormatted} Now</a>
+              <p style="color:#6b7280;font-size:13px;margin-top:24px;">If you have any questions, please reply to this email.</p>
+            </div>`,
+          });
+        }
+      }
+
+      res.json({ success: true, oldAmountPence: (invite as any).addonAmountPence ?? 0, newAmountPence, checkoutUrl: session.url, to: toEmail });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   // ─── Stripe: verify checkout session paid (used by success redirect page) ──
   app.get("/api/stripe/session-status", async (req, res) => {
     try {

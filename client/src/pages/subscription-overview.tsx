@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Send, CheckCircle2, Clock, Mail, Pencil, Minus, Plus, UtensilsCrossed, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, RotateCcw, CreditCard, ExternalLink, Trash2, X, ListPlus } from "lucide-react";
+import { Send, CheckCircle2, Clock, Mail, Pencil, Minus, Plus, UtensilsCrossed, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, RotateCcw, CreditCard, ExternalLink, Trash2, X, ListPlus, RefreshCw } from "lucide-react";
 import { format, addWeeks } from "date-fns";
 
 type Selection = {
@@ -96,6 +96,9 @@ export default function SubscriptionOverviewPage() {
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [recoveringId, setRecoveringId] = useState<number | null>(null);
+  const [regenLoadingId, setRegenLoadingId] = useState<number | null>(null);
+  type RegenPreview = { oldAmountPence: number; newAmountPence: number; lineItems: Array<{ name: string; pricePence: number; quantity: number; reason: string }>; hasExistingSession: boolean };
+  const [regenDialog, setRegenDialog] = useState<{ invite: Invite; preview: RegenPreview } | null>(null);
 
   const weekRange = getCurrentWeekRange(weekOffset);
   const isCurrentWeek = weekOffset === 0;
@@ -259,6 +262,40 @@ export default function SubscriptionOverviewPage() {
     },
   });
 
+  const regenPaymentMutation = useMutation({
+    mutationFn: async (inviteId: number) => {
+      return apiRequest("POST", `/api/subscription-invites/${inviteId}/regenerate-payment`, {});
+    },
+    onSuccess: async (res) => {
+      const data = await res.json();
+      const oldGbp = (data.oldAmountPence / 100).toFixed(2);
+      const newGbp = (data.newAmountPence / 100).toFixed(2);
+      toast({ title: "Payment regenerated", description: `Session updated from £${oldGbp} → £${newGbp}. Email sent to ${data.to}.` });
+      setRegenDialog(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/subscription-invites"] });
+    },
+    onError: (err: Error) => {
+      let description = err.message;
+      try { const p = JSON.parse(err.message.replace(/^\d+:\s*/, "")); if (p?.message) description = p.message; } catch {}
+      toast({ title: "Failed to regenerate payment", description, variant: "destructive" });
+      setRegenDialog(null);
+    },
+  });
+
+  const handleRegenClick = async (invite: Invite) => {
+    setRegenLoadingId(invite.id);
+    try {
+      const res = await fetch(`/api/subscription-invites/${invite.id}/regenerate-payment-preview`, { credentials: "include" });
+      const preview: RegenPreview = await res.json();
+      if (!res.ok) throw new Error((preview as any).message || "Failed to load preview");
+      setRegenDialog({ invite, preview });
+    } catch (e: any) {
+      toast({ title: "Could not load preview", description: e.message, variant: "destructive" });
+    } finally {
+      setRegenLoadingId(null);
+    }
+  };
+
   const completed = invites.filter(i => i.status === "completed");
   const pending = invites.filter(i => i.status === "pending");
 
@@ -270,6 +307,62 @@ export default function SubscriptionOverviewPage() {
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6">
+
+      {/* Regenerate Payment Confirmation Dialog */}
+      {regenDialog && (
+        <Dialog open onOpenChange={() => setRegenDialog(null)}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Correct payment for {regenDialog.invite.customerName}?</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 text-sm">
+              <div className="flex items-center justify-between bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-lg px-4 py-3">
+                <span className="text-muted-foreground">Current session</span>
+                <span className="font-semibold text-orange-700 dark:text-orange-400 line-through">
+                  £{(regenDialog.preview.oldAmountPence / 100).toFixed(2)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg px-4 py-3">
+                <span className="text-muted-foreground">Correct amount</span>
+                <span className="font-semibold text-emerald-700 dark:text-emerald-400">
+                  £{(regenDialog.preview.newAmountPence / 100).toFixed(2)}
+                </span>
+              </div>
+              {regenDialog.preview.lineItems.length > 0 && (
+                <div className="border rounded-lg divide-y text-xs">
+                  {regenDialog.preview.lineItems.map((item, i) => (
+                    <div key={i} className="flex items-start justify-between px-3 py-2 gap-2">
+                      <div>
+                        <p className="font-medium">{item.name} ×{item.quantity}</p>
+                        <p className="text-muted-foreground">{item.reason}</p>
+                      </div>
+                      <span className="shrink-0 font-medium">£{((item.pricePence * item.quantity) / 100).toFixed(2)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <p className="text-muted-foreground text-xs">
+                {regenDialog.preview.hasExistingSession
+                  ? "The old Stripe session will be cancelled and a new one created."
+                  : "A new Stripe payment session will be created."}{" "}
+                A payment email will be sent to {regenDialog.invite.customerEmail}.
+              </p>
+            </div>
+            <div className="flex gap-2 justify-end pt-2">
+              <Button variant="outline" size="sm" onClick={() => setRegenDialog(null)}>Cancel</Button>
+              <Button
+                size="sm"
+                className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                disabled={regenPaymentMutation.isPending}
+                onClick={() => regenPaymentMutation.mutate(regenDialog.invite.id)}
+              >
+                {regenPaymentMutation.isPending ? <RotateCcw className="w-3 h-3 animate-spin mr-1" /> : null}
+                Confirm & send
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold" data-testid="text-subscriptions-title">Subscriptions</h1>
@@ -589,6 +682,21 @@ export default function SubscriptionOverviewPage() {
                               ) : (
                                 <CreditCard className="w-3 h-3" />
                               )}
+                            </Button>
+                          )}
+                          {hasUnpaidAddon && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 text-xs px-2 border-amber-400 text-amber-700 dark:border-amber-600 dark:text-amber-400"
+                              title="Recalculate & correct this payment session"
+                              disabled={regenLoadingId === invite.id}
+                              onClick={() => handleRegenClick(invite)}
+                              data-testid={`button-regen-payment-${invite.id}`}
+                            >
+                              {regenLoadingId === invite.id
+                                ? <RotateCcw className="w-3 h-3 animate-spin" />
+                                : <RefreshCw className="w-3 h-3" />}
                             </Button>
                           )}
                           {confirmDeleteId === invite.id ? (
