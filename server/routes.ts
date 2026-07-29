@@ -2696,16 +2696,41 @@ export async function registerRoutes(
       let availableExtras: Array<{ name: string; popularity: number }>;
 
       const SKIP_PAT = /subscription|add\s+delivery/i;
+      const OAT_PAT_SD = /oat/i;
+      const SOUP_PAT_SD = /soup/i;
+      const SPECIAL_PRICE_SD = 9.75;
+      const STANDARD_PRICE_SD = 7.75;
+      const isSpecialSD = (p: { name: string; price?: string | null }) => {
+        const pr = parseFloat(p.price || "0");
+        return Math.abs(pr - SPECIAL_PRICE_SD) < 0.01 && !OAT_PAT_SD.test(p.name) && !SOUP_PAT_SD.test(p.name);
+      };
+      const isRegularMealSD = (p: { name: string; price?: string | null }) =>
+        Math.abs(parseFloat(p.price || "0") - STANDARD_PRICE_SD) < 0.01;
+
       const productPool = weekProducts.length > 0 ? weekProducts : allProducts.filter(p => !SKIP_PAT.test(p.name));
-      // Meals: strictly this week's category only
-      availableMeals = productPool
-        .filter(p => !SKIP_PAT.test(p.name) && Math.abs(parseFloat(p.price || "0") - 7.75) < 0.01)
-        .sort((a, b) => a.name.localeCompare(b.name))
-        .map(p => ({ name: p.name, popularity: 0 }));
-      availableExtras = productPool
-        .filter(p => { if (SKIP_PAT.test(p.name)) return false; const pr = parseFloat(p.price || "0"); return pr > 0 && Math.abs(pr - 7.75) >= 0.01; })
-        .sort((a, b) => a.name.localeCompare(b.name))
-        .map(p => ({ name: p.name, popularity: 0 }));
+      const isTuesdayInvite = !!(invite as any).isTuesday;
+
+      if (isTuesdayInvite) {
+        // Tuesday: regular meals only, no specials; extras = oats + soups
+        availableMeals = productPool
+          .filter(p => !SKIP_PAT.test(p.name) && isRegularMealSD(p) && !OAT_PAT_SD.test(p.name) && !SOUP_PAT_SD.test(p.name))
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .map(p => ({ name: p.name, popularity: 0 }));
+        availableExtras = productPool
+          .filter(p => !SKIP_PAT.test(p.name) && (OAT_PAT_SD.test(p.name) || SOUP_PAT_SD.test(p.name)))
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .map(p => ({ name: p.name, popularity: 0 }));
+      } else {
+        // Saturday: regular meals + specials (£9.75) count as meals; extras = oats/soups/other non-meal
+        availableMeals = productPool
+          .filter(p => !SKIP_PAT.test(p.name) && (isRegularMealSD(p) || isSpecialSD(p)))
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .map(p => ({ name: p.name, popularity: 0 }));
+        availableExtras = productPool
+          .filter(p => !SKIP_PAT.test(p.name) && !isRegularMealSD(p) && !isSpecialSD(p) && parseFloat(p.price || "0") > 0)
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .map(p => ({ name: p.name, popularity: 0 }));
+      }
 
       const existingSelections = await storage.getSubscriptionSelections(invite.id);
       const isDual = (invite as any).isDual === true;
