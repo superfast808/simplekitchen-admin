@@ -2542,9 +2542,23 @@ export async function registerRoutes(
 
       const extrasList: any[] = Array.isArray(extras) ? extras : [];
 
-      // Calculate addon cost: sum of extra items at their WooCommerce price
+      // Calculate addon cost: specials surcharge (meals at £9.75 → charge difference) + extras at full price
+      const STANDARD_PRICE_SINGLE = 7.75;
+      const SPECIAL_PRICE_SINGLE = 9.75;
       let addonAmountPence = 0;
       const addonLineItems: Array<{ name: string; pricePence: number; quantity: number }> = [];
+      // Sat-only: specials within quota charge the difference (£2.00 per item)
+      if (!invite.isTuesday) {
+        for (const sel of selections) {
+          const qty = parseInt(sel.quantity, 10) || 1;
+          const unitPrice = parseFloat(productPriceMap[sel.productName] || "0");
+          if (Math.abs(unitPrice - SPECIAL_PRICE_SINGLE) < 0.01) {
+            const surchargePence = Math.round((unitPrice - STANDARD_PRICE_SINGLE) * 100);
+            addonAmountPence += surchargePence * qty;
+            addonLineItems.push({ name: `${sel.productName} (special surcharge)`, pricePence: surchargePence, quantity: qty });
+          }
+        }
+      }
       for (const extra of extrasList) {
         if (!extra.productName?.trim()) continue;
         const qty = parseInt(extra.quantity, 10) || 1;
@@ -2592,12 +2606,15 @@ export async function registerRoutes(
       });
 
       for (const sel of selections) {
+        const unitPrice = parseFloat(productPriceMap[sel.productName] || "0");
+        const itemPrice = !invite.isTuesday && Math.abs(unitPrice - SPECIAL_PRICE_SINGLE) < 0.01
+          ? String(unitPrice) : "7.75";
         await storage.createOrderItem({
           orderId: order.id,
           productId: null,
           productName: sel.productName,
           quantity: parseInt(sel.quantity, 10),
-          price: "7.75",
+          price: itemPrice,
         });
       }
       for (const extra of extrasList) {
