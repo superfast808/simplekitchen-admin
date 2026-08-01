@@ -83,6 +83,19 @@ export async function runStartupMigrations() {
     await client.query(`
       ALTER TABLE subscribers ADD COLUMN IF NOT EXISTS delivery_fee_pence INTEGER NOT NULL DEFAULT 0
     `);
+    await client.query(`
+      ALTER TABLE subscribers ADD COLUMN IF NOT EXISTS included_oats INTEGER NOT NULL DEFAULT 0
+    `);
+    await client.query(`
+      ALTER TABLE subscribers ADD COLUMN IF NOT EXISTS included_sweet_treats INTEGER NOT NULL DEFAULT 0
+    `);
+    // Propagate included add-ons to invites so the invite completion flow can enforce them
+    await client.query(`
+      ALTER TABLE subscription_invites ADD COLUMN IF NOT EXISTS included_oats INTEGER NOT NULL DEFAULT 0
+    `);
+    await client.query(`
+      ALTER TABLE subscription_invites ADD COLUMN IF NOT EXISTS included_sweet_treats INTEGER NOT NULL DEFAULT 0
+    `);
 
     // Add subscriber_id FK column to subscription_invites
     await client.query(`

@@ -407,6 +407,8 @@ async function runSubscriberSync(): Promise<void> {
           isTuesday: isTuesdaySub,
           isDual: isDualSub,
           subscriberId: sub.id,
+          includedOats: (sub as any).includedOats || 0,
+          includedSweetTreats: (sub as any).includedSweetTreats || 0,
         } as any);
       } catch (inviteErr: any) {
         // Unique index on (subscriber_id, week_from) — invite already exists, skip
@@ -2829,14 +2831,31 @@ export async function registerRoutes(
             addonLineItems.push({ name: `${sel.productName} (special surcharge)`, pricePence: surchargePence, quantity: qty });
           }
         }
+        const INCL_OAT_PAT_DUAL = /oat/i;
+        const INCL_SOUP_PAT_DUAL = /soup/i;
+        let inclOatsLeftDual = (invite as any).includedOats || 0;
+        let inclSweetsLeftDual = (invite as any).includedSweetTreats || 0;
         for (const ext of [...satExtList, ...tueExtList]) {
           if (!ext.productName?.trim()) continue;
           const qty = parseInt(ext.quantity, 10) || 1;
           const unitPrice = parseFloat(productPriceMap[ext.productName] || "0");
-          if (unitPrice > 0) {
+          if (unitPrice <= 0) continue;
+          const isOat = INCL_OAT_PAT_DUAL.test(ext.productName);
+          const isSoup = INCL_SOUP_PAT_DUAL.test(ext.productName);
+          let chargeableQty = qty;
+          if (isOat && inclOatsLeftDual > 0) {
+            const free = Math.min(qty, inclOatsLeftDual);
+            inclOatsLeftDual -= free;
+            chargeableQty -= free;
+          } else if (!isOat && !isSoup && inclSweetsLeftDual > 0) {
+            const free = Math.min(qty, inclSweetsLeftDual);
+            inclSweetsLeftDual -= free;
+            chargeableQty -= free;
+          }
+          if (chargeableQty > 0) {
             const pricePence = Math.round(unitPrice * 100);
-            addonAmountPence += pricePence * qty;
-            addonLineItems.push({ name: ext.productName, pricePence, quantity: qty });
+            addonAmountPence += pricePence * chargeableQty;
+            addonLineItems.push({ name: ext.productName, pricePence, quantity: chargeableQty });
           }
         }
 
@@ -2990,14 +3009,31 @@ export async function registerRoutes(
           }
         }
       }
+      const INCL_OAT_PAT = /oat/i;
+      const INCL_SOUP_PAT = /soup/i;
+      let inclOatsLeft = (invite as any).includedOats || 0;
+      let inclSweetsLeft = (invite as any).includedSweetTreats || 0;
       for (const extra of extrasList) {
         if (!extra.productName?.trim()) continue;
         const qty = parseInt(extra.quantity, 10) || 1;
         const unitPrice = parseFloat(productPriceMap[extra.productName] || "0");
-        if (unitPrice > 0) {
+        if (unitPrice <= 0) continue;
+        const isOat = INCL_OAT_PAT.test(extra.productName);
+        const isSoup = INCL_SOUP_PAT.test(extra.productName);
+        let chargeableQty = qty;
+        if (isOat && inclOatsLeft > 0) {
+          const free = Math.min(qty, inclOatsLeft);
+          inclOatsLeft -= free;
+          chargeableQty -= free;
+        } else if (!isOat && !isSoup && inclSweetsLeft > 0) {
+          const free = Math.min(qty, inclSweetsLeft);
+          inclSweetsLeft -= free;
+          chargeableQty -= free;
+        }
+        if (chargeableQty > 0) {
           const pricePence = Math.round(unitPrice * 100);
-          addonAmountPence += pricePence * qty;
-          addonLineItems.push({ name: extra.productName, pricePence, quantity: qty });
+          addonAmountPence += pricePence * chargeableQty;
+          addonLineItems.push({ name: extra.productName, pricePence, quantity: chargeableQty });
         }
       }
 

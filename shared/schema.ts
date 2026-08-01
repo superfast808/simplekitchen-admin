@@ -95,6 +95,8 @@ export const subscribers = pgTable("subscribers", {
   nextPaymentDueAt: timestamp("next_payment_due_at"),
   deliveryAddress: text("delivery_address"),
   deliveryFeePence: integer("delivery_fee_pence").notNull().default(0),
+  includedOats: integer("included_oats").notNull().default(0),
+  includedSweetTreats: integer("included_sweet_treats").notNull().default(0),
   notes: text("notes"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
@@ -121,6 +123,8 @@ export const subscriptionInvites = pgTable("subscription_invites", {
   isDual: boolean("is_dual").notNull().default(false),
   tuesdaySelectionsOrderId: integer("tuesday_selections_order_id"),
   subscriberId: integer("subscriber_id"),
+  includedOats: integer("included_oats").notNull().default(0),
+  includedSweetTreats: integer("included_sweet_treats").notNull().default(0),
 });
 
 export const subscriptionSelections = pgTable("subscription_selections", {
