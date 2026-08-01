@@ -76,6 +76,14 @@ export async function runStartupMigrations() {
       )
     `);
 
+    // Add delivery address + fee columns to subscribers
+    await client.query(`
+      ALTER TABLE subscribers ADD COLUMN IF NOT EXISTS delivery_address TEXT
+    `);
+    await client.query(`
+      ALTER TABLE subscribers ADD COLUMN IF NOT EXISTS delivery_fee_pence INTEGER NOT NULL DEFAULT 0
+    `);
+
     // Add subscriber_id FK column to subscription_invites
     await client.query(`
       ALTER TABLE subscription_invites ADD COLUMN IF NOT EXISTS subscriber_id INTEGER

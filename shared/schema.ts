@@ -93,6 +93,8 @@ export const subscribers = pgTable("subscribers", {
   active: boolean("active").notNull().default(true),
   lastPaymentSentAt: timestamp("last_payment_sent_at"),
   nextPaymentDueAt: timestamp("next_payment_due_at"),
+  deliveryAddress: text("delivery_address"),
+  deliveryFeePence: integer("delivery_fee_pence").notNull().default(0),
   notes: text("notes"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });

@@ -284,7 +284,7 @@ export default function SubscriptionOverviewPage() {
   // ── Subscribers state ──────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState("invites");
   const [subDialog, setSubDialog] = useState<{ open: boolean; editing: Subscriber | null }>({ open: false, editing: null });
-  const [subForm, setSubForm] = useState({ customerName: "", customerEmail: "", deliveryDay: "sat", quantity: "1", paymentIntervalWeeks: "1", notes: "" });
+  const [subForm, setSubForm] = useState({ customerName: "", customerEmail: "", deliveryDay: "sat", quantity: "1", paymentIntervalWeeks: "1", deliveryAddress: "", deliveryFeePence: "0", notes: "" });
   const [sendingSubPaymentId, setSendingSubPaymentId] = useState<number | null>(null);
   const [confirmDeleteSubId, setConfirmDeleteSubId] = useState<number | null>(null);
 
@@ -344,20 +344,21 @@ export default function SubscriptionOverviewPage() {
   });
 
   const openAddSub = () => {
-    setSubForm({ customerName: "", customerEmail: "", deliveryDay: "sat", quantity: "1", paymentIntervalWeeks: "1", notes: "" });
+    setSubForm({ customerName: "", customerEmail: "", deliveryDay: "sat", quantity: "1", paymentIntervalWeeks: "1", deliveryAddress: "", deliveryFeePence: "0", notes: "" });
     setSubDialog({ open: true, editing: null });
   };
 
   const openEditSub = (sub: Subscriber) => {
-    setSubForm({ customerName: sub.customerName, customerEmail: sub.customerEmail, deliveryDay: sub.deliveryDay, quantity: String(sub.quantity), paymentIntervalWeeks: String(sub.paymentIntervalWeeks), notes: sub.notes || "" });
+    setSubForm({ customerName: sub.customerName, customerEmail: sub.customerEmail, deliveryDay: sub.deliveryDay, quantity: String(sub.quantity), paymentIntervalWeeks: String(sub.paymentIntervalWeeks), deliveryAddress: sub.deliveryAddress || "", deliveryFeePence: String(sub.deliveryFeePence ?? 0), notes: sub.notes || "" });
     setSubDialog({ open: true, editing: sub });
   };
 
   const submitSubForm = () => {
+    const payload = { ...subForm, quantity: parseInt(subForm.quantity), paymentIntervalWeeks: parseInt(subForm.paymentIntervalWeeks), deliveryFeePence: Math.round(parseFloat(subForm.deliveryFeePence || "0") * 100) };
     if (subDialog.editing) {
-      updateSubMutation.mutate({ id: subDialog.editing.id, data: { ...subForm, quantity: parseInt(subForm.quantity), paymentIntervalWeeks: parseInt(subForm.paymentIntervalWeeks) } as any });
+      updateSubMutation.mutate({ id: subDialog.editing.id, data: payload as any });
     } else {
-      createSubMutation.mutate(subForm);
+      createSubMutation.mutate(payload as any);
     }
   };
 
@@ -452,9 +453,35 @@ export default function SubscriptionOverviewPage() {
                   <SelectItem value="4">Every 4 weeks</SelectItem>
                 </SelectContent>
               </Select>
-              <p className="text-xs text-muted-foreground">
-                Payment = {subForm.quantity || 0} meals × £7.75 × {subForm.paymentIntervalWeeks} week{parseInt(subForm.paymentIntervalWeeks) > 1 ? "s" : ""} = <strong>£{(parseInt(subForm.quantity || "0") * 7.75 * parseInt(subForm.paymentIntervalWeeks || "1")).toFixed(2)}</strong>
-              </p>
+              {(() => {
+                const meals = parseInt(subForm.quantity || "0") * 7.75 * parseInt(subForm.paymentIntervalWeeks || "1");
+                const delivery = parseFloat(subForm.deliveryFeePence || "0");
+                const total = meals + delivery;
+                return (
+                  <p className="text-xs text-muted-foreground">
+                    {subForm.quantity || 0} meals × £7.75 × {subForm.paymentIntervalWeeks} wk{parseInt(subForm.paymentIntervalWeeks) > 1 ? "s" : ""}
+                    {delivery > 0 ? ` + £${delivery.toFixed(2)} delivery` : ""}
+                    {" = "}<strong>£{total.toFixed(2)}</strong>
+                  </p>
+                );
+              })()}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Delivery fee (£)</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={subForm.deliveryFeePence}
+                  onChange={e => setSubForm(f => ({ ...f, deliveryFeePence: e.target.value }))}
+                  placeholder="0.00"
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Delivery address (optional)</Label>
+              <Textarea value={subForm.deliveryAddress} onChange={e => setSubForm(f => ({ ...f, deliveryAddress: e.target.value }))} placeholder="123 Example St, City, Postcode" rows={2} />
             </div>
             <div className="space-y-1.5">
               <Label>Notes (optional)</Label>

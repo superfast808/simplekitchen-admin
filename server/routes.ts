@@ -464,7 +464,9 @@ async function runSubscriberSync(): Promise<void> {
       if (!stripeKey) continue;
 
       const stripe = await getUncachableStripeClient(stripeKey);
-      const amountPence = sub.quantity * 775 * sub.paymentIntervalWeeks;
+      const mealsPence = sub.quantity * 775 * sub.paymentIntervalWeeks;
+      const deliveryFeePence = sub.deliveryFeePence ?? 0;
+      const amountPence = mealsPence + deliveryFeePence;
       const weeksLabel = sub.paymentIntervalWeeks === 1 ? "1 week" : `${sub.paymentIntervalWeeks} weeks`;
 
       try {
@@ -473,16 +475,28 @@ async function runSubscriberSync(): Promise<void> {
         const weekKey = week.from.toISOString().slice(0, 10);
         const idempotencyKey = `sub-payment-${sub.id}-${weekKey}`;
 
-        const session = await stripe.checkout.sessions.create({
-          payment_method_types: ["card"],
-          line_items: [{
+        const lineItems: any[] = [{
+          price_data: {
+            currency: "gbp",
+            unit_amount: 775 * sub.paymentIntervalWeeks,
+            product_data: { name: `Meal subscription – ${sub.quantity} meals × ${weeksLabel}` },
+          },
+          quantity: sub.quantity,
+        }];
+        if (deliveryFeePence > 0) {
+          lineItems.push({
             price_data: {
               currency: "gbp",
-              unit_amount: 775 * sub.paymentIntervalWeeks,
-              product_data: { name: `Meal subscription – ${sub.quantity} meals × ${weeksLabel}` },
+              unit_amount: deliveryFeePence,
+              product_data: { name: "Delivery" },
             },
-            quantity: sub.quantity,
-          }],
+            quantity: 1,
+          });
+        }
+
+        const session = await stripe.checkout.sessions.create({
+          payment_method_types: ["card"],
+          line_items: lineItems,
           mode: "payment",
           customer_email: sub.customerEmail,
           success_url: `${baseUrl}/`,
@@ -2496,7 +2510,9 @@ export async function registerRoutes(
 
       const stripe = await getUncachableStripeClient(stripeKey);
       const baseUrl = await getPortalBaseUrl();
-      const amountPence = sub.quantity * 775 * sub.paymentIntervalWeeks;
+      const mealsPence = sub.quantity * 775 * sub.paymentIntervalWeeks;
+      const deliveryFeePence = sub.deliveryFeePence ?? 0;
+      const amountPence = mealsPence + deliveryFeePence;
       const weeksLabel = sub.paymentIntervalWeeks === 1 ? "1 week" : `${sub.paymentIntervalWeeks} weeks`;
 
       const now = new Date();
@@ -2505,16 +2521,28 @@ export async function registerRoutes(
       const dayKey = now.toISOString().slice(0, 10);
       const idempotencyKey = `sub-manual-payment-${sub.id}-${dayKey}`;
 
-      const session = await stripe.checkout.sessions.create({
-        payment_method_types: ["card"],
-        line_items: [{
+      const lineItems: any[] = [{
+        price_data: {
+          currency: "gbp",
+          unit_amount: 775 * sub.paymentIntervalWeeks,
+          product_data: { name: `Meal subscription – ${sub.quantity} meals × ${weeksLabel}` },
+        },
+        quantity: sub.quantity,
+      }];
+      if (deliveryFeePence > 0) {
+        lineItems.push({
           price_data: {
             currency: "gbp",
-            unit_amount: 775 * sub.paymentIntervalWeeks,
-            product_data: { name: `Meal subscription – ${sub.quantity} meals × ${weeksLabel}` },
+            unit_amount: deliveryFeePence,
+            product_data: { name: "Delivery" },
           },
-          quantity: sub.quantity,
-        }],
+          quantity: 1,
+        });
+      }
+
+      const session = await stripe.checkout.sessions.create({
+        payment_method_types: ["card"],
+        line_items: lineItems,
         mode: "payment",
         customer_email: sub.customerEmail,
         success_url: `${baseUrl}/`,
