@@ -58,6 +58,35 @@ export async function runStartupMigrations() {
         ON CONFLICT (name) DO NOTHING
       `);
     }
+
+    // Create subscribers table for manual subscriber management
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS subscribers (
+        id SERIAL PRIMARY KEY,
+        customer_name TEXT NOT NULL,
+        customer_email TEXT NOT NULL,
+        delivery_day TEXT NOT NULL DEFAULT 'sat',
+        quantity INTEGER NOT NULL DEFAULT 1,
+        payment_interval_weeks INTEGER NOT NULL DEFAULT 1,
+        active BOOLEAN NOT NULL DEFAULT true,
+        last_payment_sent_at TIMESTAMP,
+        next_payment_due_at TIMESTAMP,
+        notes TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      )
+    `);
+
+    // Add subscriber_id FK column to subscription_invites
+    await client.query(`
+      ALTER TABLE subscription_invites ADD COLUMN IF NOT EXISTS subscriber_id INTEGER
+    `);
+
+    // Unique partial index: one invite per subscriber per week (NULL subscriber_id rows excluded)
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_subscription_invites_subscriber_week
+      ON subscription_invites (subscriber_id, week_from)
+      WHERE subscriber_id IS NOT NULL
+    `);
   } finally {
     client.release();
   }

@@ -3,7 +3,7 @@ import { eq, gte, lte, and, sql, desc, isNotNull, isNull, inArray } from "drizzl
 import {
   products, ingredients, orders, orderItems, manualQuantities, settings, users,
   subscriptionInvites, subscriptionSelections, recurringOrders, recurringOrderItems,
-  standardIngredients, addonLinks,
+  standardIngredients, addonLinks, subscribers,
   type Product, type InsertProduct,
   type Ingredient, type InsertIngredient,
   type Order, type InsertOrder,
@@ -16,6 +16,7 @@ import {
   type RecurringOrderItem, type InsertRecurringOrderItem,
   type StandardIngredient, type InsertStandardIngredient,
   type AddonLink,
+  type Subscriber, type InsertSubscriber,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -99,6 +100,13 @@ export interface IStorage {
   getAddonLinkByOrderId(orderId: number): Promise<AddonLink | undefined>;
   getPendingAddonLinks(): Promise<AddonLink[]>;
   updateAddonLink(token: string, data: { stripeSessionId?: string; pendingItems?: string; completedAt?: Date }): Promise<void>;
+
+  createSubscriber(data: InsertSubscriber): Promise<Subscriber>;
+  getSubscribers(activeOnly?: boolean): Promise<Subscriber[]>;
+  getSubscriberById(id: number): Promise<Subscriber | undefined>;
+  updateSubscriber(id: number, data: Partial<InsertSubscriber>): Promise<Subscriber | undefined>;
+  deleteSubscriber(id: number): Promise<void>;
+  getSubscriptionInvitesBySubscriberId(subscriberId: number): Promise<SubscriptionInvite[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -535,6 +543,38 @@ export class DatabaseStorage implements IStorage {
   async getPendingAddonLinks(): Promise<AddonLink[]> {
     return db.select().from(addonLinks)
       .where(and(isNotNull(addonLinks.stripeSessionId), isNull(addonLinks.completedAt)));
+  }
+
+  async createSubscriber(data: InsertSubscriber): Promise<Subscriber> {
+    const [created] = await db.insert(subscribers).values(data).returning();
+    return created;
+  }
+
+  async getSubscribers(activeOnly = false): Promise<Subscriber[]> {
+    if (activeOnly) {
+      return db.select().from(subscribers).where(eq(subscribers.active, true)).orderBy(subscribers.customerName);
+    }
+    return db.select().from(subscribers).orderBy(subscribers.customerName);
+  }
+
+  async getSubscriberById(id: number): Promise<Subscriber | undefined> {
+    const [sub] = await db.select().from(subscribers).where(eq(subscribers.id, id));
+    return sub;
+  }
+
+  async updateSubscriber(id: number, data: Partial<InsertSubscriber>): Promise<Subscriber | undefined> {
+    const [updated] = await db.update(subscribers).set(data as any).where(eq(subscribers.id, id)).returning();
+    return updated;
+  }
+
+  async deleteSubscriber(id: number): Promise<void> {
+    await db.delete(subscribers).where(eq(subscribers.id, id));
+  }
+
+  async getSubscriptionInvitesBySubscriberId(subscriberId: number): Promise<SubscriptionInvite[]> {
+    return db.select().from(subscriptionInvites)
+      .where(eq((subscriptionInvites as any).subscriberId, subscriberId))
+      .orderBy(subscriptionInvites.weekFrom);
   }
 
   async updateAddonLink(token: string, data: { stripeSessionId?: string; pendingItems?: string; completedAt?: Date }): Promise<void> {

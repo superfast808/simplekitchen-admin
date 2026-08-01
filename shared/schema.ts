@@ -83,6 +83,20 @@ export const settings = pgTable("settings", {
   value: text("value").notNull(),
 });
 
+export const subscribers = pgTable("subscribers", {
+  id: serial("id").primaryKey(),
+  customerName: text("customer_name").notNull(),
+  customerEmail: text("customer_email").notNull(),
+  deliveryDay: text("delivery_day").notNull().default("sat"), // "sat" | "tue" | "dual"
+  quantity: integer("quantity").notNull().default(1),
+  paymentIntervalWeeks: integer("payment_interval_weeks").notNull().default(1),
+  active: boolean("active").notNull().default(true),
+  lastPaymentSentAt: timestamp("last_payment_sent_at"),
+  nextPaymentDueAt: timestamp("next_payment_due_at"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 export const subscriptionInvites = pgTable("subscription_invites", {
   id: serial("id").primaryKey(),
   orderId: integer("order_id"),
@@ -104,6 +118,7 @@ export const subscriptionInvites = pgTable("subscription_invites", {
   isTuesday: boolean("is_tuesday").notNull().default(false),
   isDual: boolean("is_dual").notNull().default(false),
   tuesdaySelectionsOrderId: integer("tuesday_selections_order_id"),
+  subscriberId: integer("subscriber_id"),
 });
 
 export const subscriptionSelections = pgTable("subscription_selections", {
@@ -148,6 +163,7 @@ export const insertIngredientSchema = createInsertSchema(ingredients).omit({ id:
 export const insertOrderSchema = createInsertSchema(orders).omit({ id: true });
 export const insertOrderItemSchema = createInsertSchema(orderItems).omit({ id: true });
 export const insertManualQuantitySchema = createInsertSchema(manualQuantities).omit({ id: true });
+export const insertSubscriberSchema = createInsertSchema(subscribers).omit({ id: true, createdAt: true });
 export const insertSubscriptionInviteSchema = createInsertSchema(subscriptionInvites).omit({ id: true, createdAt: true });
 export const insertSubscriptionSelectionSchema = createInsertSchema(subscriptionSelections).omit({ id: true });
 export const insertRecurringOrderSchema = createInsertSchema(recurringOrders).omit({ id: true });
@@ -180,3 +196,5 @@ export type StandardIngredient = typeof standardIngredients.$inferSelect;
 export type InsertStandardIngredient = z.infer<typeof insertStandardIngredientSchema>;
 export type AddonLink = typeof addonLinks.$inferSelect;
 export type InsertAddonLink = z.infer<typeof insertAddonLinkSchema>;
+export type Subscriber = typeof subscribers.$inferSelect;
+export type InsertSubscriber = z.infer<typeof insertSubscriberSchema>;

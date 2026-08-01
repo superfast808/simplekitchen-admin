@@ -55,6 +55,7 @@ app.use((req, res, next) => {
   if (req.path.startsWith("/api/subscribe/")) return next();
   if (req.path.startsWith("/api/stripe/session-status")) return next();
   if (req.path.startsWith("/api/addon/")) return next();
+  if (req.path.startsWith("/api/webhooks/")) return next(); // Stripe webhooks use signature verification
   if (!req.path.startsWith("/api/")) return next();
   if (!req.session.userId) {
     return res.status(401).json({ message: "Not authenticated" });

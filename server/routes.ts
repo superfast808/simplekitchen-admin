@@ -1,3 +1,4 @@
+import express from "express";
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
@@ -350,6 +351,176 @@ async function autoSendSubscriptionInvites(): Promise<void> {
   }
 }
 
+let subscriberSyncInProgress = false;
+
+async function runSubscriberSync(): Promise<void> {
+  if (subscriberSyncInProgress) {
+    log("Subscriber sync: skipping, previous run still in progress", "sync");
+    return;
+  }
+  if (process.env.NODE_ENV !== "production") return;
+  if (!isWithinAutoSendWindow()) return;
+
+  subscriberSyncInProgress = true;
+  try {
+    const activeSubscribers = await storage.getSubscribers(true);
+    if (activeSubscribers.length === 0) return;
+
+    const week = getWeekRange(0);
+    const existingInvites = await storage.getSubscriptionInvites(week.from, week.to);
+    const invitedSubscriberIds = new Set(
+      existingInvites
+        .filter(i => (i as any).subscriberId != null)
+        .map(i => (i as any).subscriberId as number)
+    );
+
+    const transporter = await getSmtpTransporter();
+    const fromEmail = await getSmtpFromEmail();
+    const baseUrl = await getPortalBaseUrl();
+    const settingsMap = await getSettingsMap();
+    const emailSubject = settingsMap.subscription_email_subject || DEFAULT_EMAIL_SUBJECT;
+    const emailBodyTemplate = settingsMap.subscription_email_body || DEFAULT_EMAIL_BODY;
+
+    // ── Auto-invite: create invite for each subscriber missing one this week ──
+    for (const sub of activeSubscribers) {
+      if (invitedSubscriberIds.has(sub.id)) continue;
+
+      const isTuesdaySub = sub.deliveryDay === "tue";
+      const isDualSub = sub.deliveryDay === "dual";
+      const token = crypto.randomBytes(32).toString("hex");
+      const pastAddr = await storage.getCustomerDeliveryAddress(sub.customerEmail, sub.customerName);
+      const inviteAddress = pastAddr?.deliveryAddress || null;
+      const inviteFulfillment = pastAddr?.fulfillmentType || "delivery";
+
+      try {
+        await storage.createSubscriptionInvite({
+          orderId: null,
+          customerEmail: sub.customerEmail,
+          customerName: sub.customerName,
+          token,
+          subscriptionQuantity: sub.quantity,
+          status: "pending",
+          weekFrom: week.from,
+          weekTo: week.to,
+          deliveryAddress: inviteAddress,
+          fulfillmentType: inviteFulfillment,
+          isTuesday: isTuesdaySub,
+          isDual: isDualSub,
+          subscriberId: sub.id,
+        } as any);
+      } catch (inviteErr: any) {
+        // Unique index on (subscriber_id, week_from) — invite already exists, skip
+        if (inviteErr?.code === "23505") {
+          invitedSubscriberIds.add(sub.id);
+          continue;
+        }
+        throw inviteErr;
+      }
+      invitedSubscriberIds.add(sub.id);
+
+      if (transporter && fromEmail) {
+        const selectUrl = `${baseUrl}/subscribe/${token}`;
+        const firstName = sub.customerName.split(" ")[0];
+        const dayLabel = isDualSub ? " (Sat + Tue)" : (isTuesdaySub ? " (Tuesday)" : " (Saturday)");
+        const emailBody = emailBodyTemplate
+          .replace(/\{\{firstName\}\}/g, firstName)
+          .replace(/\{\{fullName\}\}/g, sub.customerName)
+          .replace(/\{\{qty\}\}/g, String(sub.quantity))
+          .replace(/\{\{url\}\}/g, selectUrl);
+        try {
+          await transporter.sendMail({
+            from: fromEmail,
+            to: sub.customerEmail,
+            subject: emailSubject
+              .replace(/\{\{firstName\}\}/g, firstName)
+              .replace(/\{\{fullName\}\}/g, sub.customerName)
+              .replace(/\{\{qty\}\}/g, String(sub.quantity)) + dayLabel,
+            html: `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">${emailBody}</div>`,
+          });
+          log(`Subscriber invite sent to ${sub.customerName} (${sub.customerEmail})`, "sync");
+        } catch (emailErr: any) {
+          log(`Subscriber invite email failed for ${sub.customerName}: ${(emailErr as Error).message}`, "sync");
+        }
+      }
+    }
+
+    // ── Auto-payment: send Stripe link if due and not recently sent ────────
+    // nextPaymentDueAt is only advanced by the Stripe webhook (checkout.session.completed).
+    // We track lastPaymentSentAt to avoid re-sending too frequently while a session is open.
+    const PAYMENT_RETRY_DAYS = 7; // min days between resend attempts for an unpaid link
+    const now = new Date();
+    const retryThreshold = new Date(now);
+    retryThreshold.setDate(retryThreshold.getDate() - PAYMENT_RETRY_DAYS);
+
+    for (const sub of activeSubscribers) {
+      const isDue = sub.nextPaymentDueAt ? new Date(sub.nextPaymentDueAt) <= now : true;
+      if (!isDue) continue;
+
+      // Avoid re-sending if a link was sent recently (payment may still be open)
+      const recentlySent = sub.lastPaymentSentAt && new Date(sub.lastPaymentSentAt) > retryThreshold;
+      if (recentlySent) continue;
+
+      const stripeKey = await getActiveStripeSecretKey();
+      if (!stripeKey) continue;
+
+      const stripe = await getUncachableStripeClient(stripeKey);
+      const amountPence = sub.quantity * 775 * sub.paymentIntervalWeeks;
+      const weeksLabel = sub.paymentIntervalWeeks === 1 ? "1 week" : `${sub.paymentIntervalWeeks} weeks`;
+
+      try {
+        // Idempotency key scoped to subscriber + current ISO week — ensures the same
+        // Stripe session is returned if this subscriber's sync runs concurrently or retries.
+        const weekKey = week.from.toISOString().slice(0, 10);
+        const idempotencyKey = `sub-payment-${sub.id}-${weekKey}`;
+
+        const session = await stripe.checkout.sessions.create({
+          payment_method_types: ["card"],
+          line_items: [{
+            price_data: {
+              currency: "gbp",
+              unit_amount: 775 * sub.paymentIntervalWeeks,
+              product_data: { name: `Meal subscription – ${sub.quantity} meals × ${weeksLabel}` },
+            },
+            quantity: sub.quantity,
+          }],
+          mode: "payment",
+          customer_email: sub.customerEmail,
+          success_url: `${baseUrl}/`,
+          cancel_url: `${baseUrl}/`,
+          metadata: { subscriberId: String(sub.id), customerName: sub.customerName },
+        }, { idempotencyKey });
+
+        // Record that a link was sent. nextPaymentDueAt is NOT advanced here —
+        // it is only updated by the Stripe webhook on confirmed payment.
+        await storage.updateSubscriber(sub.id, { lastPaymentSentAt: now });
+
+        if (transporter && fromEmail) {
+          const firstName = sub.customerName.split(" ")[0];
+          const amountGbp = `£${(amountPence / 100).toFixed(2)}`;
+          await transporter.sendMail({
+            from: fromEmail,
+            to: sub.customerEmail,
+            subject: `Your subscription payment – ${amountGbp} for ${weeksLabel}`,
+            html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">
+              <h2 style="color:#059669;">Hi ${firstName},</h2>
+              <p>Your subscription payment of <strong>${amountGbp}</strong> is now due (${sub.quantity} meals × ${weeksLabel}).</p>
+              <a href="${session.url}" style="display:inline-block;background:#059669;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold;margin:12px 0;">Pay ${amountGbp}</a>
+              <p style="color:#6b7280;font-size:13px;margin-top:24px;">If you have any questions, please reply to this email.</p>
+            </div>`,
+          });
+        }
+        log(`Subscriber payment link sent to ${sub.customerName} (${sub.customerEmail}) for £${(amountPence / 100).toFixed(2)}`, "sync");
+      } catch (err: any) {
+        log(`Subscriber payment link failed for ${sub.customerName}: ${err.message}`, "sync");
+      }
+    }
+  } catch (err: any) {
+    log(`runSubscriberSync error: ${err.message}`, "sync");
+  } finally {
+    subscriberSyncInProgress = false;
+  }
+}
+
 async function getSettingsMap(): Promise<Record<string, string>> {
   const allSettings = await storage.getAllSettings();
   const map: Record<string, string> = { ...DEFAULT_SETTINGS };
@@ -534,6 +705,8 @@ async function performSync() {
     if (upgraded > 0) log(`Auto-sync: persisted delivery upgrade for ${upgraded} order(s)`, "sync");
     // After sync, auto-send any subscription invite emails that are still pending
     await autoSendSubscriptionInvites();
+    // Auto-send invites + payments for manual subscribers
+    await runSubscriberSync();
     // Background geocode any unresolved addresses for this week (fire-and-forget)
     backgroundGeocodeOrders().catch(() => {});
   } catch (error: any) {
@@ -607,6 +780,19 @@ async function backgroundGeocodeOrders() {
   }
 }
 
+// Dedicated interval for subscriber sync — runs independently of WooCommerce sync_enabled
+let subscriberSyncInterval: ReturnType<typeof setInterval> | null = null;
+const SUBSCRIBER_SYNC_INTERVAL_MS = 30 * 60 * 1000; // every 30 minutes
+
+function startSubscriberSyncScheduler() {
+  if (subscriberSyncInterval) clearInterval(subscriberSyncInterval);
+  subscriberSyncInterval = setInterval(() => {
+    runSubscriberSync().catch((err) => log(`Subscriber sync error: ${err.message}`, "sync"));
+  }, SUBSCRIBER_SYNC_INTERVAL_MS);
+  // Run once shortly after startup
+  setTimeout(() => runSubscriberSync().catch((err) => log(`Subscriber sync error: ${err.message}`, "sync")), 10000);
+}
+
 async function startAutoSync() {
   if (syncInterval) {
     clearInterval(syncInterval);
@@ -631,6 +817,9 @@ async function startAutoSync() {
     // Even when sync is off, still pre-geocode unresolved addresses at startup
     setTimeout(() => backgroundGeocodeOrders().catch(() => {}), 8000);
   }
+
+  // Always run subscriber sync on its own schedule regardless of sync_enabled
+  startSubscriberSyncScheduler();
 }
 
 export async function registerRoutes(
@@ -2143,6 +2332,220 @@ export async function registerRoutes(
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
+  });
+
+  // ─── Stripe webhook: advance nextPaymentDueAt on confirmed subscriber payment ─
+  // The global express.json() middleware captures req.rawBody via its verify callback,
+  // so we use that Buffer for Stripe signature verification without needing express.raw().
+  // Configure your Stripe dashboard to send checkout.session.completed events to:
+  //   POST /api/webhooks/stripe
+  // Set STRIPE_SUBSCRIBER_WEBHOOK_SECRET in your environment secrets.
+  app.post("/api/webhooks/stripe", async (req, res) => {
+    const webhookSecret = process.env.STRIPE_SUBSCRIBER_WEBHOOK_SECRET;
+    const isProduction = process.env.NODE_ENV === "production";
+
+    // In production, always require a configured webhook secret
+    if (!webhookSecret && isProduction) {
+      log("Stripe webhook rejected: STRIPE_SUBSCRIBER_WEBHOOK_SECRET not configured in production", "sync");
+      return res.status(400).json({ message: "Webhook secret not configured" });
+    }
+
+    let event: any;
+    const rawBody = (req as any).rawBody as Buffer | undefined;
+
+    if (webhookSecret) {
+      const sig = req.headers["stripe-signature"] as string;
+      if (!sig || !rawBody) {
+        return res.status(400).json({ message: "Missing stripe-signature header or raw body" });
+      }
+      try {
+        const stripeKey = await getActiveStripeSecretKey();
+        if (!stripeKey) return res.status(400).json({ message: "No Stripe key configured" });
+        const stripe = await getUncachableStripeClient(stripeKey);
+        event = stripe.webhooks.constructEvent(rawBody, sig, webhookSecret);
+      } catch (err: any) {
+        log(`Stripe webhook signature verification failed: ${err.message}`, "sync");
+        return res.status(400).json({ message: `Webhook error: ${err.message}` });
+      }
+    } else {
+      // No secret — accept unsigned payload in development only
+      event = req.body;
+    }
+
+    if (event.type === "checkout.session.completed") {
+      const session = event.data.object as any;
+      const subscriberId = session.metadata?.subscriberId;
+      if (subscriberId) {
+        try {
+          const sub = await storage.getSubscriberById(parseInt(subscriberId, 10));
+          if (sub) {
+            const paidAt = new Date(session.created * 1000);
+            const nextDue = new Date(paidAt);
+            nextDue.setDate(nextDue.getDate() + sub.paymentIntervalWeeks * 7);
+            await storage.updateSubscriber(sub.id, { nextPaymentDueAt: nextDue });
+            log(`Subscriber payment confirmed for ${sub.customerName} — nextPaymentDueAt set to ${nextDue.toISOString()}`, "sync");
+          }
+        } catch (err: any) {
+          log(`Subscriber webhook update failed: ${err.message}`, "sync");
+        }
+      }
+    }
+
+    res.json({ received: true });
+  });
+
+  // ─── Subscribers CRUD ────────────────────────────────────────────────────
+  app.get("/api/subscribers", async (req, res) => {
+    if (!req.session?.userId) return res.status(401).json({ message: "Not authenticated" });
+    try {
+      const activeOnly = req.query.activeOnly === "true";
+      const subs = await storage.getSubscribers(activeOnly);
+      res.json(subs);
+    } catch (err: any) { res.status(500).json({ message: err.message }); }
+  });
+
+  app.post("/api/subscribers", async (req, res) => {
+    if (!req.session?.userId) return res.status(401).json({ message: "Not authenticated" });
+    try {
+      const { customerName, customerEmail, deliveryDay, quantity, paymentIntervalWeeks, notes } = req.body;
+      if (!customerName?.trim() || !customerEmail?.trim() || !deliveryDay || !quantity) {
+        return res.status(400).json({ message: "customerName, customerEmail, deliveryDay and quantity are required" });
+      }
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(String(customerEmail).trim())) {
+        return res.status(400).json({ message: "customerEmail is not a valid email address" });
+      }
+      if (!["sat", "tue", "dual"].includes(deliveryDay)) {
+        return res.status(400).json({ message: "deliveryDay must be sat, tue or dual" });
+      }
+      const qty = Number(quantity);
+      if (!Number.isInteger(qty) || qty < 1) {
+        return res.status(400).json({ message: "quantity must be a positive integer" });
+      }
+      const interval = Number(paymentIntervalWeeks ?? 1);
+      if (![1, 2, 4].includes(interval) || !Number.isInteger(interval)) {
+        return res.status(400).json({ message: "paymentIntervalWeeks must be 1, 2 or 4" });
+      }
+      const sub = await storage.createSubscriber({
+        customerName: customerName.trim(),
+        customerEmail: String(customerEmail).trim().toLowerCase(),
+        deliveryDay,
+        quantity: qty,
+        paymentIntervalWeeks: interval,
+        active: true,
+        notes: notes?.trim() || null,
+        lastPaymentSentAt: null,
+        nextPaymentDueAt: null,
+      });
+      res.json(sub);
+    } catch (err: any) { res.status(500).json({ message: err.message }); }
+  });
+
+  app.patch("/api/subscribers/:id", async (req, res) => {
+    if (!req.session?.userId) return res.status(401).json({ message: "Not authenticated" });
+    try {
+      const id = parseInt(req.params.id);
+      const allowed = ["customerName", "customerEmail", "deliveryDay", "quantity", "paymentIntervalWeeks", "active", "notes", "nextPaymentDueAt"];
+      const patch: Record<string, any> = {};
+      for (const key of allowed) {
+        if (req.body[key] !== undefined) patch[key] = req.body[key];
+      }
+      if (patch.deliveryDay && !["sat", "tue", "dual"].includes(patch.deliveryDay)) {
+        return res.status(400).json({ message: "deliveryDay must be sat, tue or dual" });
+      }
+      if (patch.customerEmail !== undefined) {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(String(patch.customerEmail).trim())) {
+          return res.status(400).json({ message: "customerEmail is not a valid email address" });
+        }
+        patch.customerEmail = String(patch.customerEmail).trim().toLowerCase();
+      }
+      if (patch.quantity !== undefined) {
+        const qty = Number(patch.quantity);
+        if (!Number.isInteger(qty) || qty < 1) return res.status(400).json({ message: "quantity must be a positive integer" });
+        patch.quantity = qty;
+      }
+      if (patch.paymentIntervalWeeks !== undefined) {
+        const interval = Number(patch.paymentIntervalWeeks);
+        if (![1, 2, 4].includes(interval) || !Number.isInteger(interval)) return res.status(400).json({ message: "paymentIntervalWeeks must be 1, 2 or 4" });
+        patch.paymentIntervalWeeks = interval;
+      }
+      const updated = await storage.updateSubscriber(id, patch);
+      if (!updated) return res.status(404).json({ message: "Subscriber not found" });
+      res.json(updated);
+    } catch (err: any) { res.status(500).json({ message: err.message }); }
+  });
+
+  app.delete("/api/subscribers/:id", async (req, res) => {
+    if (!req.session?.userId) return res.status(401).json({ message: "Not authenticated" });
+    try {
+      await storage.deleteSubscriber(parseInt(req.params.id));
+      res.json({ success: true });
+    } catch (err: any) { res.status(500).json({ message: err.message }); }
+  });
+
+  // Manual trigger: send a payment link now for a specific subscriber
+  app.post("/api/subscribers/:id/send-payment-link", async (req, res) => {
+    if (!req.session?.userId) return res.status(401).json({ message: "Not authenticated" });
+    try {
+      const sub = await storage.getSubscriberById(parseInt(req.params.id));
+      if (!sub) return res.status(404).json({ message: "Subscriber not found" });
+
+      const stripeKey = await getActiveStripeSecretKey();
+      if (!stripeKey) return res.status(400).json({ message: "No Stripe API key configured" });
+
+      const stripe = await getUncachableStripeClient(stripeKey);
+      const baseUrl = await getPortalBaseUrl();
+      const amountPence = sub.quantity * 775 * sub.paymentIntervalWeeks;
+      const weeksLabel = sub.paymentIntervalWeeks === 1 ? "1 week" : `${sub.paymentIntervalWeeks} weeks`;
+
+      const now = new Date();
+      // Idempotency key: subscriber + current date so repeated manual triggers
+      // within the same day reuse the same Stripe session rather than creating extras.
+      const dayKey = now.toISOString().slice(0, 10);
+      const idempotencyKey = `sub-manual-payment-${sub.id}-${dayKey}`;
+
+      const session = await stripe.checkout.sessions.create({
+        payment_method_types: ["card"],
+        line_items: [{
+          price_data: {
+            currency: "gbp",
+            unit_amount: 775 * sub.paymentIntervalWeeks,
+            product_data: { name: `Meal subscription – ${sub.quantity} meals × ${weeksLabel}` },
+          },
+          quantity: sub.quantity,
+        }],
+        mode: "payment",
+        customer_email: sub.customerEmail,
+        success_url: `${baseUrl}/`,
+        cancel_url: `${baseUrl}/`,
+        metadata: { subscriberId: String(sub.id), customerName: sub.customerName },
+      }, { idempotencyKey });
+
+      // Only record that a link was sent. nextPaymentDueAt is advanced by the
+      // Stripe webhook (checkout.session.completed) once payment is confirmed.
+      await storage.updateSubscriber(sub.id, { lastPaymentSentAt: now });
+
+      const transporter = await getSmtpTransporter();
+      const fromEmail = await getSmtpFromEmail();
+      if (transporter && fromEmail) {
+        const firstName = sub.customerName.split(" ")[0];
+        const amountGbp = `£${(amountPence / 100).toFixed(2)}`;
+        await transporter.sendMail({
+          from: fromEmail,
+          to: sub.customerEmail,
+          subject: `Your subscription payment – ${amountGbp} for ${weeksLabel}`,
+          html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">
+            <h2 style="color:#059669;">Hi ${firstName},</h2>
+            <p>Your subscription payment of <strong>${amountGbp}</strong> is now due (${sub.quantity} meals × ${weeksLabel}).</p>
+            <a href="${session.url}" style="display:inline-block;background:#059669;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold;margin:12px 0;">Pay ${amountGbp}</a>
+            <p style="color:#6b7280;font-size:13px;margin-top:24px;">If you have any questions, please reply to this email.</p>
+          </div>`,
+        });
+      }
+
+      res.json({ success: true, to: sub.customerEmail, amountPence, checkoutUrl: session.url });
+    } catch (err: any) { res.status(500).json({ message: err.message }); }
   });
 
   app.get("/api/subscription-invites", async (req, res) => {

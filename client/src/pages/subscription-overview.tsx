@@ -9,8 +9,12 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
-import { Send, CheckCircle2, Clock, Mail, Pencil, Minus, Plus, UtensilsCrossed, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, RotateCcw, CreditCard, ExternalLink, Trash2, X, ListPlus, RefreshCw } from "lucide-react";
+import { Send, CheckCircle2, Clock, Mail, Pencil, Minus, Plus, UtensilsCrossed, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, RotateCcw, CreditCard, ExternalLink, Trash2, X, ListPlus, RefreshCw, UserPlus, Users } from "lucide-react";
 import { format, addWeeks } from "date-fns";
 
 type Selection = {
@@ -42,6 +46,21 @@ type Invite = {
   stripePaymentIntentId?: string;
   isTuesday?: boolean;
   isDual?: boolean;
+  subscriberId?: number | null;
+};
+
+type Subscriber = {
+  id: number;
+  customerName: string;
+  customerEmail: string;
+  deliveryDay: string;
+  quantity: number;
+  paymentIntervalWeeks: number;
+  active: boolean;
+  lastPaymentSentAt: string | null;
+  nextPaymentDueAt: string | null;
+  notes: string | null;
+  createdAt: string;
 };
 
 type MealData = {
@@ -262,6 +281,86 @@ export default function SubscriptionOverviewPage() {
     },
   });
 
+  // ── Subscribers state ──────────────────────────────────────────────────
+  const [activeTab, setActiveTab] = useState("invites");
+  const [subDialog, setSubDialog] = useState<{ open: boolean; editing: Subscriber | null }>({ open: false, editing: null });
+  const [subForm, setSubForm] = useState({ customerName: "", customerEmail: "", deliveryDay: "sat", quantity: "1", paymentIntervalWeeks: "1", notes: "" });
+  const [sendingSubPaymentId, setSendingSubPaymentId] = useState<number | null>(null);
+  const [confirmDeleteSubId, setConfirmDeleteSubId] = useState<number | null>(null);
+
+  const { data: subscribersList = [], isLoading: subsLoading } = useQuery<Subscriber[]>({
+    queryKey: ["/api/subscribers"],
+    queryFn: async () => {
+      const res = await fetch("/api/subscribers", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch");
+      return res.json();
+    },
+  });
+
+  const createSubMutation = useMutation({
+    mutationFn: async (body: typeof subForm) => apiRequest("POST", "/api/subscribers", { ...body, quantity: parseInt(body.quantity), paymentIntervalWeeks: parseInt(body.paymentIntervalWeeks) }),
+    onSuccess: async () => {
+      toast({ title: "Subscriber added" });
+      setSubDialog({ open: false, editing: null });
+      queryClient.invalidateQueries({ queryKey: ["/api/subscribers"] });
+    },
+    onError: (err: Error) => toast({ title: "Failed to add subscriber", description: err.message, variant: "destructive" }),
+  });
+
+  const updateSubMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: number; data: Partial<Subscriber> }) => apiRequest("PATCH", `/api/subscribers/${id}`, data),
+    onSuccess: async () => {
+      toast({ title: "Subscriber updated" });
+      setSubDialog({ open: false, editing: null });
+      queryClient.invalidateQueries({ queryKey: ["/api/subscribers"] });
+    },
+    onError: (err: Error) => toast({ title: "Failed to update", description: err.message, variant: "destructive" }),
+  });
+
+  const deleteSubMutation = useMutation({
+    mutationFn: async (id: number) => apiRequest("DELETE", `/api/subscribers/${id}`, {}),
+    onSuccess: () => {
+      toast({ title: "Subscriber removed" });
+      setConfirmDeleteSubId(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/subscribers"] });
+    },
+    onError: (err: Error) => toast({ title: "Failed to remove", description: err.message, variant: "destructive" }),
+  });
+
+  const sendSubPaymentMutation = useMutation({
+    mutationFn: async (id: number) => apiRequest("POST", `/api/subscribers/${id}/send-payment-link`, {}),
+    onSuccess: async (res) => {
+      const data = await res.json();
+      toast({ title: "Payment link sent", description: `£${(data.amountPence / 100).toFixed(2)} link sent to ${data.to}` });
+      setSendingSubPaymentId(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/subscribers"] });
+    },
+    onError: (err: Error) => {
+      let description = err.message;
+      try { const p = JSON.parse(err.message.replace(/^\d+:\s*/, "")); if (p?.message) description = p.message; } catch {}
+      toast({ title: "Failed to send payment link", description, variant: "destructive" });
+      setSendingSubPaymentId(null);
+    },
+  });
+
+  const openAddSub = () => {
+    setSubForm({ customerName: "", customerEmail: "", deliveryDay: "sat", quantity: "1", paymentIntervalWeeks: "1", notes: "" });
+    setSubDialog({ open: true, editing: null });
+  };
+
+  const openEditSub = (sub: Subscriber) => {
+    setSubForm({ customerName: sub.customerName, customerEmail: sub.customerEmail, deliveryDay: sub.deliveryDay, quantity: String(sub.quantity), paymentIntervalWeeks: String(sub.paymentIntervalWeeks), notes: sub.notes || "" });
+    setSubDialog({ open: true, editing: sub });
+  };
+
+  const submitSubForm = () => {
+    if (subDialog.editing) {
+      updateSubMutation.mutate({ id: subDialog.editing.id, data: { ...subForm, quantity: parseInt(subForm.quantity), paymentIntervalWeeks: parseInt(subForm.paymentIntervalWeeks) } as any });
+    } else {
+      createSubMutation.mutate(subForm);
+    }
+  };
+
   const regenPaymentMutation = useMutation({
     mutationFn: async (inviteId: number) => {
       return apiRequest("POST", `/api/subscription-invites/${inviteId}/regenerate-payment`, {});
@@ -305,8 +404,77 @@ export default function SubscriptionOverviewPage() {
       ? `${Math.abs(weekOffset)} week${Math.abs(weekOffset) > 1 ? "s" : ""} ago (${format(weekRange.from, "d MMM")} – ${format(weekRange.to, "d MMM")})`
       : `${weekOffset} week${weekOffset > 1 ? "s" : ""} ahead (${format(weekRange.from, "d MMM")} – ${format(weekRange.to, "d MMM")})`;
 
+  const DAY_LABELS: Record<string, string> = { sat: "Saturday", tue: "Tuesday", dual: "Sat + Tue" };
+  const INTERVAL_LABELS: Record<number, string> = { 1: "Weekly", 2: "Every 2 wks", 4: "Every 4 wks" };
+
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6">
+
+      {/* Subscriber form dialog */}
+      <Dialog open={subDialog.open} onOpenChange={(v) => setSubDialog(d => ({ ...d, open: v }))}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{subDialog.editing ? "Edit Subscriber" : "Add Subscriber"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label>Customer name</Label>
+              <Input value={subForm.customerName} onChange={e => setSubForm(f => ({ ...f, customerName: e.target.value }))} placeholder="Jane Smith" />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Email</Label>
+              <Input type="email" value={subForm.customerEmail} onChange={e => setSubForm(f => ({ ...f, customerEmail: e.target.value }))} placeholder="jane@example.com" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Delivery day</Label>
+                <Select value={subForm.deliveryDay} onValueChange={v => setSubForm(f => ({ ...f, deliveryDay: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="sat">Saturday</SelectItem>
+                    <SelectItem value="tue">Tuesday</SelectItem>
+                    <SelectItem value="dual">Sat + Tue</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Meals / week</Label>
+                <Input type="number" min="1" max="30" value={subForm.quantity} onChange={e => setSubForm(f => ({ ...f, quantity: e.target.value }))} />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Payment interval</Label>
+              <Select value={subForm.paymentIntervalWeeks} onValueChange={v => setSubForm(f => ({ ...f, paymentIntervalWeeks: v }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="1">Every week</SelectItem>
+                  <SelectItem value="2">Every 2 weeks</SelectItem>
+                  <SelectItem value="4">Every 4 weeks</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Payment = {subForm.quantity || 0} meals × £7.75 × {subForm.paymentIntervalWeeks} week{parseInt(subForm.paymentIntervalWeeks) > 1 ? "s" : ""} = <strong>£{(parseInt(subForm.quantity || "0") * 7.75 * parseInt(subForm.paymentIntervalWeeks || "1")).toFixed(2)}</strong>
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Notes (optional)</Label>
+              <Textarea value={subForm.notes} onChange={e => setSubForm(f => ({ ...f, notes: e.target.value }))} placeholder="Any notes…" rows={2} />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" size="sm" onClick={() => setSubDialog(d => ({ ...d, open: false }))}>Cancel</Button>
+            <Button
+              size="sm"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+              disabled={!subForm.customerName || !subForm.customerEmail || createSubMutation.isPending || updateSubMutation.isPending}
+              onClick={submitSubForm}
+            >
+              {(createSubMutation.isPending || updateSubMutation.isPending) ? <RotateCcw className="w-3 h-3 animate-spin mr-1" /> : null}
+              {subDialog.editing ? "Save changes" : "Add subscriber"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Regenerate Payment Confirmation Dialog */}
       {regenDialog && (
@@ -393,6 +561,19 @@ export default function SubscriptionOverviewPage() {
           )}
         </div>
       </div>
+
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList>
+          <TabsTrigger value="invites">Invites</TabsTrigger>
+          <TabsTrigger value="subscribers" className="gap-1.5">
+            <Users className="w-3.5 h-3.5" />Subscribers
+            {subscribersList.length > 0 && (
+              <span className="ml-1 text-xs bg-muted rounded-full px-1.5 py-0.5 font-medium">{subscribersList.filter(s => s.active).length}</span>
+            )}
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="invites" className="space-y-6 mt-4">
 
       {/* Week navigation */}
       <div className="flex items-center justify-between bg-muted/40 rounded-lg px-4 py-2">
@@ -504,6 +685,11 @@ export default function SubscriptionOverviewPage() {
                       <TableCell className="font-medium">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           {invite.customerName}
+                          {invite.subscriberId && (
+                            <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400">
+                              Manual
+                            </span>
+                          )}
                           {invite.isDual ? (
                             <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
                               Sat+Tue
@@ -749,6 +935,124 @@ export default function SubscriptionOverviewPage() {
           )}
         </CardContent>
       </Card>
+
+        </TabsContent>
+
+        {/* ─── Subscribers tab ─────────────────────────────────────────── */}
+        <TabsContent value="subscribers" className="space-y-4 mt-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-base font-semibold">Manual Subscribers</h2>
+              <p className="text-xs text-muted-foreground">Subscribers managed independently of WooCommerce. Weekly invites &amp; payments are sent automatically.</p>
+            </div>
+            <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1" onClick={openAddSub}>
+              <UserPlus className="w-4 h-4" />Add Subscriber
+            </Button>
+          </div>
+
+          <Card>
+            <CardContent className="p-0">
+              {subsLoading ? (
+                <div className="p-6 space-y-3">{[1, 2, 3].map(i => <Skeleton key={i} className="h-10 w-full" />)}</div>
+              ) : subscribersList.length === 0 ? (
+                <div className="p-12 text-center text-muted-foreground space-y-3">
+                  <Users className="w-10 h-10 mx-auto opacity-30" />
+                  <p className="font-medium">No manual subscribers yet</p>
+                  <p className="text-sm">Add a subscriber to start sending automatic weekly invites and payment links.</p>
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Email</TableHead>
+                      <TableHead className="text-center">Day</TableHead>
+                      <TableHead className="text-center">Meals</TableHead>
+                      <TableHead className="text-center">Payment</TableHead>
+                      <TableHead className="text-center">Last paid</TableHead>
+                      <TableHead className="text-center">Next due</TableHead>
+                      <TableHead className="text-center">Active</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {subscribersList.map(sub => (
+                      <TableRow key={sub.id} className={!sub.active ? "opacity-50" : ""}>
+                        <TableCell className="font-medium">{sub.customerName}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground">{sub.customerEmail}</TableCell>
+                        <TableCell className="text-center">
+                          <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${
+                            sub.deliveryDay === "dual" ? "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300" :
+                            sub.deliveryDay === "tue" ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300" :
+                            "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300"
+                          }`}>
+                            {DAY_LABELS[sub.deliveryDay] ?? sub.deliveryDay}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-center font-medium">{sub.quantity}</TableCell>
+                        <TableCell className="text-center">
+                          <span className="text-xs text-muted-foreground">
+                            £{(sub.quantity * 7.75 * sub.paymentIntervalWeeks).toFixed(2)}<br />
+                            <span className="text-[10px]">{INTERVAL_LABELS[sub.paymentIntervalWeeks] ?? `Every ${sub.paymentIntervalWeeks} wks`}</span>
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-center text-xs text-muted-foreground">
+                          {sub.lastPaymentSentAt ? format(new Date(sub.lastPaymentSentAt), "d MMM") : "—"}
+                        </TableCell>
+                        <TableCell className="text-center text-xs">
+                          {sub.nextPaymentDueAt ? (
+                            <span className={new Date(sub.nextPaymentDueAt) <= new Date() ? "text-red-600 font-medium" : "text-muted-foreground"}>
+                              {format(new Date(sub.nextPaymentDueAt), "d MMM")}
+                            </span>
+                          ) : <span className="text-muted-foreground">—</span>}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <Switch
+                            checked={sub.active}
+                            onCheckedChange={v => updateSubMutation.mutate({ id: sub.id, data: { active: v } })}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center justify-end gap-1">
+                            <Button size="sm" variant="outline" className="h-7 text-xs px-2" title="Edit" onClick={() => openEditSub(sub)}>
+                              <Pencil className="w-3 h-3" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 text-xs px-2 text-emerald-700 border-emerald-300"
+                              title="Send payment link now"
+                              disabled={sendSubPaymentMutation.isPending && sendingSubPaymentId === sub.id}
+                              onClick={() => { setSendingSubPaymentId(sub.id); sendSubPaymentMutation.mutate(sub.id); }}
+                            >
+                              {sendSubPaymentMutation.isPending && sendingSubPaymentId === sub.id
+                                ? <RotateCcw className="w-3 h-3 animate-spin" />
+                                : <CreditCard className="w-3 h-3" />}
+                            </Button>
+                            {confirmDeleteSubId === sub.id ? (
+                              <div className="flex items-center gap-1">
+                                <span className="text-xs text-red-600 whitespace-nowrap">Remove?</span>
+                                <Button size="sm" variant="destructive" className="h-7 text-xs px-2" onClick={() => deleteSubMutation.mutate(sub.id)}>
+                                  {deleteSubMutation.isPending ? <RotateCcw className="w-3 h-3 animate-spin" /> : "Yes"}
+                                </Button>
+                                <Button size="sm" variant="outline" className="h-7 text-xs px-2" onClick={() => setConfirmDeleteSubId(null)}>No</Button>
+                              </div>
+                            ) : (
+                              <Button size="sm" variant="ghost" className="h-7 text-xs px-2 text-red-500 hover:text-red-700 hover:bg-red-50" title="Remove" onClick={() => setConfirmDeleteSubId(sub.id)}>
+                                <X className="w-3 h-3" />
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
       {editingInvite && (
         <AdminSelectionDialog
