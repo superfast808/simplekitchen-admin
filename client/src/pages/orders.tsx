@@ -1432,6 +1432,9 @@ function EditOrderDialog({ order, open, onOpenChange }: { order: OrderWithItems;
   );
 
   const { data: products } = useQuery<any[]>({ queryKey: ["/api/products"] });
+  const { data: currentWeekProducts } = useQuery<any[]>({ queryKey: ["/api/products/current-week"] });
+  const currentWeekNames = new Set((currentWeekProducts || []).map((p: any) => p.name));
+  const currentWeekMeals = (currentWeekProducts || []).filter((p: any) => !/subscription|add\s+delivery/i.test(p.name));
 
   const updateMutation = useMutation({
     mutationFn: (data: any) => apiRequest("PATCH", `/api/orders/${order.id}`, data),
@@ -1554,29 +1557,48 @@ function EditOrderDialog({ order, open, onOpenChange }: { order: OrderWithItems;
           <div className="space-y-2">
             <Label>Items</Label>
             {itemLines.map((line, idx) => (
-              <div key={idx} className="flex gap-2 items-start">
-                <ProductSelect
-                  value={line.productName}
-                  onChange={(v) => {
-                    const newLines = [...itemLines];
-                    newLines[idx].productName = v;
-                    setItemLines(newLines);
-                  }}
-                  products={products}
-                  testId={`select-edit-item-${idx}`}
-                />
-                <Input
-                  type="number"
-                  value={line.quantity}
-                  onChange={(e) => {
-                    const newLines = [...itemLines];
-                    newLines[idx].quantity = parseInt(e.target.value) || 1;
-                    setItemLines(newLines);
-                  }}
-                  className="w-20 shrink-0"
-                  min={1}
-                  data-testid={`input-edit-qty-${idx}`}
-                />
+              <div key={idx} className="space-y-1">
+                <div className="flex gap-2 items-start">
+                  <ProductSelect
+                    value={line.productName}
+                    onChange={(v) => {
+                      const newLines = [...itemLines];
+                      newLines[idx].productName = v;
+                      setItemLines(newLines);
+                    }}
+                    products={products}
+                    testId={`select-edit-item-${idx}`}
+                  />
+                  <Input
+                    type="number"
+                    value={line.quantity}
+                    onChange={(e) => {
+                      const newLines = [...itemLines];
+                      newLines[idx].quantity = parseInt(e.target.value) || 1;
+                      setItemLines(newLines);
+                    }}
+                    className="w-20 shrink-0"
+                    min={1}
+                    data-testid={`input-edit-qty-${idx}`}
+                  />
+                </div>
+                {line.productName.trim() && currentWeekProducts && !currentWeekNames.has(line.productName) && (
+                  <div className="flex items-center gap-2 pl-1 flex-wrap">
+                    <span className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3" /> Not on this week's menu
+                    </span>
+                    <Select onValueChange={(v) => { const newLines = [...itemLines]; newLines[idx].productName = v; setItemLines(newLines); }}>
+                      <SelectTrigger className="h-7 text-xs border-amber-300 text-amber-700 w-auto max-w-[200px]">
+                        <SelectValue placeholder="Change to…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {currentWeekMeals.map((p: any) => (
+                          <SelectItem key={p.id} value={p.name} className="text-xs">{p.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
               </div>
             ))}
             <Button

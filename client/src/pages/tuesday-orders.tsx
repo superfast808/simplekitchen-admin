@@ -707,6 +707,9 @@ function EditOrderItemsDialog({ order, open, onOpenChange }: { order: OrderWithI
   };
 
   const mealProducts = (products || []).filter((p: any) => !/subscription|add\s+delivery/i.test(p.name));
+  const { data: currentWeekProducts } = useQuery<any[]>({ queryKey: ["/api/products/current-week"] });
+  const currentWeekNames = new Set((currentWeekProducts || []).map((p: any) => p.name));
+  const currentWeekMeals = (currentWeekProducts || []).filter((p: any) => !/subscription|add\s+delivery/i.test(p.name));
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -722,19 +725,38 @@ function EditOrderItemsDialog({ order, open, onOpenChange }: { order: OrderWithI
         </p>
         <div className="space-y-2">
           {itemLines.map((line, idx) => (
-            <div key={idx} className="flex gap-2 items-center">
-              <Input
-                value={line.productName}
-                onChange={(e) => { const n = [...itemLines]; n[idx].productName = e.target.value; setItemLines(n); }}
-                placeholder="Product name"
-                className="flex-1 text-sm"
-                list="tue-correct-items-suggestions"
-                data-testid={`input-tue-correct-item-name-${idx}`}
-              />
-              <Button size="icon" variant="outline" className="h-8 w-8 shrink-0" onClick={() => { const n = [...itemLines]; n[idx].quantity = Math.max(1, n[idx].quantity - 1); setItemLines(n); }} data-testid={`button-tue-correct-qty-minus-${idx}`}><Minus className="w-3 h-3" /></Button>
-              <span className="w-6 text-center text-sm font-semibold">{line.quantity}</span>
-              <Button size="icon" variant="outline" className="h-8 w-8 shrink-0" onClick={() => { const n = [...itemLines]; n[idx].quantity = n[idx].quantity + 1; setItemLines(n); }} data-testid={`button-tue-correct-qty-plus-${idx}`}><Plus className="w-3 h-3" /></Button>
-              <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0" onClick={() => setItemLines(itemLines.filter((_, i) => i !== idx))} disabled={itemLines.length <= 1} data-testid={`button-tue-correct-remove-${idx}`}><Trash2 className="w-3 h-3 text-destructive" /></Button>
+            <div key={idx} className="space-y-1">
+              <div className="flex gap-2 items-center">
+                <Input
+                  value={line.productName}
+                  onChange={(e) => { const n = [...itemLines]; n[idx].productName = e.target.value; setItemLines(n); }}
+                  placeholder="Product name"
+                  className="flex-1 text-sm"
+                  list="tue-correct-items-suggestions"
+                  data-testid={`input-tue-correct-item-name-${idx}`}
+                />
+                <Button size="icon" variant="outline" className="h-8 w-8 shrink-0" onClick={() => { const n = [...itemLines]; n[idx].quantity = Math.max(1, n[idx].quantity - 1); setItemLines(n); }} data-testid={`button-tue-correct-qty-minus-${idx}`}><Minus className="w-3 h-3" /></Button>
+                <span className="w-6 text-center text-sm font-semibold">{line.quantity}</span>
+                <Button size="icon" variant="outline" className="h-8 w-8 shrink-0" onClick={() => { const n = [...itemLines]; n[idx].quantity = n[idx].quantity + 1; setItemLines(n); }} data-testid={`button-tue-correct-qty-plus-${idx}`}><Plus className="w-3 h-3" /></Button>
+                <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0" onClick={() => setItemLines(itemLines.filter((_, i) => i !== idx))} disabled={itemLines.length <= 1} data-testid={`button-tue-correct-remove-${idx}`}><Trash2 className="w-3 h-3 text-destructive" /></Button>
+              </div>
+              {line.productName.trim() && currentWeekProducts && !currentWeekNames.has(line.productName) && (
+                <div className="flex items-center gap-2 pl-1 flex-wrap">
+                  <span className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3" /> Not on this week's menu
+                  </span>
+                  <Select onValueChange={(v) => { const n = [...itemLines]; n[idx].productName = v; setItemLines(n); }}>
+                    <SelectTrigger className="h-7 text-xs border-amber-300 text-amber-700 w-auto max-w-[200px]">
+                      <SelectValue placeholder="Change to…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {currentWeekMeals.map((p: any) => (
+                        <SelectItem key={p.id} value={p.name} className="text-xs">{p.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
             </div>
           ))}
           <datalist id="tue-correct-items-suggestions">
@@ -767,6 +789,9 @@ function EditManualOrderDialog({ order, open, onOpenChange }: { order: OrderWith
   );
 
   const { data: products } = useQuery<any[]>({ queryKey: ["/api/products"] });
+  const { data: cwProducts } = useQuery<any[]>({ queryKey: ["/api/products/current-week"] });
+  const cwNames = new Set((cwProducts || []).map((p: any) => p.name));
+  const cwMeals = (cwProducts || []).filter((p: any) => !/subscription|add\s+delivery/i.test(p.name));
 
   const updateMutation = useMutation({
     mutationFn: (data: any) => apiRequest("PATCH", `/api/orders/${order.id}`, data),
@@ -830,26 +855,45 @@ function EditManualOrderDialog({ order, open, onOpenChange }: { order: OrderWith
           <div className="space-y-2">
             <Label>Items</Label>
             {itemLines.map((line, idx) => (
-              <div key={idx} className="flex gap-2">
-                <Input
-                  value={line.productName}
-                  onChange={(e) => { const n = [...itemLines]; n[idx].productName = e.target.value; setItemLines(n); }}
-                  placeholder="Product name" className="flex-1" list="edit-manual-product-suggestions"
-                  data-testid={`input-edit-manual-item-${idx}`}
-                />
-                <Input
-                  type="number" value={line.quantity}
-                  onChange={(e) => { const n = [...itemLines]; n[idx].quantity = parseInt(e.target.value) || 1; setItemLines(n); }}
-                  className="w-20" min={1} data-testid={`input-edit-manual-qty-${idx}`}
-                />
-                <Button
-                  size="icon" variant="ghost"
-                  onClick={() => setItemLines(itemLines.filter((_, i) => i !== idx))}
-                  disabled={itemLines.length <= 1}
-                  data-testid={`button-remove-item-${idx}`}
-                >
-                  <Trash2 className="w-3.5 h-3.5 text-destructive" />
-                </Button>
+              <div key={idx} className="space-y-1">
+                <div className="flex gap-2">
+                  <Input
+                    value={line.productName}
+                    onChange={(e) => { const n = [...itemLines]; n[idx].productName = e.target.value; setItemLines(n); }}
+                    placeholder="Product name" className="flex-1" list="edit-manual-product-suggestions"
+                    data-testid={`input-edit-manual-item-${idx}`}
+                  />
+                  <Input
+                    type="number" value={line.quantity}
+                    onChange={(e) => { const n = [...itemLines]; n[idx].quantity = parseInt(e.target.value) || 1; setItemLines(n); }}
+                    className="w-20" min={1} data-testid={`input-edit-manual-qty-${idx}`}
+                  />
+                  <Button
+                    size="icon" variant="ghost"
+                    onClick={() => setItemLines(itemLines.filter((_, i) => i !== idx))}
+                    disabled={itemLines.length <= 1}
+                    data-testid={`button-remove-item-${idx}`}
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                  </Button>
+                </div>
+                {line.productName.trim() && cwProducts && !cwNames.has(line.productName) && (
+                  <div className="flex items-center gap-2 pl-1 flex-wrap">
+                    <span className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3" /> Not on this week's menu
+                    </span>
+                    <Select onValueChange={(v) => { const n = [...itemLines]; n[idx].productName = v; setItemLines(n); }}>
+                      <SelectTrigger className="h-7 text-xs border-amber-300 text-amber-700 w-auto max-w-[200px]">
+                        <SelectValue placeholder="Change to…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {cwMeals.map((p: any) => (
+                          <SelectItem key={p.id} value={p.name} className="text-xs">{p.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
               </div>
             ))}
             <datalist id="edit-manual-product-suggestions">
