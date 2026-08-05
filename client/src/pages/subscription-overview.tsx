@@ -1304,9 +1304,6 @@ function AdminSelectionDialog({ invite, open, onOpenChange }: {
 
   const isDual = mealData?.isDual === true;
 
-  const availableMealNamesSet = new Set(availableMeals.map(m => m.name));
-  const availableExtraNamesSet = new Set(availableExtras.map(e => e.name));
-
   const totalSelected = Object.values(selections).reduce((sum, q) => sum + q, 0);
   const remaining = localMax - totalSelected;
   const totalExtras = Object.values(extras).reduce((sum, q) => sum + q, 0);
@@ -1344,6 +1341,8 @@ function AdminSelectionDialog({ invite, open, onOpenChange }: {
 
   const availableMeals = mealData?.availableMeals || [];
   const availableExtras = mealData?.availableExtras || [];
+  const availableMealNamesSet = new Set(availableMeals.map(m => m.name));
+  const availableExtraNamesSet = new Set(availableExtras.map(e => e.name));
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
