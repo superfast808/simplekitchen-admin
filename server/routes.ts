@@ -5235,19 +5235,23 @@ export async function registerRoutes(
     try {
       const { db } = await import("./db");
       const { sql } = await import("drizzle-orm");
-      await db.execute(sql`
+      // Match by order ID + product name so stale item IDs are never a problem
+      const r1 = await db.execute(sql`
         UPDATE order_items SET product_name = 'Creamy Pesto Mozzarella Chicken & Roasted Potatoes'
-        WHERE id IN (7448266, 7448265, 7448259, 7448258)
+        WHERE order_id IN (3029, 3030, 3031, 3084)
+          AND product_name = 'Honey BBQ Chicken & Potatoes'
       `);
-      await db.execute(sql`
+      const r2 = await db.execute(sql`
         UPDATE order_items SET product_name = 'SK Special - Beef Lasanga'
-        WHERE id = 7448254
+        WHERE order_id = 3084
+          AND product_name = 'Honey Chipotle Salmon Pasta'
       `);
+      // Ensure the lock is still set
       await db.execute(sql`
         UPDATE orders SET portal_overridden = true
         WHERE id IN (3029, 3030, 3031, 3084)
       `);
-      res.json({ ok: true, message: "Production items corrected and orders locked." });
+      res.json({ ok: true, bbqFixed: (r1 as any).rowCount, salmonFixed: (r2 as any).rowCount });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
