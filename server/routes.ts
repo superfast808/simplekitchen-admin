@@ -5230,33 +5230,6 @@ export async function registerRoutes(
     }
   });
 
-  // ONE-SHOT production item fix — remove once deployed and triggered
-  app.get("/api/admin/fix-aug5-items", async (req: any, res) => {
-    try {
-      const { db } = await import("./db");
-      const { sql } = await import("drizzle-orm");
-      // Match by order ID + product name so stale item IDs are never a problem
-      const r1 = await db.execute(sql`
-        UPDATE order_items SET product_name = 'Creamy Pesto Mozzarella Chicken & Roasted Potatoes'
-        WHERE order_id IN (3029, 3030, 3031, 3084)
-          AND product_name = 'Honey BBQ Chicken & Potatoes'
-      `);
-      const r2 = await db.execute(sql`
-        UPDATE order_items SET product_name = 'SK Special - Beef Lasanga'
-        WHERE order_id = 3084
-          AND product_name = 'Honey Chipotle Salmon Pasta'
-      `);
-      // Ensure the lock is still set
-      await db.execute(sql`
-        UPDATE orders SET portal_overridden = true
-        WHERE id IN (3029, 3030, 3031, 3084)
-      `);
-      res.json({ ok: true, bbqFixed: (r1 as any).rowCount, salmonFixed: (r2 as any).rowCount });
-    } catch (err: any) {
-      res.status(500).json({ message: err.message });
-    }
-  });
-
   // Clean up any duplicate woo_id rows caused by multi-instance concurrent syncs
   storage.deduplicateWooOrders().then(n => {
     if (n > 0) log(`Startup dedup: removed ${n} duplicate WooCommerce order(s)`, "sync");
