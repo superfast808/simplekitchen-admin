@@ -5231,8 +5231,7 @@ export async function registerRoutes(
   });
 
   // ONE-SHOT production item fix — remove once deployed and triggered
-  app.post("/api/admin/fix-aug5-items", async (req: any, res) => {
-    if (!req.session?.userId) return res.status(401).json({ message: "Not authenticated" });
+  app.get("/api/admin/fix-aug5-items", async (req: any, res) => {
     try {
       const { db } = await import("./db");
       const { sql } = await import("drizzle-orm");
