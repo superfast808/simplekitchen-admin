@@ -809,6 +809,70 @@ function startSubscriberSyncScheduler() {
   setTimeout(() => runSubscriberSync().catch((err) => log(`Subscriber sync error: ${err.message}`, "sync")), 10000);
 }
 
+// ── Scheduled Saturday 1pm London-time product sync ───────────────────────────
+let productSyncInterval: ReturnType<typeof setInterval> | null = null;
+let lastProductSyncDate: string | null = null;
+
+function getLondonDateParts(): { day: number; hour: number; dateStr: string } {
+  const now = new Date();
+  const londonDate = new Date(now.toLocaleString("en-US", { timeZone: "Europe/London" }));
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const dateStr = `${londonDate.getFullYear()}-${pad(londonDate.getMonth() + 1)}-${pad(londonDate.getDate())}`;
+  return { day: londonDate.getDay(), hour: londonDate.getHours(), dateStr };
+}
+
+async function runProductSync(): Promise<{ imported: number; updated: number; total: number }> {
+  const wooProducts = await fetchWooProducts({ status: "any" });
+  const allWooProducts: any[] = [];
+  for (const wp of wooProducts) {
+    allWooProducts.push(wp);
+    if (wp.type && wp.type.includes("variable")) {
+      const variations = await fetchWooVariations(wp.id, wp);
+      allWooProducts.push(...variations);
+    }
+  }
+  let imported = 0, updated = 0;
+  for (const wp of allWooProducts) {
+    const existing = await storage.getProductByWooId(wp.id);
+    let name = decodeHtmlEntities(wp.name || wp._parentName || "");
+    if (wp._parentName && wp.attributes?.length) {
+      const attrs = wp.attributes.map((a: any) => a.option).filter(Boolean).join(", ");
+      if (attrs) name = `${decodeHtmlEntities(wp._parentName)} - ${attrs}`;
+    }
+    const productData = {
+      wooId: wp.id,
+      name,
+      price: String(wp.price || "0"),
+      imageUrl: (wp.images?.[0]?.src || wp._parentImages?.[0]?.src) || null,
+      category: (wp.categories?.[0]?.name || wp._parentCategories?.[0]?.name) || null,
+    };
+    if (existing) {
+      await storage.updateProduct(existing.id, productData);
+      updated++;
+    } else {
+      await storage.createProduct(productData);
+      imported++;
+    }
+  }
+  return { imported, updated, total: allWooProducts.length };
+}
+
+function startProductSyncScheduler() {
+  if (productSyncInterval) clearInterval(productSyncInterval);
+  // Check every 5 minutes whether it's Saturday 1pm London time and we haven't synced today
+  productSyncInterval = setInterval(() => {
+    const { day, hour, dateStr } = getLondonDateParts();
+    if (day === 6 && hour === 13 && lastProductSyncDate !== dateStr) {
+      lastProductSyncDate = dateStr;
+      log(`Scheduled product sync: triggered (Saturday 1pm London time)`, "sync");
+      runProductSync()
+        .then(({ imported, updated, total }) =>
+          log(`Scheduled product sync complete — imported=${imported}, updated=${updated}, total=${total}`, "sync"))
+        .catch((err) => log(`Scheduled product sync failed: ${err.message}`, "sync"));
+    }
+  }, 5 * 60 * 1000);
+}
+
 async function startAutoSync() {
   if (syncInterval) {
     clearInterval(syncInterval);
@@ -836,6 +900,8 @@ async function startAutoSync() {
 
   // Always run subscriber sync on its own schedule regardless of sync_enabled
   startSubscriberSyncScheduler();
+  // Always run product sync scheduler (fires at 1pm London time every Saturday)
+  startProductSyncScheduler();
 }
 
 export async function registerRoutes(
@@ -1731,46 +1797,8 @@ export async function registerRoutes(
 
   app.post("/api/woo/sync-products", async (_req, res) => {
     try {
-      const wooProducts = await fetchWooProducts({ status: "any" });
-      let imported = 0;
-      let updated = 0;
-
-      // Collect all products including variations for variable products
-      const allWooProducts: any[] = [];
-      for (const wp of wooProducts) {
-        allWooProducts.push(wp);
-        if (wp.type && (wp.type.includes("variable"))) {
-          const variations = await fetchWooVariations(wp.id, wp);
-          allWooProducts.push(...variations);
-        }
-      }
-
-      for (const wp of allWooProducts) {
-        const existing = await storage.getProductByWooId(wp.id);
-        // For variations, build name from parent name + attribute values
-        let name = decodeHtmlEntities(wp.name || wp._parentName || "");
-        if (wp._parentName && wp.attributes?.length) {
-          const attrs = wp.attributes.map((a: any) => a.option).filter(Boolean).join(", ");
-          if (attrs) name = `${decodeHtmlEntities(wp._parentName)} - ${attrs}`;
-        }
-        const productData = {
-          wooId: wp.id,
-          name,
-          price: String(wp.price || "0"),
-          imageUrl: (wp.images?.[0]?.src || wp._parentImages?.[0]?.src) || null,
-          category: (wp.categories?.[0]?.name || wp._parentCategories?.[0]?.name) || null,
-        };
-
-        if (existing) {
-          await storage.updateProduct(existing.id, productData);
-          updated++;
-        } else {
-          await storage.createProduct(productData);
-          imported++;
-        }
-      }
-
-      res.json({ imported, updated, total: allWooProducts.length });
+      const result = await runProductSync();
+      res.json(result);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
