@@ -1,0 +1,1 @@
+- [WooCommerce sync race condition](woo-sync-race-condition.md) — manual sync lacked re-check before insert; concurrent auto+manual sync created duplicate order rows for same woo_id.

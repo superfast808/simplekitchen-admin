@@ -1770,6 +1770,13 @@ export async function registerRoutes(
           }
           updated++;
         } else {
+          // Re-check immediately before insert — guards against concurrent auto-sync
+          // running in parallel with this manual sync creating the same order
+          const recheckExisting = await storage.getOrderByWooId(wo.id);
+          if (recheckExisting) {
+            updated++;
+            continue;
+          }
           orderData.deliveryLat = null;
           orderData.deliveryLng = null;
           const order = await storage.createOrder(orderData);
