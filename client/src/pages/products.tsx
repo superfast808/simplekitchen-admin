@@ -141,7 +141,10 @@ export default function ProductsPage() {
     mutationFn: () => apiRequest("POST", "/api/woo/sync-products"),
     onSuccess: async (res) => {
       const data = await res.json();
-      toast({ title: "Products synced", description: `Imported: ${data.imported}, Updated: ${data.updated}` });
+      toast({
+        title: "Products synced",
+        description: `Imported: ${data.imported}, Updated: ${data.updated}${data.movedToBlankWeek ? `, moved to blank week: ${data.movedToBlankWeek}` : ""}`,
+      });
       queryClient.invalidateQueries({ queryKey: ["/api/products"] });
     },
     onError: (error: Error) => {

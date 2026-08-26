@@ -821,7 +821,7 @@ function getLondonDateParts(): { day: number; hour: number; dateStr: string } {
   return { day: londonDate.getDay(), hour: londonDate.getHours(), dateStr };
 }
 
-async function runProductSync(): Promise<{ imported: number; updated: number; total: number }> {
+async function runProductSync(): Promise<{ imported: number; updated: number; movedToBlankWeek: number; total: number }> {
   const wooProducts = await fetchWooProducts({ status: "any" });
   const allWooProducts: any[] = [];
   for (const wp of wooProducts) {
@@ -831,7 +831,8 @@ async function runProductSync(): Promise<{ imported: number; updated: number; to
       allWooProducts.push(...variations);
     }
   }
-  let imported = 0, updated = 0;
+  let imported = 0, updated = 0, movedToBlankWeek = 0;
+  const syncedWooIds = new Set(allWooProducts.map(wp => wp.id));
   for (const wp of allWooProducts) {
     const existing = await storage.getProductByWooId(wp.id);
     let name = decodeHtmlEntities(wp.name || wp._parentName || "");
@@ -854,7 +855,20 @@ async function runProductSync(): Promise<{ imported: number; updated: number; to
       imported++;
     }
   }
-  return { imported, updated, total: allWooProducts.length };
+
+  // Keep products that have disappeared from WooCommerce for historical orders and
+  // ingredient records, but remove them from the rotating menu by clearing their
+  // category. This places them in the blank week instead of leaving stale meals
+  // in an active Week 1–6 category.
+  const storedProducts = await storage.getProducts();
+  for (const product of storedProducts) {
+    if (product.wooId !== null && !syncedWooIds.has(product.wooId) && product.category !== null) {
+      await storage.updateProduct(product.id, { category: null });
+      movedToBlankWeek++;
+    }
+  }
+
+  return { imported, updated, movedToBlankWeek, total: allWooProducts.length };
 }
 
 function startProductSyncScheduler() {
@@ -866,8 +880,8 @@ function startProductSyncScheduler() {
       lastProductSyncDate = dateStr;
       log(`Scheduled product sync: triggered (Saturday 1pm London time)`, "sync");
       runProductSync()
-        .then(({ imported, updated, total }) =>
-          log(`Scheduled product sync complete — imported=${imported}, updated=${updated}, total=${total}`, "sync"))
+        .then(({ imported, updated, movedToBlankWeek, total }) =>
+          log(`Scheduled product sync complete — imported=${imported}, updated=${updated}, movedToBlankWeek=${movedToBlankWeek}, total=${total}`, "sync"))
         .catch((err) => log(`Scheduled product sync failed: ${err.message}`, "sync"));
     }
   }, 5 * 60 * 1000);
@@ -1054,7 +1068,7 @@ export async function registerRoutes(
       const { categoryName } = await getCurrentWeekInfo();
       const allProducts = await storage.getProducts();
       const weekProducts = allProducts.filter(p => p.category === categoryName);
-      res.json(weekProducts.length > 0 ? weekProducts : allProducts);
+      res.json(weekProducts);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
