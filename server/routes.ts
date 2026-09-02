@@ -871,6 +871,134 @@ async function runProductSync(): Promise<{ imported: number; updated: number; mo
   return { imported, updated, movedToBlankWeek, total: allWooProducts.length };
 }
 
+const RECIPE_COSTS_URL = "https://kitchen.simplekitchenprep.com/api/recipe-costs";
+const RECIPE_COST_MATCH_THRESHOLD = 0.99;
+
+type RecipeCostIngredient = {
+  ingredient?: unknown;
+  quantity?: unknown;
+  unit?: unknown;
+  costPerUnit?: unknown;
+};
+
+type RecipeCostRecord = {
+  dishName?: unknown;
+  ingredients?: unknown;
+};
+
+function normalizeRecipeName(name: string): string {
+  return name
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function nameSimilarity(a: string, b: string): number {
+  const left = normalizeRecipeName(a);
+  const right = normalizeRecipeName(b);
+  if (!left || !right) return 0;
+  if (left === right) return 1;
+
+  const previous = Array.from({ length: right.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= left.length; i++) {
+    const current = [i];
+    for (let j = 1; j <= right.length; j++) {
+      current[j] = left[i - 1] === right[j - 1]
+        ? previous[j - 1]
+        : Math.min(previous[j - 1] + 1, previous[j] + 1, current[j - 1] + 1);
+    }
+    for (let j = 0; j <= right.length; j++) previous[j] = current[j];
+  }
+  return 1 - previous[right.length] / Math.max(left.length, right.length);
+}
+
+async function fetchRecipeCosts(): Promise<RecipeCostRecord[]> {
+  const response = await fetch(RECIPE_COSTS_URL);
+  if (!response.ok) {
+    throw new Error(`Recipe cost API error (${response.status})`);
+  }
+  const payload = await response.json();
+  if (!Array.isArray(payload)) {
+    throw new Error("Recipe cost API returned an invalid response");
+  }
+  return payload as RecipeCostRecord[];
+}
+
+async function importRecipeCosts(): Promise<{
+  matchedRecipes: number;
+  matchedProducts: number;
+  importedIngredients: number;
+  unmatchedRecipes: string[];
+}> {
+  const recipes = await fetchRecipeCosts();
+  const localProducts = await storage.getProducts();
+  const unmatchedRecipes: string[] = [];
+  let matchedRecipes = 0;
+  let matchedProducts = 0;
+  let importedIngredients = 0;
+
+  for (const recipe of recipes) {
+    const recipeName = typeof recipe.dishName === "string" ? recipe.dishName.trim() : "";
+    const sourceIngredients = Array.isArray(recipe.ingredients) ? recipe.ingredients as RecipeCostIngredient[] : [];
+    if (!recipeName || sourceIngredients.length === 0) {
+      if (recipeName) unmatchedRecipes.push(recipeName);
+      continue;
+    }
+
+    const scored = localProducts
+      .map(product => ({ product, score: nameSimilarity(recipeName, product.name) }))
+      .sort((a, b) => b.score - a.score);
+    const best = scored[0];
+    if (!best || best.score < RECIPE_COST_MATCH_THRESHOLD) {
+      unmatchedRecipes.push(recipeName);
+      continue;
+    }
+
+    // If multiple local products share the same normalized name, update all of
+    // them; they represent the same recipe in the local product catalogue.
+    const matchingProducts = scored.filter(({ score, product }) =>
+      score >= RECIPE_COST_MATCH_THRESHOLD &&
+      normalizeRecipeName(product.name) === normalizeRecipeName(best.product.name)
+    );
+
+    matchedRecipes++;
+    for (const { product } of matchingProducts) {
+      await storage.deleteIngredientsByProductId(product.id);
+      let productIngredientCount = 0;
+      for (const sourceIngredient of sourceIngredients) {
+        const ingredientName = typeof sourceIngredient.ingredient === "string"
+          ? sourceIngredient.ingredient.trim()
+          : "";
+        const quantity = Number(sourceIngredient.quantity);
+        const unit = typeof sourceIngredient.unit === "string" ? sourceIngredient.unit.trim() : "";
+        const costPerUnit = Number(sourceIngredient.costPerUnit);
+        if (!ingredientName || !Number.isFinite(quantity) || !unit) continue;
+
+        const costPerG = Number.isFinite(costPerUnit) ? String(costPerUnit) : null;
+        await storage.createIngredient({
+          productId: product.id,
+          name: ingredientName,
+          quantityPerUnit: String(quantity),
+          unit,
+          costPerG,
+        });
+        if (costPerG !== null) {
+          await storage.upsertStandardIngredient(ingredientName, costPerG, unit);
+        }
+        productIngredientCount++;
+      }
+      matchedProducts++;
+      importedIngredients += productIngredientCount;
+    }
+  }
+
+  return { matchedRecipes, matchedProducts, importedIngredients, unmatchedRecipes };
+}
+
 function startProductSyncScheduler() {
   if (productSyncInterval) clearInterval(productSyncInterval);
   // Check every 5 minutes whether it's Saturday 1pm London time and we haven't synced today
@@ -1116,6 +1244,14 @@ export async function registerRoutes(
       res.json(created);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/recipe-costs/import", async (_req, res) => {
+    try {
+      res.json(await importRecipeCosts());
+    } catch (error: any) {
+      res.status(502).json({ message: error.message });
     }
   });
 

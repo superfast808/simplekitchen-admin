@@ -10,6 +10,7 @@ import { RefreshCw, Package, ChevronRight, X, Plus, Save, ArrowDownToLine, Penci
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { Product, Ingredient } from "@shared/schema";
+import { ImportRecipeCostsButton } from "@/components/import-recipe-costs-button";
 
 type SuggestionItem = string | { value: string; meta?: string; isLibrary?: boolean };
 
@@ -161,10 +162,13 @@ export default function ProductsPage() {
             Manage products and their ingredients
           </p>
         </div>
-        <Button size="sm" onClick={() => syncMutation.mutate()} disabled={syncMutation.isPending} data-testid="button-sync-products">
-          <RefreshCw className={`w-4 h-4 mr-1 ${syncMutation.isPending ? "animate-spin" : ""}`} />
-          Sync from Woo
-        </Button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <ImportRecipeCostsButton />
+          <Button size="sm" onClick={() => syncMutation.mutate()} disabled={syncMutation.isPending} data-testid="button-sync-products">
+            <RefreshCw className={`w-4 h-4 mr-1 ${syncMutation.isPending ? "animate-spin" : ""}`} />
+            Sync from Woo
+          </Button>
+        </div>
       </div>
 
       {isLoading ? (

@@ -7,6 +7,7 @@ import { ChefHat, ChevronDown, ChevronRight } from "lucide-react";
 import { DateFilter, DateRangeLabel, useDateFilter } from "@/components/date-filter";
 import { OrderSourceFilter, useOrderSourceFilter } from "@/components/order-source-filter";
 import { Button } from "@/components/ui/button";
+import { ImportRecipeCostsButton } from "@/components/import-recipe-costs-button";
 
 type ProductBreakdown = {
   productId: number;
@@ -213,7 +214,10 @@ export default function IngredientsPage() {
           <h1 className="text-2xl font-semibold tracking-tight" data-testid="text-ingredients-title">Ingredient Summary</h1>
           <DateRangeLabel from={from} to={to} />
         </div>
-        <DateFilter {...dateFilter} testIdPrefix="ing" />
+        <div className="flex items-center gap-2 flex-wrap">
+          <ImportRecipeCostsButton />
+          <DateFilter {...dateFilter} testIdPrefix="ing" />
+        </div>
       </div>
 
       <OrderSourceFilter filter={sourceFilter} testIdPrefix="ing-source" />
