@@ -1896,6 +1896,7 @@ export async function registerRoutes(
         ].filter(Boolean).join(", ");
 
         const fulfillmentType = detectFulfillmentType(wo);
+        const wooNote = getWooOrderNote(wo);
 
         const orderData: Record<string, any> = {
           wooId: wo.id,
@@ -1913,6 +1914,11 @@ export async function registerRoutes(
           if (!existing.deliveryLat || !existing.deliveryLng) {
             orderData.deliveryLat = null;
             orderData.deliveryLng = null;
+          }
+          if (wooNote) {
+            orderData.notes = wooNote;
+          } else if (!existing.notes) {
+            orderData.notes = null;
           }
           await storage.updateOrder(existing.id, orderData);
           // If admin has manually corrected this order's items, preserve them — skip WC re-import
@@ -1952,6 +1958,7 @@ export async function registerRoutes(
           }
           orderData.deliveryLat = null;
           orderData.deliveryLng = null;
+          orderData.notes = wooNote;
           const order = await storage.createOrder(orderData);
           for (const item of wo.line_items || []) {
             let product = await storage.getProductByWooId(item.product_id);
@@ -2555,6 +2562,59 @@ export async function registerRoutes(
       res.json({ sent, total: subOrders.length, skipped, errors });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
+    }
+  });
+
+  // WooCommerce signs the raw JSON payload with HMAC-SHA256 and sends the
+  // base64 digest in X-WC-Webhook-Signature. Configure order.created and
+  // order.updated webhooks to POST here using the same WC_WEBHOOK_SECRET.
+  app.post("/api/webhooks/woocommerce", async (req, res) => {
+    const webhookSecret = process.env.WC_WEBHOOK_SECRET;
+    const isProduction = process.env.NODE_ENV === "production";
+    const rawBody = (req as any).rawBody as Buffer | undefined;
+    const signatureHeader = req.headers["x-wc-webhook-signature"];
+    const signature = Array.isArray(signatureHeader) ? signatureHeader[0] : signatureHeader;
+
+    if (!webhookSecret && isProduction) {
+      log("Woo webhook rejected: WC_WEBHOOK_SECRET not configured in production", "sync");
+      return res.status(400).json({ message: "Webhook secret not configured" });
+    }
+    if (webhookSecret && !isValidWooWebhookSignature(rawBody, signature)) {
+      log("Woo webhook signature verification failed", "sync");
+      return res.status(401).json({ message: "Invalid webhook signature" });
+    }
+
+    const topicHeader = req.headers["x-wc-webhook-topic"];
+    const topic = (Array.isArray(topicHeader) ? topicHeader[0] : topicHeader || "").toLowerCase();
+    if (topic && topic !== "order.created" && topic !== "order.updated") {
+      return res.json({ received: true, ignored: true, topic });
+    }
+
+    const wooOrder = req.body;
+    const wooId = Number(wooOrder?.id);
+    if (!Number.isInteger(wooId) || wooId <= 0) {
+      // WooCommerce sends a signed ping when a webhook is first activated.
+      return res.json({ received: true, ping: true });
+    }
+
+    try {
+      const existing = await storage.getOrderByWooId(wooId);
+      if (!existing) {
+        // The regular Woo sync imports complete new orders. Returning success here
+        // prevents webhook retries while the next sync safely creates the order.
+        log(`Woo webhook received delivery notes for order ${wooId}; awaiting order sync`, "sync");
+        return res.json({ received: true, updated: false, awaitingSync: true });
+      }
+
+      const note = getWooOrderNote(wooOrder);
+      if (note) {
+        await storage.updateOrder(existing.id, { notes: note });
+      }
+      log(`Woo webhook updated delivery notes for order ${wooId}`, "sync");
+      return res.json({ received: true, updated: !!note });
+    } catch (error: any) {
+      log(`Woo webhook update failed for order ${wooId}: ${error.message}`, "sync");
+      return res.status(500).json({ message: "Webhook update failed" });
     }
   });
 
