@@ -592,6 +592,29 @@ async function getActiveStripePublishableKey(): Promise<string> {
   return process.env.STRIPE_PUBLISHABLE_KEY || "";
 }
 
+function getWooOrderNote(wooOrder: any): string | null {
+  const deliveryNotes = typeof wooOrder?.delivery_notes === "string"
+    ? wooOrder.delivery_notes.trim()
+    : "";
+  if (deliveryNotes) return deliveryNotes;
+
+  const customerNote = typeof wooOrder?.customer_note === "string"
+    ? wooOrder.customer_note.trim()
+    : "";
+  return customerNote || null;
+}
+
+function isValidWooWebhookSignature(rawBody: Buffer | undefined, signature: string | undefined): boolean {
+  const secret = process.env.WC_WEBHOOK_SECRET;
+  if (!secret || !rawBody || !signature) return false;
+
+  const expected = crypto.createHmac("sha256", secret).update(rawBody).digest("base64");
+  const expectedBuffer = Buffer.from(expected);
+  const receivedBuffer = Buffer.from(signature);
+  return expectedBuffer.length === receivedBuffer.length &&
+    crypto.timingSafeEqual(expectedBuffer, receivedBuffer);
+}
+
 async function performSync() {
   if (syncInProgress) {
     log("Auto-sync: skipping, previous sync still in progress", "sync");
@@ -625,7 +648,7 @@ async function performSync() {
 
       const fulfillmentType = detectFulfillmentType(wo);
 
-      const wooNote = wo.customer_note ? wo.customer_note.trim() : null;
+      const wooNote = getWooOrderNote(wo);
 
       const orderData: Record<string, any> = {
         wooId: wo.id,
