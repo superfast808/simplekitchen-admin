@@ -395,7 +395,7 @@ export default function OrdersPage() {
   };
 
   return (
-    <div className="p-6 space-y-6 max-w-full">
+    <div className="max-w-full space-y-6 p-4 sm:p-6">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight" data-testid="text-page-title">Orders</h1>
@@ -475,9 +475,9 @@ export default function OrdersPage() {
       {(customerGroups.length > 0 || allRecurringOrders) && (
         <Card data-testid="card-consistent-customers">
           <CardContent className="p-0">
-            <div className="flex items-center justify-between px-4 py-3">
+            <div className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
               <button
-                className="flex items-center gap-2 text-left"
+                className="flex min-w-0 items-center gap-2 text-left"
                 onClick={() => setShowConsistent(v => !v)}
                 data-testid="button-toggle-consistent"
               >
@@ -486,10 +486,10 @@ export default function OrdersPage() {
                 <Badge variant="secondary" className="text-xs">{customerGroups.length}</Badge>
                 {showConsistent ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
               </button>
-              <div className="flex items-center gap-2">
+              <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center sm:justify-end">
                 <Button
                   size="sm"
-                  className="h-7 text-xs bg-emerald-600 text-white"
+                  className="col-span-2 h-8 w-full text-xs bg-emerald-600 text-white sm:col-span-1 sm:h-7 sm:w-auto"
                   onClick={() => smartStampAllMutation.mutate()}
                   disabled={smartStampAllMutation.isPending}
                   data-testid="button-smart-stamp-all"
@@ -498,10 +498,10 @@ export default function OrdersPage() {
                   {smartStampAllMutation.isPending ? "Stamping…" : "Stamp All This Week"}
                 </Button>
                 {confirmRemoveStamps ? (
-                  <div className="flex items-center gap-1">
-                    <span className="text-xs text-destructive font-medium">Remove all this week's stamps?</span>
+                  <div className="col-span-2 flex min-w-0 flex-wrap items-center gap-1 sm:col-span-1">
+                    <span className="w-full text-xs text-destructive font-medium sm:w-auto">Remove all this week's stamps?</span>
                     <Button
-                      size="sm" variant="destructive" className="h-7 text-xs"
+                      size="sm" variant="destructive" className="h-8 flex-1 text-xs sm:h-7 sm:flex-none"
                       onClick={() => removeStampsMutation.mutate()}
                       disabled={removeStampsMutation.isPending}
                       data-testid="button-confirm-remove-stamps"
@@ -509,7 +509,7 @@ export default function OrdersPage() {
                       {removeStampsMutation.isPending ? "Removing…" : "Yes, remove"}
                     </Button>
                     <Button
-                      size="sm" variant="outline" className="h-7 text-xs"
+                      size="sm" variant="outline" className="h-8 flex-1 text-xs sm:h-7 sm:flex-none"
                       onClick={() => setConfirmRemoveStamps(false)}
                       data-testid="button-cancel-remove-stamps"
                     >
@@ -518,7 +518,7 @@ export default function OrdersPage() {
                   </div>
                 ) : (
                   <Button
-                    size="sm" variant="outline" className="h-7 text-xs text-destructive border-destructive/40"
+                    size="sm" variant="outline" className="h-8 w-full text-xs text-destructive border-destructive/40 sm:h-7 sm:w-auto"
                     onClick={() => setConfirmRemoveStamps(true)}
                     data-testid="button-remove-stamps"
                   >
@@ -526,14 +526,14 @@ export default function OrdersPage() {
                   </Button>
                 )}
                 <Button
-                  size="sm" variant="outline" className="h-7 text-xs text-amber-600 border-amber-300"
+                  size="sm" variant="outline" className="h-8 w-full text-xs text-amber-600 border-amber-300 sm:h-7 sm:w-auto"
                   onClick={() => deduplicateMutation.mutate()}
                   disabled={deduplicateMutation.isPending}
                   data-testid="button-deduplicate-consistent"
                 >
                   {deduplicateMutation.isPending ? "Cleaning…" : "Remove duplicates"}
                 </Button>
-                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setShowAddConsistentDialog(true)} data-testid="button-add-consistent">
+                <Button size="sm" variant="outline" className="h-8 w-full text-xs sm:h-7 sm:w-auto" onClick={() => setShowAddConsistentDialog(true)} data-testid="button-add-consistent">
                   <Plus className="w-3 h-3 mr-1" />Add Customer
                 </Button>
               </div>
@@ -547,7 +547,7 @@ export default function OrdersPage() {
                       <TableHead className="w-[180px]">Ordering Days</TableHead>
                       <TableHead>Saturday Items</TableHead>
                       <TableHead>Tuesday Items</TableHead>
-                      <TableHead className="min-w-[300px]">Actions</TableHead>
+                      <TableHead className="min-w-[220px] sm:min-w-[300px]">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -659,23 +659,23 @@ export default function OrdersPage() {
                             : <span className="text-muted-foreground/40 italic">—</span>}
                         </TableCell>
                         <TableCell className="align-top pt-2">
-                          <div className="flex flex-wrap gap-1.5">
+                          <div className="grid grid-cols-1 gap-1.5 sm:flex sm:flex-wrap">
                             {group.saturday && (
                               <>
-                                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setEditingConsistentCustomer(group.saturday!)} data-testid={`button-amend-sat-${group.customerName}`}>
+                                <Button size="sm" variant="outline" className="h-8 w-full justify-start text-xs sm:h-7 sm:w-auto sm:justify-center" onClick={() => setEditingConsistentCustomer(group.saturday!)} data-testid={`button-amend-sat-${group.customerName}`}>
                                   <Pencil className="w-3 h-3 mr-1" />Amend Saturday
                                 </Button>
-                                <Button size="sm" variant="default" className="h-7 text-xs" onClick={() => setStampingCustomer(group.saturday!)} data-testid={`button-stamp-sat-${group.customerName}`}>
+                                <Button size="sm" variant="default" className="h-8 w-full justify-start text-xs sm:h-7 sm:w-auto sm:justify-center" onClick={() => setStampingCustomer(group.saturday!)} data-testid={`button-stamp-sat-${group.customerName}`}>
                                   <Stamp className="w-3 h-3 mr-1" />Stamp Sat
                                 </Button>
                               </>
                             )}
                             {group.tuesday && (
                               <>
-                                <Button size="sm" variant="outline" className="h-7 text-xs border-amber-400 text-amber-600 dark:text-amber-400" onClick={() => setEditingConsistentCustomer(group.tuesday!)} data-testid={`button-amend-tue-${group.customerName}`}>
+                                <Button size="sm" variant="outline" className="h-8 w-full justify-start text-xs border-amber-400 text-amber-600 dark:text-amber-400 sm:h-7 sm:w-auto sm:justify-center" onClick={() => setEditingConsistentCustomer(group.tuesday!)} data-testid={`button-amend-tue-${group.customerName}`}>
                                   <Pencil className="w-3 h-3 mr-1" />Amend Tuesday
                                 </Button>
-                                <Button size="sm" className="h-7 text-xs bg-amber-500 hover:bg-amber-600" onClick={() => setStampingCustomer(group.tuesday!)} data-testid={`button-stamp-tue-${group.customerName}`}>
+                                <Button size="sm" className="h-8 w-full justify-start text-xs bg-amber-500 hover:bg-amber-600 sm:h-7 sm:w-auto sm:justify-center" onClick={() => setStampingCustomer(group.tuesday!)} data-testid={`button-stamp-tue-${group.customerName}`}>
                                   <Stamp className="w-3 h-3 mr-1" />Stamp Tue
                                 </Button>
                               </>
