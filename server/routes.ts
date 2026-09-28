@@ -12,6 +12,7 @@ import nodemailer from "nodemailer";
 import crypto from "crypto";
 import { log } from "./index";
 import { getUncachableStripeClient } from "./stripeClient";
+import { pool } from "./db";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
@@ -35,6 +36,10 @@ function matchesSource(item: { isManual: boolean; isTuesday: boolean }, filter: 
 let syncInterval: ReturnType<typeof setInterval> | null = null;
 let syncInProgress = false;
 let startupTimeout: ReturnType<typeof setTimeout> | null = null;
+let lastOrderSyncStartedAt: string | null = null;
+let lastOrderSyncCompletedAt: string | null = null;
+let lastOrderSyncError: string | null = null;
+let lastOrderSyncSummary: { imported: number; updated: number; total: number } | null = null;
 
 function buildAddressVariants(raw: string): string[] {
   const variants: string[] = [raw];
@@ -636,6 +641,8 @@ async function performSync() {
     return;
   }
   syncInProgress = true;
+  lastOrderSyncStartedAt = new Date().toISOString();
+  lastOrderSyncError = null;
   try {
     log("Auto-sync: starting order sync...", "sync");
     const fourWeeksAgo = new Date();
@@ -755,6 +762,8 @@ async function performSync() {
       }
     }
 
+    lastOrderSyncSummary = { imported, updated, total: wooOrders.length };
+    lastOrderSyncCompletedAt = new Date().toISOString();
     log(`Auto-sync complete: imported=${imported}, updated=${updated}, total=${wooOrders.length}`, "sync");
     const upgraded = await persistDeliveryUpgrades();
     if (upgraded > 0) log(`Auto-sync: persisted delivery upgrade for ${upgraded} order(s)`, "sync");
@@ -765,7 +774,9 @@ async function performSync() {
     // Background geocode any unresolved addresses for this week (fire-and-forget)
     backgroundGeocodeOrders().catch(() => {});
   } catch (error: any) {
-    log(`Auto-sync failed: ${error.message}`, "sync");
+    lastOrderSyncError = error?.message || String(error);
+    lastOrderSyncCompletedAt = new Date().toISOString();
+    log(`Auto-sync failed: ${lastOrderSyncError}`, "sync");
   } finally {
     syncInProgress = false;
   }
@@ -1114,6 +1125,138 @@ export async function registerRoutes(
     await storage.createUser({ username: bootstrapUsername, password: hashedPassword });
     log(`Created bootstrap admin user (username: ${bootstrapUsername})`, "auth");
   }
+
+
+  app.get("/api/system/status", async (_req, res) => {
+    const startedAt = Date.now();
+    try {
+      const [dbResult, settingsMap, stripeSecret, stripePublishable] = await Promise.all([
+        pool.query<{
+          database: string;
+          user: string;
+          serverVersion: string;
+          sizeBytes: string;
+          serverTime: Date;
+          orders: number;
+          products: number;
+          users: number;
+          subscribers: number;
+        }>(`
+          SELECT
+            current_database() AS "database",
+            current_user AS "user",
+            current_setting('server_version') AS "serverVersion",
+            pg_database_size(current_database())::text AS "sizeBytes",
+            NOW() AS "serverTime",
+            (SELECT COUNT(*)::int FROM orders) AS "orders",
+            (SELECT COUNT(*)::int FROM products) AS "products",
+            (SELECT COUNT(*)::int FROM users) AS "users",
+            (SELECT COUNT(*)::int FROM subscribers) AS "subscribers"
+        `),
+        getSettingsMap(),
+        getActiveStripeSecretKey(),
+        getActiveStripePublishableKey(),
+      ]);
+
+      const db = dbResult.rows[0];
+      const smtpConfigured = Boolean(
+        (settingsMap.smtp_host || process.env.SMTP_HOST) &&
+        (settingsMap.smtp_user || process.env.SMTP_USER) &&
+        (settingsMap.smtp_pass || process.env.SMTP_PASS) &&
+        (settingsMap.smtp_from || process.env.SMTP_FROM_EMAIL)
+      );
+      const wooConfigured = Boolean(
+        process.env.WC_STORE_URL &&
+        process.env.WC_CONSUMER_KEY &&
+        process.env.WC_CONSUMER_SECRET
+      );
+      const stripeConfigured = Boolean(stripeSecret && stripePublishable);
+
+      res.json({
+        status: "ok",
+        checkedAt: new Date().toISOString(),
+        responseMs: Date.now() - startedAt,
+        deployment: {
+          platform: process.env.DEPLOYMENT_PLATFORM || "Plesk / Docker",
+          environment: process.env.NODE_ENV || "unknown",
+          service: process.env.APP_SERVICE_NAME || "Simple Kitchen Admin",
+          hostname: process.env.HOSTNAME || null,
+        },
+        runtime: {
+          node: process.version,
+          uptimeSeconds: Math.floor(process.uptime()),
+          memory: {
+            rssBytes: process.memoryUsage().rss,
+            heapUsedBytes: process.memoryUsage().heapUsed,
+            heapTotalBytes: process.memoryUsage().heapTotal,
+          },
+        },
+        database: {
+          connected: true,
+          name: db.database,
+          user: db.user,
+          serverVersion: db.serverVersion,
+          sizeBytes: Number(db.sizeBytes),
+          serverTime: db.serverTime,
+          counts: {
+            orders: db.orders,
+            products: db.products,
+            users: db.users,
+            subscribers: db.subscribers,
+          },
+        },
+        integrations: {
+          woocommerce: {
+            configured: wooConfigured,
+            storeUrl: process.env.WC_STORE_URL || null,
+          },
+          smtp: {
+            configured: smtpConfigured,
+            host: settingsMap.smtp_host || process.env.SMTP_HOST || null,
+            from: settingsMap.smtp_from || process.env.SMTP_FROM_EMAIL || null,
+          },
+          stripe: {
+            configured: stripeConfigured,
+            mode: settingsMap.stripe_mode || "test",
+          },
+          webhooks: {
+            wooCommerceConfigured: Boolean(process.env.WC_WEBHOOK_SECRET),
+            stripeSubscriberConfigured: Boolean(process.env.STRIPE_SUBSCRIBER_WEBHOOK_SECRET),
+          },
+        },
+        sync: {
+          enabled: settingsMap.sync_enabled === "true",
+          intervalMinutes: Math.max(
+            MIN_SYNC_INTERVAL,
+            Math.min(MAX_SYNC_INTERVAL, parseInt(settingsMap.sync_interval_minutes) || 60),
+          ),
+          inProgress: syncInProgress,
+          subscriberSyncInProgress,
+          geocodeInProgress,
+          lastStartedAt: lastOrderSyncStartedAt,
+          lastCompletedAt: lastOrderSyncCompletedAt,
+          lastError: lastOrderSyncError,
+          lastSummary: lastOrderSyncSummary,
+        },
+      });
+    } catch (error: any) {
+      log(`System status check failed: ${error?.message || error}`, "status");
+      res.status(503).json({
+        status: "degraded",
+        checkedAt: new Date().toISOString(),
+        responseMs: Date.now() - startedAt,
+        deployment: {
+          platform: process.env.DEPLOYMENT_PLATFORM || "Plesk / Docker",
+          environment: process.env.NODE_ENV || "unknown",
+          service: process.env.APP_SERVICE_NAME || "Simple Kitchen Admin",
+        },
+        database: {
+          connected: false,
+        },
+        error: "A system dependency is unavailable",
+      });
+    }
+  });
 
   app.post("/api/auth/login", async (req, res) => {
     try {
