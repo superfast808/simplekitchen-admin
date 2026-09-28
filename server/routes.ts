@@ -604,6 +604,21 @@ function getWooOrderNote(wooOrder: any): string | null {
   return customerNote || null;
 }
 
+function getWooPaidTotal(wooOrder: any): string | null {
+  if (!wooOrder.date_paid && !wooOrder.date_paid_gmt) return null;
+  if (wooOrder.status === "refunded") return null;
+  const total = Number(wooOrder.total);
+  if (!Number.isFinite(total) || total < 0) return null;
+  const refunds = Array.isArray(wooOrder.refunds) ? wooOrder.refunds : [];
+  let refunded = 0;
+  for (const refund of refunds) {
+    const amount = Number(refund.total);
+    if (!Number.isFinite(amount)) return null; // Cannot claim a paid balance without the refund value.
+    refunded += Math.abs(amount);
+  }
+  return Math.max(0, total - refunded).toFixed(2);
+}
+
 function isValidWooWebhookSignature(rawBody: Buffer | undefined, signature: string | undefined): boolean {
   const secret = process.env.WC_WEBHOOK_SECRET;
   if (!secret || !rawBody || !signature) return false;
@@ -660,6 +675,7 @@ async function performSync() {
         fulfillmentType,
         isManual: false,
         shippingTotal: String(parseFloat(wo.shipping_total || "0").toFixed(2)),
+        wooPaidTotal: getWooPaidTotal(wo),
       };
 
       if (existing) {
@@ -1908,6 +1924,7 @@ export async function registerRoutes(
           fulfillmentType,
           isManual: false,
           shippingTotal: String(parseFloat(wo.shipping_total || "0").toFixed(2)),
+        wooPaidTotal: getWooPaidTotal(wo),
         };
 
         if (existing) {
@@ -2319,7 +2336,15 @@ export async function registerRoutes(
           itemSummary[item.productName] = (itemSummary[item.productName] || 0) + item.quantity;
         }
         const summaryText = Object.entries(itemSummary).map(([n, q]) => `${q} x ${n}`).join(", ");
-        const noteText = (order as any).notes ? String((order as any).notes).trim() : "";
+        const mealCount = order.items.reduce((sum, item) =>
+          sum + (/add\s+delivery|meal\s+subscription|oat|porridge|overnight|soup/i.test(item.productName) ? 0 : item.quantity), 0);
+        const oatCount = order.items.reduce((sum, item) =>
+          sum + (/oat|porridge|overnight/i.test(item.productName) ? item.quantity : 0), 0);
+        const totalsText = [
+          `Meals ${mealCount} + Oats ${oatCount} = ${mealCount + oatCount}`,
+          ...(order.wooPaidTotal !== null ? [`Paid: £${Number(order.wooPaidTotal).toFixed(2)}`] : []),
+        ].join("  |  ");
+        const noteText = order.notes?.trim() || "";
 
         // Pre-measure each section
         const NOTE_FONT_SIZE = 5.5;
@@ -2341,15 +2366,20 @@ export async function registerRoutes(
         doc.font("Helvetica").fontSize(6.5);
         const itemsH = summaryText ? doc.heightOfString(summaryText, { width: innerW }) : 0;
 
+        doc.font("Helvetica-Bold").fontSize(6.5);
+        const totalsH = doc.heightOfString(totalsText, { width: innerW, lineBreak: false });
+
         doc.font("Helvetica-Oblique").fontSize(NOTE_FONT_SIZE);
         const noteH = noteText ? doc.heightOfString(noteText, { width: innerW, lineBreak: false }) : 0;
+        const totalsY = labelY + labelH - 2 - totalsH - (noteH > 0 ? GAP4 + noteH : 0);
 
-        // Total content height — note flows right after items
+        // Reserve the compact totals line and notes before allowing long item lists to use the remaining space.
         const totalContentH =
           nameH + GAP1 +
           tagH  + GAP2 +
           (addrH  > 0 ? addrH  + GAP3 : 0) +
-          (itemsH > 0 ? itemsH         : 0) +
+          (itemsH > 0 ? itemsH + GAP4 : 0) +
+          totalsH +
           (noteH  > 0 ? GAP4 + noteH   : 0);
 
         // Vertically center the whole block; never start above top padding
@@ -2379,8 +2409,10 @@ export async function registerRoutes(
         // Address
         if (addrText && cy < labelY + labelH - 10) {
           doc.font("Helvetica").fontSize(7);
-          const afterAddr = (itemsH > 0 ? GAP3 + itemsH : 0) + (noteH > 0 ? GAP4 + noteH : 0) + 4;
-          const maxAddrH = labelY + labelH - cy - afterAddr;
+          const maxAddrH = Math.min(
+            totalsY - cy - GAP3 - (itemsH > 0 ? Math.min(itemsH, 18) + GAP4 : 0),
+            24
+          );
           if (maxAddrH > 7) {
             doc.text(addrText, cx, cy, { ...opts, height: maxAddrH, ellipsis: true });
             cy = doc.y + GAP3;
@@ -2388,20 +2420,25 @@ export async function registerRoutes(
         }
 
         // Items
-        if (summaryText && cy < labelY + labelH - 6) {
+        if (summaryText && cy < totalsY - 6) {
           doc.font("Helvetica").fontSize(6.5);
-          const maxItemH = labelY + labelH - cy - (noteH > 0 ? GAP4 + noteH : 0) - 2;
-          doc.text(summaryText, cx, cy, { ...opts, height: maxItemH, ellipsis: true });
-          cy = doc.y;
+          const maxItemH = totalsY - cy - GAP4;
+          if (maxItemH > 6) {
+            doc.text(summaryText, cx, cy, { ...opts, height: maxItemH, ellipsis: true });
+          }
         }
 
+        // Counts and confirmed WooCommerce paid amount.
+        doc.font("Helvetica-Bold").fontSize(6.5).fillColor("black");
+        doc.text(totalsText, cx, totalsY, { ...opts, lineBreak: false, ellipsis: true, height: totalsH });
+
         // Notes — small italic red text flowing directly below items
-        if (noteText && cy < labelY + labelH - 3) {
-          cy += GAP4;
+        if (noteText) {
           doc.font("Helvetica-Oblique").fontSize(NOTE_FONT_SIZE).fillColor("red");
-          const maxNoteH = labelY + labelH - cy - 1;
+          const noteY = totalsY + totalsH + GAP4;
+          const maxNoteH = labelY + labelH - noteY - 1;
           if (maxNoteH > 4) {
-            doc.text(noteText, cx, cy, { ...opts, lineBreak: false, ellipsis: true, height: maxNoteH });
+            doc.text(noteText, cx, noteY, { ...opts, lineBreak: false, ellipsis: true, height: maxNoteH });
           }
           doc.fillColor("black");
         }
