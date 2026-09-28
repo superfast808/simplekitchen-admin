@@ -89,10 +89,10 @@ const sidebarStyle = {
 function AuthenticatedApp({ username, onLogout }: { username: string; onLogout: () => void }) {
   return (
     <SidebarProvider style={sidebarStyle as React.CSSProperties}>
-      <div className="flex h-screen w-full">
+      <div className="brand-app-shell flex h-screen w-full">
         <AppSidebar />
         <div className="flex flex-col flex-1 min-w-0">
-          <header className="flex items-center justify-between gap-1 p-2 border-b">
+          <header className="brand-topbar flex items-center justify-between gap-1 border-b px-3 py-2">
             <SidebarTrigger data-testid="button-sidebar-toggle" />
             <div className="flex items-center gap-2">
               <span className="text-sm text-muted-foreground" data-testid="text-current-user">{username}</span>
@@ -102,7 +102,7 @@ function AuthenticatedApp({ username, onLogout }: { username: string; onLogout: 
               <ThemeToggle />
             </div>
           </header>
-          <main className="flex-1 overflow-auto">
+          <main className="brand-main flex-1 overflow-auto">
             <PageRouter />
           </main>
         </div>

@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { LogIn } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 
 type LogoResponse = { logo: string };
@@ -50,19 +49,20 @@ export default function LoginPage({ onLogin }: { onLogin: () => void }) {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-sm">
-        <CardHeader className="text-center space-y-3">
+    <div className="brand-login-page min-h-screen flex items-center justify-center p-4">
+      <Card className="brand-login-card w-full max-w-sm bg-[#fffdf9] text-[#20241e]">
+        <CardHeader className="text-center space-y-4 pt-8">
           {logoData?.logo ? (
-            <img src={logoData.logo} alt="Logo" className="h-16 mx-auto object-contain" />
+            <img src={logoData.logo} alt="Simple Kitchen" className="brand-login-logo h-20 w-20 mx-auto object-contain" />
           ) : (
-            <div className="w-14 h-14 mx-auto rounded-lg bg-primary flex items-center justify-center">
-              <LogIn className="w-7 h-7 text-primary-foreground" />
+            <div className="brand-login-logo mx-auto flex h-20 w-20 items-center justify-center text-xl font-black tracking-tight text-[#293721]">
+              SK
             </div>
           )}
           <div>
-            <CardTitle>Partner Portal</CardTitle>
-            <CardDescription>Sign in to continue</CardDescription>
+            <div className="brand-kicker mb-2">Operations Portal</div>
+            <CardTitle className="text-3xl tracking-tight">Simple Kitchen</CardTitle>
+            <CardDescription className="mt-2">Sign in to manage orders, subscriptions and kitchen operations.</CardDescription>
           </div>
         </CardHeader>
         <CardContent>
@@ -90,7 +90,7 @@ export default function LoginPage({ onLogin }: { onLogin: () => void }) {
                 data-testid="input-login-password"
               />
             </div>
-            <Button type="submit" className="w-full" disabled={isLoading} data-testid="button-login">
+            <Button type="submit" className="w-full rounded-xl" disabled={isLoading} data-testid="button-login">
               {isLoading ? "Signing in..." : "Sign In"}
             </Button>
           </form>
