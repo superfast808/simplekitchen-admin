@@ -1,6 +1,6 @@
 import { Package, ShoppingCart, ChefHat, MapPin, BarChart3, Plus, Settings, HelpCircle, Activity, Mail, CalendarCheck, CalendarDays, BookOpen, Server } from "lucide-react";
 import { Link, useLocation } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { SIMPLE_KITCHEN_LOGO_URL } from "@/lib/brand";
 import {
   Sidebar,
   SidebarContent,
@@ -36,31 +36,18 @@ const menuItems = [
 export function AppSidebar() {
   const [location] = useLocation();
 
-  const { data: logoData } = useQuery<{ logo: string }>({
-    queryKey: ["/api/settings/logo"],
-    retry: false,
-  });
-
-  const hasLogo = logoData?.logo && logoData.logo.length > 0;
-
   return (
     <Sidebar className="brand-sidebar">
       <SidebarHeader className="p-4">
         <div className="flex items-center gap-2">
-          {hasLogo ? (
-            <div className="brand-logo-frame flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl p-1">
-              <img
-                src={logoData.logo}
-                alt="Logo"
-                className="h-full w-full object-contain"
-                data-testid="img-sidebar-logo"
-              />
-            </div>
-          ) : (
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#d9e2ce] text-sm font-black tracking-tight text-[#293721] shadow-sm">
-              SK
-            </div>
-          )}
+          <div className="brand-logo-frame flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl p-1">
+            <img
+              src={SIMPLE_KITCHEN_LOGO_URL}
+              alt="Simple Kitchen"
+              className="h-full w-full object-contain"
+              data-testid="img-sidebar-logo"
+            />
+          </div>
           <div>
             <h2 className="text-sm font-semibold" data-testid="text-app-title">Simple Kitchen</h2>
             <p className="text-xs text-sidebar-foreground/60">Operations Portal</p>
