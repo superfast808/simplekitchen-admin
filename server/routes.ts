@@ -2478,6 +2478,22 @@ export async function registerRoutes(
         doc.save();
         doc.rect(labelX, labelY, labelW, labelH).clip();
 
+        // Very subtle Simple Kitchen watermark for bag labels. Keep this behind
+        // all operational text so customer/order information remains dominant.
+        doc.save();
+        doc
+          .font("Helvetica-Bold")
+          .fontSize(44)
+          .fillColor("#3f5034")
+          .fillOpacity(0.055)
+          .text("SK", labelX, labelY + labelH / 2 - 24, {
+            width: labelW,
+            align: "center",
+            lineBreak: false,
+            characterSpacing: 1.5,
+          });
+        doc.restore();
+
         const isDelivery = order.fulfillmentType === "delivery";
         const tag = `[ ${isDelivery ? "DELIVERY" : "COLLECTION"} ]`;
 
