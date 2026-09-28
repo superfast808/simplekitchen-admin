@@ -15,6 +15,15 @@ declare module "express-session" {
 const app = express();
 const httpServer = createServer(app);
 
+const sessionSecret = process.env.SESSION_SECRET;
+if (!sessionSecret || sessionSecret.length < 32) {
+  throw new Error("SESSION_SECRET must be set to at least 32 characters");
+}
+
+// The production app sits behind the Plesk reverse proxy. Trust one proxy hop
+// so Express sees the original HTTPS scheme and secure session cookies work.
+app.set("trust proxy", 1);
+
 declare module "http" {
   interface IncomingMessage {
     rawBody: unknown;
@@ -39,13 +48,14 @@ app.use(
       conString: process.env.DATABASE_URL,
       createTableIfMissing: true,
     }),
-    secret: process.env.SESSION_SECRET!,
+    secret: sessionSecret,
     resave: false,
     saveUninitialized: false,
     cookie: {
       maxAge: 7 * 24 * 60 * 60 * 1000,
       httpOnly: true,
       sameSite: "lax",
+      secure: process.env.NODE_ENV === "production" ? "auto" : false,
     },
   }),
 );
@@ -127,10 +137,8 @@ app.use((req, res, next) => {
     await setupVite(httpServer, app);
   }
 
-  // ALWAYS serve the app on the port specified in the environment variable PORT
-  // Other ports are firewalled. Default to 5000 if not specified.
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
+  // The Docker container listens on PORT (5000 by default); Docker Compose
+  // publishes it only on localhost for the Plesk reverse proxy.
   const port = parseInt(process.env.PORT || "5000", 10);
   httpServer.listen(
     {
