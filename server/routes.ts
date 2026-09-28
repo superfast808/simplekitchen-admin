@@ -574,7 +574,7 @@ async function getSmtpFromEmail(): Promise<string> {
   return s.smtp_from || process.env.SMTP_FROM_EMAIL || "";
 }
 
-// Return the active Stripe secret key (DB settings → env var → undefined for proxy fallback)
+// Return the active Stripe secret key (DB settings → env var → undefined if not configured)
 async function getActiveStripeSecretKey(): Promise<string | undefined> {
   const s = await getSettingsMap();
   const mode = s.stripe_mode || "test";
@@ -1101,9 +1101,18 @@ export async function registerRoutes(
 
   const userCount = await storage.countUsers();
   if (userCount === 0) {
-    const hashedPassword = await bcrypt.hash("admin", 10);
-    await storage.createUser({ username: "admin", password: hashedPassword });
-    log("Created default admin user (username: admin)", "auth");
+    const bootstrapUsername = process.env.BOOTSTRAP_ADMIN_USERNAME?.trim();
+    const bootstrapPassword = process.env.BOOTSTRAP_ADMIN_PASSWORD;
+
+    if (!bootstrapUsername || !bootstrapPassword || bootstrapPassword.length < 12) {
+      throw new Error(
+        "No portal users exist. Restore the production database or set BOOTSTRAP_ADMIN_USERNAME and a BOOTSTRAP_ADMIN_PASSWORD of at least 12 characters.",
+      );
+    }
+
+    const hashedPassword = await bcrypt.hash(bootstrapPassword, 12);
+    await storage.createUser({ username: bootstrapUsername, password: hashedPassword });
+    log(`Created bootstrap admin user (username: ${bootstrapUsername})`, "auth");
   }
 
   app.post("/api/auth/login", async (req, res) => {
