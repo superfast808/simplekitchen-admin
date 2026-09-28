@@ -44,32 +44,32 @@ export function AppSidebar() {
   const hasLogo = logoData?.logo && logoData.logo.length > 0;
 
   return (
-    <Sidebar>
+    <Sidebar className="brand-sidebar">
       <SidebarHeader className="p-4">
         <div className="flex items-center gap-2">
           {hasLogo ? (
-            <div className="flex items-center justify-center w-8 h-8 rounded-md overflow-hidden">
+            <div className="brand-logo-frame flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl p-1">
               <img
                 src={logoData.logo}
                 alt="Logo"
-                className="w-full h-full object-contain"
+                className="h-full w-full object-contain"
                 data-testid="img-sidebar-logo"
               />
             </div>
           ) : (
-            <div className="flex items-center justify-center w-8 h-8 rounded-md bg-primary">
-              <Package className="w-4 h-4 text-primary-foreground" />
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#d9e2ce] text-sm font-black tracking-tight text-[#293721] shadow-sm">
+              SK
             </div>
           )}
           <div>
-            <h2 className="text-sm font-semibold" data-testid="text-app-title">Partner Portal</h2>
-            <p className="text-xs text-muted-foreground">WooCommerce Manager</p>
+            <h2 className="text-sm font-semibold" data-testid="text-app-title">Simple Kitchen</h2>
+            <p className="text-xs text-sidebar-foreground/60">Operations Portal</p>
           </div>
         </div>
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>Navigation</SidebarGroupLabel>
+          <SidebarGroupLabel>Operations</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {menuItems.map((item) => (
@@ -87,7 +87,7 @@ export function AppSidebar() {
         </SidebarGroup>
       </SidebarContent>
       <SidebarFooter className="p-4">
-        <p className="text-xs text-muted-foreground">Syncs with WooCommerce</p>
+        <p className="text-xs text-sidebar-foreground/55">Simple Kitchen · Live operations</p>
       </SidebarFooter>
     </Sidebar>
   );
