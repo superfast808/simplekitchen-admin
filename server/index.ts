@@ -2,7 +2,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
 import { registerRoutes } from "./routes";
-import { runStartupMigrations } from "./db";
+import { pool, runStartupMigrations } from "./db";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 
@@ -39,6 +39,27 @@ app.use(
 );
 
 app.use(express.urlencoded({ extended: false }));
+
+// Lightweight public probe for Plesk/Docker monitoring. It deliberately
+// exposes no credentials or application data.
+app.get("/healthz", async (_req, res) => {
+  try {
+    await pool.query("SELECT 1");
+    res.status(200).json({
+      status: "ok",
+      service: process.env.APP_SERVICE_NAME || "Simple Kitchen Admin",
+      deployment: process.env.DEPLOYMENT_PLATFORM || "Plesk / Docker",
+      uptimeSeconds: Math.floor(process.uptime()),
+      checkedAt: new Date().toISOString(),
+    });
+  } catch {
+    res.status(503).json({
+      status: "degraded",
+      service: process.env.APP_SERVICE_NAME || "Simple Kitchen Admin",
+      checkedAt: new Date().toISOString(),
+    });
+  }
+});
 
 const PgStore = connectPgSimple(session);
 
