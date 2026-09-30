@@ -41,22 +41,194 @@ let lastOrderSyncCompletedAt: string | null = null;
 let lastOrderSyncError: string | null = null;
 let lastOrderSyncSummary: { imported: number; updated: number; total: number } | null = null;
 
+const DELIVERY_DEPOT = {
+  lat: 55.8156,
+  lng: -4.2211,
+};
+
+const DELIVERY_SERVICE_RADIUS_KM = 180;
+
+function extractUkPostcode(raw: string): string | null {
+  const match = raw.match(/\b([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\b/i);
+  if (!match) return null;
+  return match[1].toUpperCase().replace(/\s+/g, " ").trim();
+}
+
+function normalizePostcode(value: string | null | undefined): string {
+  return (value || "").toUpperCase().replace(/\s+/g, "");
+}
+
+function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const toRad = (n: number) => n * Math.PI / 180;
+  const earthRadiusKm = 6371;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+    Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  return earthRadiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function isPlausibleDeliveryCoordinate(lat: number | null, lng: number | null): boolean {
+  if (lat === null || lng === null || !Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+
+  // Hard UK sanity check, then keep results within a generous delivery radius
+  // around the Glasgow depot. This rejects same-named US/overseas locations.
+  if (lat < 49 || lat > 61 || lng < -9 || lng > 3) return false;
+
+  return haversineKm(DELIVERY_DEPOT.lat, DELIVERY_DEPOT.lng, lat, lng) <= DELIVERY_SERVICE_RADIUS_KM;
+}
+
 function buildAddressVariants(raw: string): string[] {
-  const variants: string[] = [raw];
-  let cleaned = raw.replace(/,\s*GB$/i, "").trim();
-  if (cleaned !== raw) variants.push(cleaned);
-  const noFlat = cleaned.replace(/^(Flat|Unit|Apt|Suite)\s+\S+,?\s*/i, "").trim();
-  if (noFlat !== cleaned) variants.push(noFlat);
-  const noSubunit = cleaned.replace(/^\d+\/\d+\s+/i, "").trim();
-  if (noSubunit !== cleaned && !variants.includes(noSubunit)) variants.push(noSubunit);
-  const postcodeMatch = raw.match(/([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})/i);
-  if (postcodeMatch) {
-    const cityMatch = raw.match(/,\s*([^,]+),\s*[A-Z]{1,2}\d/i);
-    const city = cityMatch ? cityMatch[1].trim() : "";
-    if (city) variants.push(`${postcodeMatch[1]}, ${city}`);
-    variants.push(postcodeMatch[1]);
+  const postcode = extractUkPostcode(raw);
+  const cleaned = raw
+    .replace(/,?\s*(GB|UK|United Kingdom)\s*$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const variants: string[] = [];
+  const add = (value: string) => {
+    const trimmed = value.trim().replace(/^,|,$/g, "").trim();
+    if (trimmed && !variants.includes(trimmed)) variants.push(trimmed);
+  };
+
+  // Explicit country bias is important: local street/town names are otherwise
+  // occasionally resolved to similarly named places in the USA.
+  add(`${cleaned}, Scotland, United Kingdom`);
+  add(cleaned);
+
+  // Flats and unit identifiers can confuse Nominatim. Keep a street-level fallback.
+  const noFlat = cleaned.replace(/^(Flat|Unit|Apartment|Apt|Suite)\s+[^,]+,?\s*/i, "").trim();
+  if (noFlat !== cleaned) {
+    add(`${noFlat}, Scotland, United Kingdom`);
+    add(noFlat);
   }
+
+  const noSubunit = cleaned.replace(/^\d+\/\d+\s+/i, "").trim();
+  if (noSubunit !== cleaned) {
+    add(`${noSubunit}, Scotland, United Kingdom`);
+    add(noSubunit);
+  }
+
+  if (postcode) {
+    add(`${postcode}, Scotland, United Kingdom`);
+    add(postcode);
+  }
+
   return variants;
+}
+
+type GeocodeResult = {
+  lat: number | null;
+  lng: number | null;
+  displayName: string | null;
+  postcode: string | null;
+  source: "nominatim" | "postcodes.io" | null;
+};
+
+async function geocodeUkAddress(rawAddress: string): Promise<GeocodeResult> {
+  const postcode = extractUkPostcode(rawAddress);
+  const variants = buildAddressVariants(rawAddress);
+
+  for (const variant of variants) {
+    try {
+      const params = new URLSearchParams({
+        format: "jsonv2",
+        q: variant,
+        limit: "5",
+        countrycodes: "gb",
+        addressdetails: "1",
+        dedupe: "1",
+        // Bias towards west/central Scotland while countrycodes=gb is the hard limit.
+        viewbox: "-6.2,56.7,-2.3,54.3",
+      });
+
+      const response = await fetch(`https://nominatim.openstreetmap.org/search?${params.toString()}`, {
+        headers: {
+          "User-Agent": "SimpleKitchenPrepDeliveryRoutes/1.0 (admin.simplekitchenprep.com)",
+          "Accept-Language": "en-GB,en;q=0.9",
+        },
+      });
+
+      const contentType = response.headers.get("content-type") || "";
+      if (!response.ok || !contentType.includes("application/json")) {
+        await new Promise(r => setTimeout(r, 1100));
+        continue;
+      }
+
+      const data = await response.json() as any[];
+      const candidates = (Array.isArray(data) ? data : [])
+        .map(item => {
+          const lat = Number.parseFloat(item.lat);
+          const lng = Number.parseFloat(item.lon);
+          const countryCode = String(item.address?.country_code || "").toLowerCase();
+          const resultPostcode = String(item.address?.postcode || "");
+          const postcodeMatch = Boolean(
+            postcode && normalizePostcode(resultPostcode) === normalizePostcode(postcode)
+          );
+          const distanceKm = Number.isFinite(lat) && Number.isFinite(lng)
+            ? haversineKm(DELIVERY_DEPOT.lat, DELIVERY_DEPOT.lng, lat, lng)
+            : Number.POSITIVE_INFINITY;
+
+          let score = Number(item.importance || 0);
+          if (countryCode === "gb") score += 10;
+          if (postcodeMatch) score += 100;
+          if (/scotland/i.test(String(item.display_name || ""))) score += 5;
+          score -= distanceKm / 1000;
+
+          return { item, lat, lng, countryCode, score };
+        })
+        .filter(candidate =>
+          candidate.countryCode === "gb" &&
+          isPlausibleDeliveryCoordinate(candidate.lat, candidate.lng)
+        )
+        .sort((a, b) => b.score - a.score);
+
+      const best = candidates[0];
+      if (best) {
+        return {
+          lat: best.lat,
+          lng: best.lng,
+          displayName: String(best.item.display_name || variant),
+          postcode: String(best.item.address?.postcode || postcode || "") || null,
+          source: "nominatim",
+        };
+      }
+    } catch {
+      // Continue to the next address variant.
+    }
+
+    await new Promise(r => setTimeout(r, 1100));
+  }
+
+  // If street-level lookup fails but we have a UK postcode, postcodes.io gives a
+  // reliable UK-only centroid. It is much safer than accepting an overseas match.
+  if (postcode) {
+    try {
+      const response = await fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(postcode)}`);
+      if (response.ok) {
+        const payload = await response.json() as any;
+        const lat = Number(payload?.result?.latitude);
+        const lng = Number(payload?.result?.longitude);
+        if (isPlausibleDeliveryCoordinate(lat, lng)) {
+          return {
+            lat,
+            lng,
+            displayName: payload?.result?.admin_ward
+              ? `${postcode} — ${payload.result.admin_ward}`
+              : postcode,
+            postcode,
+            source: "postcodes.io",
+          };
+        }
+      }
+    } catch {
+      // Leave unresolved rather than guessing.
+    }
+  }
+
+  return { lat: null, lng: null, displayName: null, postcode, source: null };
 }
 
 // Returns the current week number (1-6) based on week1ReferenceDate setting.
@@ -788,59 +960,48 @@ async function backgroundGeocodeOrders() {
   if (geocodeInProgress) return;
   geocodeInProgress = true;
   try {
-    // Geocode orders in a broad 3-week window: last week, this week, next week
     const windowFrom = new Date();
     windowFrom.setDate(windowFrom.getDate() - 14);
     const windowTo = new Date();
     windowTo.setDate(windowTo.getDate() + 14);
 
     const ordersList = await storage.getOrders(windowFrom, windowTo);
-    const ungeocoded = ordersList.filter(
-      o => o.deliveryAddress && o.fulfillmentType !== "collection" && (!o.deliveryLat || !o.deliveryLng)
-    );
+    const ungeocoded = ordersList.filter(order => {
+      if (!order.deliveryAddress || order.fulfillmentType === "collection") return false;
+      const lat = order.deliveryLat ? Number.parseFloat(order.deliveryLat) : null;
+      const lng = order.deliveryLng ? Number.parseFloat(order.deliveryLng) : null;
+      return !isPlausibleDeliveryCoordinate(lat, lng);
+    });
 
     if (ungeocoded.length === 0) return;
-    log(`Geocoding ${ungeocoded.length} unresolved address(es) in background...`, "sync");
+    log(`Geocoding ${ungeocoded.length} unresolved/invalid address(es) in background...`, "sync");
 
     let resolved = 0;
     for (const order of ungeocoded) {
       try {
-        const variants = buildAddressVariants(order.deliveryAddress!);
-        let lat: number | null = null;
-        let lng: number | null = null;
-        for (const variant of variants) {
-          try {
-            const response = await fetch(
-              `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(variant)}&limit=1`,
-              { headers: { "User-Agent": "PartnerPortal/1.0" } }
-            );
-            const contentType = response.headers.get("content-type") || "";
-            if (!contentType.includes("application/json")) {
-              await new Promise(r => setTimeout(r, 2000));
-              continue;
-            }
-            const data = await response.json();
-            if (data && data.length > 0) {
-              lat = parseFloat(data[0].lat);
-              lng = parseFloat(data[0].lon);
-              break;
-            }
-          } catch {
-            // network error on this variant
-          }
-          await new Promise(r => setTimeout(r, 1100));
-        }
-        if (lat !== null && lng !== null) {
-          await storage.updateOrder(order.id, { deliveryLat: String(lat), deliveryLng: String(lng) });
+        const result = await geocodeUkAddress(order.deliveryAddress!);
+        if (result.lat !== null && result.lng !== null) {
+          await storage.updateOrder(order.id, {
+            deliveryLat: String(result.lat),
+            deliveryLng: String(result.lng),
+          });
           resolved++;
+        } else if (order.deliveryLat || order.deliveryLng) {
+          // Clear previously cached bad coordinates so they never appear on the map.
+          await storage.updateOrder(order.id, {
+            deliveryLat: null,
+            deliveryLng: null,
+          } as any);
         }
-        // Nominatim rate limit: 1 req/sec
         await new Promise(r => setTimeout(r, 1100));
       } catch {
-        // skip individual failures silently
+        // Keep this address unresolved rather than persisting a dubious location.
       }
     }
-    if (resolved > 0) log(`Background geocoding complete: ${resolved}/${ungeocoded.length} resolved`, "sync");
+
+    if (resolved > 0) {
+      log(`Background geocoding complete: ${resolved}/${ungeocoded.length} resolved`, "sync");
+    }
   } finally {
     geocodeInProgress = false;
   }
@@ -2413,14 +2574,19 @@ export async function registerRoutes(
             : "collection";
           // Treat subscription-created orders as website (not custom) for reconciliation
           const effectiveIsManual = o.isManual && !subscriptionOrderIds.has(o.id);
+          const storedLat = o.deliveryLat ? parseFloat(o.deliveryLat) : null;
+          const storedLng = o.deliveryLng ? parseFloat(o.deliveryLng) : null;
+          const coordsValid = isPlausibleDeliveryCoordinate(storedLat, storedLng);
+
           return {
             id: o.id,
             customerName: o.customerName,
             address: o.deliveryAddress,
-            lat: o.deliveryLat ? parseFloat(o.deliveryLat) : null,
-            lng: o.deliveryLng ? parseFloat(o.deliveryLng) : null,
+            lat: coordsValid ? storedLat : null,
+            lng: coordsValid ? storedLng : null,
             fulfillment: fulfillment as "delivery" | "collection",
             isManual: effectiveIsManual,
+            coordinateStatus: coordsValid ? "verified-local" : (storedLat !== null || storedLng !== null ? "recheck" : "missing"),
           };
         });
       res.json(addresses);
@@ -2434,43 +2600,113 @@ export async function registerRoutes(
       const { address, orderId } = req.body;
       if (!address) return res.status(400).json({ message: "Address is required" });
 
-      const variants = buildAddressVariants(address);
-      let lat: number | null = null;
-      let lng: number | null = null;
+      const result = await geocodeUkAddress(String(address));
 
-      for (const variant of variants) {
-        try {
-          const response = await fetch(
-            `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(variant)}&limit=1`,
-            { headers: { "User-Agent": "PartnerPortal/1.0" } }
-          );
-          const contentType = response.headers.get("content-type") || "";
-          if (!contentType.includes("application/json")) {
-            // Nominatim returned HTML/XML error page — rate limited or server error, skip variant
-            await new Promise(r => setTimeout(r, 2000));
-            continue;
-          }
-          const data = await response.json();
-          if (data && data.length > 0) {
-            lat = parseFloat(data[0].lat);
-            lng = parseFloat(data[0].lon);
-            break;
-          }
-        } catch {
-          // network error on this variant — continue to next
+      if (orderId) {
+        if (result.lat !== null && result.lng !== null) {
+          await storage.updateOrder(parseInt(orderId), {
+            deliveryLat: String(result.lat),
+            deliveryLng: String(result.lng),
+          });
+        } else {
+          await storage.updateOrder(parseInt(orderId), {
+            deliveryLat: null,
+            deliveryLng: null,
+          } as any);
         }
-        await new Promise(r => setTimeout(r, 1100));
       }
 
-      if (lat !== null && lng !== null && orderId) {
-        await storage.updateOrder(parseInt(orderId), {
-          deliveryLat: String(lat),
-          deliveryLng: String(lng),
-        });
-      }
-      res.json({ lat, lng });
+      res.json(result);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/delivery-route/optimize", async (req, res) => {
+    try {
+      const rawStops = Array.isArray(req.body?.stops) ? req.body.stops : [];
+      const stops = rawStops
+        .map((stop: any) => ({
+          id: Number(stop.id),
+          lat: Number(stop.lat),
+          lng: Number(stop.lng),
+        }))
+        .filter((stop: any) =>
+          Number.isInteger(stop.id) &&
+          isPlausibleDeliveryCoordinate(stop.lat, stop.lng)
+        );
+
+      if (stops.length === 0) {
+        return res.json({
+          source: "none",
+          orderedStopIds: [],
+          geometry: [],
+          distanceMeters: 0,
+          durationSeconds: 0,
+          legs: [],
+        });
+      }
+
+      // OSRM's public demo router uses OpenStreetMap's road graph, so the route
+      // follows actual drivable roads instead of straight-line point hopping.
+      // Keep the depot as the fixed first coordinate and let Trip optimise the rest.
+      const coordinates = [
+        `${DELIVERY_DEPOT.lng},${DELIVERY_DEPOT.lat}`,
+        ...stops.map((stop: any) => `${stop.lng},${stop.lat}`),
+      ].join(";");
+
+      const url =
+        `https://router.project-osrm.org/trip/v1/driving/${coordinates}` +
+        "?source=first&roundtrip=false&overview=full&geometries=geojson&steps=false";
+
+      const response = await fetch(url, {
+        headers: { "User-Agent": "SimpleKitchenPrepDeliveryRoutes/1.0" },
+      });
+
+      if (!response.ok) {
+        throw new Error(`OSRM routing error (${response.status})`);
+      }
+
+      const payload = await response.json() as any;
+      const trip = payload?.trips?.[0];
+      const waypoints = Array.isArray(payload?.waypoints) ? payload.waypoints : [];
+
+      if (!trip || !Array.isArray(trip.geometry?.coordinates)) {
+        throw new Error("Road router returned no usable trip");
+      }
+
+      const orderedStops = stops
+        .map((stop: any, inputIndex: number) => {
+          const waypoint = waypoints[inputIndex + 1];
+          return {
+            stop,
+            waypointIndex: Number.isInteger(waypoint?.waypoint_index)
+              ? waypoint.waypoint_index
+              : inputIndex + 1,
+          };
+        })
+        .sort((a: any, b: any) => a.waypointIndex - b.waypointIndex)
+        .map((entry: any) => entry.stop.id);
+
+      const geometry = trip.geometry.coordinates.map((pair: number[]) => [pair[1], pair[0]]);
+
+      res.json({
+        source: "osrm",
+        orderedStopIds: orderedStops,
+        geometry,
+        distanceMeters: Number(trip.distance || 0),
+        durationSeconds: Number(trip.duration || 0),
+        legs: Array.isArray(trip.legs)
+          ? trip.legs.map((leg: any) => ({
+              distanceMeters: Number(leg.distance || 0),
+              durationSeconds: Number(leg.duration || 0),
+            }))
+          : [],
+      });
+    } catch (error: any) {
+      // The client has a local fallback optimiser, so a public OSRM outage should
+      // degrade gracefully rather than breaking the route page.
+      res.status(502).json({ message: error.message });
     }
   });
 
