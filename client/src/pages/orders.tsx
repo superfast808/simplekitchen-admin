@@ -37,6 +37,13 @@ function sortItems<T extends { productName: string }>(items: T[]): T[] {
   return [...items].sort((a, b) => itemSortPriority(a.productName) - itemSortPriority(b.productName));
 }
 
+function canonicalizeOrderProductName(name: string): string {
+  const trimmed = (name || "").trim();
+  return trimmed.toLowerCase() === "slow cooked honey bbq mac"
+    ? "Slow Cooked Honey BBQ Beef Mac"
+    : trimmed;
+}
+
 const SUB_RE_ORDERS = /meal\s+subscription/i;
 
 function effectiveSpend(o: any, subCustomers: Set<string> = new Set()): number {
@@ -324,7 +331,9 @@ export default function OrdersPage() {
     }
   }
 
-  const allProductNames = Array.from(new Set((orders || []).flatMap(o => o.items.map(i => i.productName))))
+  const allProductNames = Array.from(new Set(
+    (orders || []).flatMap(o => o.items.map(i => canonicalizeOrderProductName(i.productName)))
+  ))
     .sort((a, b) => {
       const pa = itemSortPriority(a), pb = itemSortPriority(b);
       return pa !== pb ? pa - pb : a.localeCompare(b);
@@ -333,7 +342,9 @@ export default function OrdersPage() {
   const productTotals: Record<string, number> = {};
   for (const name of allProductNames) {
     productTotals[name] = (orders || []).reduce((sum, order) => {
-      return sum + order.items.filter(i => i.productName === name).reduce((s, i) => s + i.quantity, 0);
+      return sum + order.items
+        .filter(i => canonicalizeOrderProductName(i.productName) === name)
+        .reduce((s, i) => s + i.quantity, 0);
     }, 0);
   }
 
@@ -639,7 +650,7 @@ export default function OrdersPage() {
                                   : group.saturday!.items;
                                 return items.length === 0
                                   ? <span className="italic">No items — amend to add</span>
-                                  : <>{sortItems(items).map(i => `${i.quantity > 1 ? i.quantity + "× " : ""}${i.productName}`).join(", ")}{actualOrders && actualOrders.length > 0 && <span className="ml-1 text-xs text-muted-foreground/60">(actual)</span>}</>;
+                                  : <>{sortItems(items).map(i => `${i.quantity > 1 ? i.quantity + "× " : ""}${canonicalizeOrderProductName(i.productName)}`).join(", ")}{actualOrders && actualOrders.length > 0 && <span className="ml-1 text-xs text-muted-foreground/60">(actual)</span>}</>;
                               })()
                             : <span className="text-muted-foreground/40 italic">—</span>}
                         </TableCell>
@@ -654,7 +665,7 @@ export default function OrdersPage() {
                                   : group.tuesday!.items;
                                 return items.length === 0
                                   ? <span className="italic">No items — amend to add</span>
-                                  : <>{sortItems(items).map(i => `${i.quantity > 1 ? i.quantity + "× " : ""}${i.productName}`).join(", ")}{actualOrders && actualOrders.length > 0 && <span className="ml-1 text-xs text-muted-foreground/60">(actual)</span>}</>;
+                                  : <>{sortItems(items).map(i => `${i.quantity > 1 ? i.quantity + "× " : ""}${canonicalizeOrderProductName(i.productName)}`).join(", ")}{actualOrders && actualOrders.length > 0 && <span className="ml-1 text-xs text-muted-foreground/60">(actual)</span>}</>;
                               })()
                             : <span className="text-muted-foreground/40 italic">—</span>}
                         </TableCell>
@@ -741,7 +752,7 @@ export default function OrdersPage() {
                     const itemSummary = sortItems(order.items
                       .filter(i => !i.productName.toLowerCase().includes("add delivery")))
                       .map(i => {
-                        return `${i.quantity > 1 ? i.quantity + "× " : ""}${i.productName}`;
+                        return `${i.quantity > 1 ? i.quantity + "× " : ""}${canonicalizeOrderProductName(i.productName)}`;
                       })
                       .join(", ");
                     return (
@@ -846,7 +857,7 @@ export default function OrdersPage() {
                         )}
                       </TableCell>
                       {allProductNames.map(name => {
-                        const qty = order.items.filter(i => i.productName === name).reduce((s, i) => s + i.quantity, 0);
+                        const qty = order.items.filter(i => canonicalizeOrderProductName(i.productName) === name).reduce((s, i) => s + i.quantity, 0);
                         return (
                           <TableCell key={name} className="text-center">
                             {qty > 0 ? (
