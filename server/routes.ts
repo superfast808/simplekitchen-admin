@@ -2702,90 +2702,142 @@ export async function registerRoutes(
         });
       }
 
-      // OSRM's public demo router uses OpenStreetMap's road graph, so the route
-      // follows actual drivable roads instead of straight-line point hopping.
-      // For a non-round-trip OSRM requires a fixed destination. Use the stop
-      // furthest from the depot as the end point, which is a good delivery-route
-      // heuristic and avoids finishing by doubling back across the service area.
-      const furthestStop = [...stops].sort((a: any, b: any) =>
-        haversineKm(DELIVERY_DEPOT.lat, DELIVERY_DEPOT.lng, b.lat, b.lng) -
-        haversineKm(DELIVERY_DEPOT.lat, DELIVERY_DEPOT.lng, a.lat, a.lng)
-      )[0];
-
-      const orderedInputStops = [
-        ...stops.filter((stop: any) => stop.id !== furthestStop.id),
-        furthestStop,
+      const allPoints = [
+        { id: 0, lat: DELIVERY_DEPOT.lat, lng: DELIVERY_DEPOT.lng },
+        ...stops,
       ];
+      const coordinates = allPoints
+        .map(point => `${point.lng},${point.lat}`)
+        .join(";");
 
-      const coordinates = [
-        `${DELIVERY_DEPOT.lng},${DELIVERY_DEPOT.lat}`,
-        ...orderedInputStops.map((stop: any) => `${stop.lng},${stop.lat}`),
-      ].join(";");
+      // Build a road-time matrix first. This gives us direct control over the
+      // waypoint order instead of relying on OSRM Trip's optimiser, which can
+      // make large geographic jumps and then return to a nearby stop later.
+      const tableUrl =
+        `https://router.project-osrm.org/table/v1/driving/${coordinates}` +
+        "?annotations=duration,distance";
 
-      const url =
-        `https://router.project-osrm.org/trip/v1/driving/${coordinates}` +
-        "?source=first&destination=last&roundtrip=false&overview=full&geometries=geojson&steps=false";
-
-      const response = await fetch(url, {
+      const tableResponse = await fetch(tableUrl, {
         headers: { "User-Agent": "SimpleKitchenPrepDeliveryRoutes/1.0" },
       });
-
-      if (!response.ok) {
-        throw new Error(`OSRM routing error (${response.status})`);
+      if (!tableResponse.ok) {
+        throw new Error(`OSRM table routing error (${tableResponse.status})`);
       }
 
-      const payload = await response.json() as any;
-      const trip = payload?.trips?.[0];
-      const waypoints = Array.isArray(payload?.waypoints) ? payload.waypoints : [];
-
-      if (!trip || !Array.isArray(trip.geometry?.coordinates)) {
-        throw new Error("Road router returned no usable trip");
+      const tablePayload = await tableResponse.json() as any;
+      const durations = tablePayload?.durations;
+      if (!Array.isArray(durations) || durations.length !== allPoints.length) {
+        throw new Error("Road router returned no usable travel-time matrix");
       }
 
-      const orderedStops = orderedInputStops
-        .map((stop: any, inputIndex: number) => {
-          const waypoint = waypoints[inputIndex + 1];
-          return {
-            stop,
-            waypointIndex: Number.isInteger(waypoint?.waypoint_index)
-              ? waypoint.waypoint_index
-              : inputIndex + 1,
-          };
-        })
-        .sort((a: any, b: any) => a.waypointIndex - b.waypointIndex)
-        .map((entry: any) => entry.stop.id);
+      // Nearest-neighbour on actual driving time, starting at the depot.
+      // Then improve the open route with 2-opt while keeping the depot fixed.
+      const remaining = stops.map((_, idx) => idx + 1);
+      const routeIndexes: number[] = [0];
+      let current = 0;
+      while (remaining.length > 0) {
+        let bestPos = 0;
+        let bestDuration = Number.POSITIVE_INFINITY;
+        for (let pos = 0; pos < remaining.length; pos++) {
+          const candidate = remaining[pos];
+          const d = Number(durations[current]?.[candidate]);
+          if (Number.isFinite(d) && d < bestDuration) {
+            bestDuration = d;
+            bestPos = pos;
+          }
+        }
+        const next = remaining.splice(bestPos, 1)[0];
+        routeIndexes.push(next);
+        current = next;
+      }
 
-      // A route is only useful if every valid input stop is represented. Public
-      // OSRM can occasionally return an incomplete waypoint set; treating that
-      // as success caused customers to disappear from the route page.
-      const uniqueOrderedStops = new Set(orderedStops);
-      if (
-        orderedStops.length !== orderedInputStops.length ||
-        orderedInputStops.some((stop: any) => !uniqueOrderedStops.has(stop.id))
-      ) {
+      const routeCost = (indexes: number[]) => {
+        let total = 0;
+        for (let i = 0; i < indexes.length - 1; i++) {
+          const d = Number(durations[indexes[i]]?.[indexes[i + 1]]);
+          if (!Number.isFinite(d)) return Number.POSITIVE_INFINITY;
+          total += d;
+        }
+        return total;
+      };
+
+      let improved = true;
+      let passes = 0;
+      while (improved && passes < 8) {
+        improved = false;
+        passes++;
+        const currentCost = routeCost(routeIndexes);
+        for (let i = 1; i < routeIndexes.length - 1; i++) {
+          for (let j = i + 1; j < routeIndexes.length; j++) {
+            const candidate = [
+              ...routeIndexes.slice(0, i),
+              ...routeIndexes.slice(i, j + 1).reverse(),
+              ...routeIndexes.slice(j + 1),
+            ];
+            const candidateCost = routeCost(candidate);
+            if (candidateCost + 1 < currentCost) {
+              routeIndexes.splice(0, routeIndexes.length, ...candidate);
+              improved = true;
+              break;
+            }
+          }
+          if (improved) break;
+        }
+      }
+
+      const orderedStops = routeIndexes
+        .slice(1)
+        .map(index => allPoints[index])
+        .filter((point): point is { id: number; lat: number; lng: number } => Boolean(point));
+
+      if (orderedStops.length !== stops.length) {
         throw new Error(
-          `Road router returned an incomplete trip (${orderedStops.length}/${orderedInputStops.length} stops)`
+          `Road optimiser returned an incomplete route (${orderedStops.length}/${stops.length} stops)`
         );
       }
 
-      const geometry = trip.geometry.coordinates.map((pair: number[]) => [pair[1], pair[0]]);
+      // Draw the final route through every stop in the exact calculated order.
+      // The route service may split legs, but no waypoint is optional.
+      const orderedCoordinates = [
+        `${DELIVERY_DEPOT.lng},${DELIVERY_DEPOT.lat}`,
+        ...orderedStops.map(stop => `${stop.lng},${stop.lat}`),
+      ].join(";");
+
+      const routeUrl =
+        `https://router.project-osrm.org/route/v1/driving/${orderedCoordinates}` +
+        "?overview=full&geometries=geojson&steps=false";
+
+      const routeResponse = await fetch(routeUrl, {
+        headers: { "User-Agent": "SimpleKitchenPrepDeliveryRoutes/1.0" },
+      });
+      if (!routeResponse.ok) {
+        throw new Error(`OSRM road routing error (${routeResponse.status})`);
+      }
+
+      const routePayload = await routeResponse.json() as any;
+      const route = routePayload?.routes?.[0];
+      if (!route || !Array.isArray(route.geometry?.coordinates)) {
+        throw new Error("Road router returned no usable route");
+      }
+
+      const geometry = route.geometry.coordinates.map((pair: number[]) => [pair[1], pair[0]]);
 
       res.json({
         source: "osrm",
-        orderedStopIds: orderedStops,
+        orderedStopIds: orderedStops.map(stop => stop.id),
         geometry,
-        distanceMeters: Number(trip.distance || 0),
-        durationSeconds: Number(trip.duration || 0),
-        legs: Array.isArray(trip.legs)
-          ? trip.legs.map((leg: any) => ({
+        distanceMeters: Number(route.distance || 0),
+        durationSeconds: Number(route.duration || 0),
+        legs: Array.isArray(route.legs)
+          ? route.legs.map((leg: any) => ({
               distanceMeters: Number(leg.distance || 0),
               durationSeconds: Number(leg.duration || 0),
             }))
           : [],
       });
     } catch (error: any) {
-      // The client has a local fallback optimiser, so a public OSRM outage should
-      // degrade gracefully rather than breaking the route page.
+      // The client has a complete local fallback optimiser, so a public OSRM
+      // outage or capacity limit should never remove customers from the route.
       res.status(502).json({ message: error.message });
     }
   });
