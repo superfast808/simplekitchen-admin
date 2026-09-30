@@ -2755,6 +2755,19 @@ export async function registerRoutes(
         .sort((a: any, b: any) => a.waypointIndex - b.waypointIndex)
         .map((entry: any) => entry.stop.id);
 
+      // A route is only useful if every valid input stop is represented. Public
+      // OSRM can occasionally return an incomplete waypoint set; treating that
+      // as success caused customers to disappear from the route page.
+      const uniqueOrderedStops = new Set(orderedStops);
+      if (
+        orderedStops.length !== orderedInputStops.length ||
+        orderedInputStops.some((stop: any) => !uniqueOrderedStops.has(stop.id))
+      ) {
+        throw new Error(
+          `Road router returned an incomplete trip (${orderedStops.length}/${orderedInputStops.length} stops)`
+        );
+      }
+
       const geometry = trip.geometry.coordinates.map((pair: number[]) => [pair[1], pair[0]]);
 
       res.json({
