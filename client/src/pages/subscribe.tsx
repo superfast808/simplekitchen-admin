@@ -122,14 +122,14 @@ function BrandLogo({ size = "lg" }: { size?: "lg" | "sm" }) {
 
   if (logoData?.logo) {
     return (
-      <div className={`${dims} mx-auto rounded-2xl overflow-hidden shadow-lg`}>
-        <img src={logoData.logo} alt="Simple Kitchen Prep" className="w-full h-full object-contain" />
+      <div className={`${dims} mx-auto rounded-3xl overflow-hidden bg-white shadow-xl ring-1 ring-black/5 p-1.5`}>
+        <img src={logoData.logo} alt="Simple Kitchen Prep" className="w-full h-full object-contain rounded-2xl" />
       </div>
     );
   }
 
   return (
-    <div className={`${dims} mx-auto rounded-2xl bg-gradient-to-br from-emerald-500 to-emerald-600 flex items-center justify-center shadow-lg`}>
+    <div className={`${dims} mx-auto rounded-3xl bg-gradient-to-br from-emerald-600 to-emerald-700 flex items-center justify-center shadow-xl ring-4 ring-white`}>
       <ChefHat className={`${iconDims} text-white`} />
     </div>
   );
@@ -177,7 +177,7 @@ function MealSelectorPanel({
 
   return (
     <div className="space-y-2">
-      <div className={`flex items-center justify-between px-4 py-3 rounded-xl border ${headerBg}`}>
+      <div className={`flex items-center justify-between px-4 py-3.5 rounded-2xl border shadow-sm ${headerBg}`}>
         <div className="flex items-center gap-2">
           <CalendarDays className={`w-4 h-4 ${headerText}`} />
           <span className={`font-semibold text-sm ${headerText}`}>{label}</span>
@@ -202,7 +202,7 @@ function MealSelectorPanel({
             className={`transition-all ${isSelected ? `${borderColor} ${bgColor} shadow-sm` : ""}`}
             data-testid={`card-meal-${testPrefix}-${meal.name.replace(/\s+/g, "-").toLowerCase()}`}
           >
-            <CardContent className="p-4 flex items-center justify-between gap-3">
+            <CardContent className="p-4 sm:p-5 flex items-center justify-between gap-4">
               <div className="flex-1 min-w-0">
                 <p className="font-medium text-sm truncate">{meal.name}</p>
                 {isSpecialMeal ? (
@@ -232,7 +232,7 @@ function MealSelectorPanel({
                 ) : (
                   <Button size="sm" variant="outline" onClick={() => onAddMeal(meal.name)}
                     disabled={remaining <= 0}
-                    className={btnColor}
+                    className={`${btnColor} rounded-full px-4 font-semibold bg-white hover:bg-stone-50`}
                     data-testid={`button-select-${testPrefix}-${meal.name.replace(/\s+/g, "-").toLowerCase()}`}>
                     <Plus className="w-3 h-3 mr-1" />
                     Add
@@ -257,7 +257,7 @@ function MealSelectorPanel({
         <div className="space-y-2 pt-1">
           <div className="flex items-center gap-2">
             <div className="flex-1 border-t" />
-            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide shrink-0">Add-ons (optional)</p>
+            <p className="text-xs font-semibold text-amber-800 dark:text-amber-300 uppercase tracking-[0.18em] shrink-0">Something extra</p>
             <div className="flex-1 border-t" />
           </div>
           {(availableExtras || []).map((extra) => {
@@ -268,7 +268,7 @@ function MealSelectorPanel({
               <Card key={extra.name}
                 className={`transition-all ${isSelected ? "border-blue-400 bg-blue-50/50 dark:bg-blue-950/20 shadow-sm" : ""}`}
                 data-testid={`card-extra-${testPrefix}-${extra.name.replace(/\s+/g, "-").toLowerCase()}`}>
-                <CardContent className="p-4 flex items-center justify-between gap-3">
+                <CardContent className="p-4 sm:p-5 flex items-center justify-between gap-4">
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-sm truncate">{extra.name}</p>
                     {unitPrice > 0 && <p className="text-xs text-muted-foreground">£{unitPrice.toFixed(2)}</p>}
@@ -290,7 +290,7 @@ function MealSelectorPanel({
                       </div>
                     ) : (
                       <Button size="sm" variant="outline" onClick={() => onAddExtra(extra.name)}
-                        className="text-blue-600 border-blue-300"
+                        className="text-amber-700 border-amber-300 rounded-full px-4 font-semibold bg-white hover:bg-amber-50"
                         data-testid={`button-select-extra-${testPrefix}-${extra.name.replace(/\s+/g, "-").toLowerCase()}`}>
                         <Plus className="w-3 h-3 mr-1" />
                         Add
@@ -563,7 +563,7 @@ export default function SubscribePage({ params }: { params: { token: string } })
               />
               {emailError && <p className="text-sm text-red-500" data-testid="text-email-error">{emailError}</p>}
             </div>
-            <Button className="w-full bg-emerald-600" onClick={handleVerifyEmail} data-testid="button-verify-email">
+            <Button className="w-full rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-semibold shadow-sm" onClick={handleVerifyEmail} data-testid="button-verify-email">
               Continue <ArrowRight className="w-4 h-4 ml-2" />
             </Button>
           </CardContent>
@@ -576,11 +576,11 @@ export default function SubscribePage({ params }: { params: { token: string } })
   if (data.isDual) {
     const canSubmit = satTotal > 0 && tueTotal > 0;
     return (
-      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-orange-50 dark:from-gray-900 dark:via-gray-900 dark:to-gray-900">
-        <div className="max-w-lg mx-auto p-4 pb-36">
-          <div className="text-center py-6">
+      <div className="min-h-screen bg-[#f7f4ec] dark:bg-gray-950">
+        <div className="max-w-2xl mx-auto px-4 sm:px-6 pt-4 pb-40">
+          <div className="text-center py-6 sm:py-8">
             <div className="mb-3"><BrandLogo size="sm" /></div>
-            <h1 className="text-xl font-bold" data-testid="text-subscribe-title">Choose Your Meals</h1>
+            <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-stone-900 dark:text-white" data-testid="text-subscribe-title">Choose Your Meals</h1>
             <p className="text-sm text-muted-foreground mt-1">
               {maxMeals} meals per delivery — Saturday <span className="font-semibold text-orange-600">+</span> Tuesday
             </p>
@@ -635,8 +635,8 @@ export default function SubscribePage({ params }: { params: { token: string } })
           {submitError && <p className="text-sm text-red-500 text-center mt-3" data-testid="text-submit-error">{submitError}</p>}
         </div>
 
-        <div className="fixed bottom-0 left-0 right-0 bg-white/95 dark:bg-gray-900/95 backdrop-blur border-t p-4 shadow-lg">
-          <div className="max-w-lg mx-auto">
+        <div className="fixed bottom-0 left-0 right-0 bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl border-t border-stone-200/80 p-4 shadow-[0_-10px_30px_rgba(0,0,0,0.08)]">
+          <div className="max-w-2xl mx-auto">
             <div className="flex items-center gap-4 mb-2 text-xs text-muted-foreground">
               <span className="text-orange-600 font-medium">Sat: {satTotal}/{maxMeals}</span>
               <span className="text-blue-600 font-medium">Tue: {tueTotal}/{maxMeals}</span>
@@ -677,7 +677,7 @@ export default function SubscribePage({ params }: { params: { token: string } })
               </p>
             )}
             <Button
-              className="w-full bg-emerald-600 hover:bg-emerald-700 text-white"
+              className="w-full rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-semibold shadow-sm"
               size="lg"
               onClick={handleSubmit}
               disabled={submitting || !canSubmit}
@@ -700,11 +700,11 @@ export default function SubscribePage({ params }: { params: { token: string } })
 
   // ---- SINGLE DAY ----
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-orange-50 dark:from-gray-900 dark:via-gray-900 dark:to-gray-900">
-      <div className="max-w-lg mx-auto p-4 pb-32">
-        <div className="text-center py-6">
+    <div className="min-h-screen bg-[#f7f4ec] dark:bg-gray-950">
+      <div className="max-w-2xl mx-auto px-4 sm:px-6 pt-4 pb-36">
+        <div className="text-center py-6 sm:py-8">
           <div className="mb-3"><BrandLogo size="sm" /></div>
-          <h1 className="text-xl font-bold" data-testid="text-subscribe-title">Choose Your Meals</h1>
+          <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-stone-900 dark:text-white" data-testid="text-subscribe-title">Choose Your Meals</h1>
           <p className="text-sm text-muted-foreground mt-1">
             Select {maxMeals} meals for this week{data.categoryName ? ` (${data.categoryName})` : ""}
             {data.isTuesday !== undefined && (
@@ -717,7 +717,7 @@ export default function SubscribePage({ params }: { params: { token: string } })
 
         <div className="mb-4 flex items-center justify-center gap-2">
           <Badge
-            className={`text-sm px-3 py-1 ${remaining === 0 ? "bg-emerald-500 text-white" : "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300"}`}
+            className={`text-sm px-4 py-1.5 rounded-full font-semibold ${remaining === 0 ? "bg-emerald-700 text-white" : "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200"}`}
             data-testid="badge-remaining"
           >
             {remaining === 0 ? `All ${maxMeals} chosen` : `${remaining} of ${maxMeals} remaining`}
@@ -735,7 +735,7 @@ export default function SubscribePage({ params }: { params: { token: string } })
               <Card key={meal.name}
                 className={`transition-all ${isSelected ? "border-emerald-400 bg-emerald-50/50 dark:bg-emerald-950/20 shadow-sm" : ""}`}
                 data-testid={`card-meal-${meal.name.replace(/\s+/g, "-").toLowerCase()}`}>
-                <CardContent className="p-4 flex items-center justify-between gap-3">
+                <CardContent className="p-4 sm:p-5 flex items-center justify-between gap-4">
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-sm truncate">{meal.name}</p>
                     {isSpecialMeal ? (
@@ -797,7 +797,7 @@ export default function SubscribePage({ params }: { params: { token: string } })
           <div className="mt-2 space-y-2">
             <div className="flex items-center gap-2">
               <div className="flex-1 border-t" />
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide shrink-0">Add-ons (optional)</p>
+              <p className="text-xs font-semibold text-amber-800 dark:text-amber-300 uppercase tracking-[0.18em] shrink-0">Something extra</p>
               <div className="flex-1 border-t" />
             </div>
             {(data.availableExtras || []).map((extra) => {
@@ -808,7 +808,7 @@ export default function SubscribePage({ params }: { params: { token: string } })
                 <Card key={extra.name}
                   className={`transition-all ${isSelected ? "border-blue-400 bg-blue-50/50 dark:bg-blue-950/20 shadow-sm" : ""}`}
                   data-testid={`card-extra-${extra.name.replace(/\s+/g, "-").toLowerCase()}`}>
-                  <CardContent className="p-4 flex items-center justify-between gap-3">
+                  <CardContent className="p-4 sm:p-5 flex items-center justify-between gap-4">
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-sm truncate">{extra.name}</p>
                       {unitPrice > 0 && <p className="text-xs text-muted-foreground">£{unitPrice.toFixed(2)}</p>}
@@ -830,7 +830,7 @@ export default function SubscribePage({ params }: { params: { token: string } })
                         </div>
                       ) : (
                         <Button size="sm" variant="outline" onClick={() => makeExtraAdder(setExtras)(extra.name)}
-                          className="text-blue-600 border-blue-300"
+                          className="text-amber-700 border-amber-300 rounded-full px-4 font-semibold bg-white hover:bg-amber-50"
                           data-testid={`button-select-extra-${extra.name.replace(/\s+/g, "-").toLowerCase()}`}>
                           <Plus className="w-3 h-3 mr-1" />
                           Add
@@ -850,8 +850,8 @@ export default function SubscribePage({ params }: { params: { token: string } })
       </div>
 
       {totalSelected > 0 && (
-        <div className="fixed bottom-0 left-0 right-0 bg-white/95 dark:bg-gray-900/95 backdrop-blur border-t p-4 shadow-lg">
-          <div className="max-w-lg mx-auto">
+        <div className="fixed bottom-0 left-0 right-0 bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl border-t border-stone-200/80 p-4 shadow-[0_-10px_30px_rgba(0,0,0,0.08)]">
+          <div className="max-w-2xl mx-auto">
             <div className="flex items-center gap-2 mb-2 text-xs text-muted-foreground overflow-x-auto">
               {Object.entries(selections).filter(([_, q]) => q > 0).map(([name, qty]) => (
                 <Badge key={name} variant="secondary" className="shrink-0 text-xs">{name} ×{qty}</Badge>
@@ -900,7 +900,7 @@ export default function SubscribePage({ params }: { params: { token: string } })
               ) : null;
             })()}
             <Button
-              className="w-full bg-emerald-600 hover:bg-emerald-700 text-white"
+              className="w-full rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-semibold shadow-sm"
               size="lg"
               onClick={handleSubmit}
               disabled={submitting || totalSelected === 0}
