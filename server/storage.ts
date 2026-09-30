@@ -369,9 +369,15 @@ export class DatabaseStorage implements IStorage {
 
   async getSubscriptionInvites(from?: Date, to?: Date): Promise<SubscriptionInvite[]> {
     const conditions = [];
-    // Filter by weekFrom for both bounds so the query is immune to server-side
-    // week_to boundary changes (e.g. Thu 07:00 UK vs Wed 23:59 UTC mismatches).
-    if (from) conditions.push(gte(subscriptionInvites.weekFrom, from));
+    // Subscription week anchors historically straddled midnight because London
+    // midnight during BST can be persisted as 23:00 Friday in timestamp-without-
+    // time-zone columns. Allow a 12-hour tolerance on the lower bound so legacy
+    // invites still belong to the intended Saturday week. New invites are stored
+    // at a safe Saturday-afternoon anchor.
+    if (from) {
+      const tolerantFrom = new Date(from.getTime() - 12 * 60 * 60 * 1000);
+      conditions.push(gte(subscriptionInvites.weekFrom, tolerantFrom));
+    }
     if (to) conditions.push(lte(subscriptionInvites.weekFrom, to));
     return db.select().from(subscriptionInvites)
       .where(conditions.length > 0 ? and(...conditions) : undefined)
