@@ -61,7 +61,7 @@ export default function SaturdayOrdersPage() {
 
   const { data: manualOrders } = useQuery<OrderWithItems[]>({
     queryKey: ["/api/orders", `?from=${from.toISOString()}&to=${to.toISOString()}`],
-    select: (data) => data.filter(o => o.isManual && !o.isTuesday && o.status !== 'refunded' && o.status !== 'cancelled'),
+    select: (data) => data.filter(o => o.isManual && !o.isTuesday && o.status !== 'refunded' && o.status !== 'cancelled' && o.status !== 'on-hold'),
   });
 
   const { data: websiteOrders } = useQuery<OrderWithItems[]>({

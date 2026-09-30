@@ -76,6 +76,10 @@ type MealData = {
   categoryName?: string;
   availableMeals: Array<{ name: string; popularity: number }>;
   availableExtras: Array<{ name: string; popularity: number }>;
+  satAvailableMeals?: Array<{ name: string; popularity: number }>;
+  satAvailableExtras?: Array<{ name: string; popularity: number }>;
+  tueAvailableMeals?: Array<{ name: string; popularity: number }>;
+  tueAvailableExtras?: Array<{ name: string; popularity: number }>;
   selections: Array<{ productName: string; quantity: number; deliveryDay?: string }>;
   satSelections?: Array<{ productName: string; quantity: number }>;
   tueSelections?: Array<{ productName: string; quantity: number }>;
@@ -814,6 +818,10 @@ export default function SubscriptionOverviewPage() {
                             size="sm"
                             variant={isComplete ? "outline" : "default"}
                             className="h-7 text-xs flex-1"
+                            disabled={!!(invite.addonPaymentToken || invite.stripePaymentIntentId) && !invite.addonPaid}
+                            title={(invite.addonPaymentToken || invite.stripePaymentIntentId) && !invite.addonPaid
+                              ? "Payment is outstanding. Reconcile payment before editing."
+                              : undefined}
                             onClick={() => setEditingInvite(invite)}
                             data-testid={`button-edit-invite-${invite.id}`}
                           >
@@ -1118,6 +1126,7 @@ export default function SubscriptionOverviewPage() {
 
       {editingInvite && (
         <AdminSelectionDialog
+          key={editingInvite.id}
           invite={editingInvite}
           open={!!editingInvite}
           onOpenChange={(v) => { if (!v) setEditingInvite(null); }}
@@ -1262,21 +1271,23 @@ function AdminSelectionDialog({ invite, open, onOpenChange }: {
 
   useEffect(() => {
     if (!mealData) return;
-    const extraSet = new Set((mealData.availableExtras || []).map(e => e.name));
 
     if (mealData.isDual) {
-      const toMap = (arr: Array<{ productName: string; quantity: number }>, isExtra: boolean) => {
+      const satExtraSet = new Set((mealData.satAvailableExtras ?? mealData.availableExtras ?? []).map(e => e.name));
+      const tueExtraSet = new Set((mealData.tueAvailableExtras ?? mealData.availableExtras ?? []).map(e => e.name));
+      const toMap = (arr: Array<{ productName: string; quantity: number }>, extraSet: Set<string>, isExtra: boolean) => {
         const m: Record<string, number> = {};
         for (const s of arr || []) {
           if (isExtra ? extraSet.has(s.productName) : !extraSet.has(s.productName)) m[s.productName] = s.quantity;
         }
         return m;
       };
-      setSatSelections(toMap(mealData.satSelections || [], false));
-      setSatExtras(toMap(mealData.satSelections || [], true));
-      setTueSelections(toMap(mealData.tueSelections || [], false));
-      setTueExtras(toMap(mealData.tueSelections || [], true));
+      setSatSelections(toMap(mealData.satSelections || [], satExtraSet, false));
+      setSatExtras(toMap(mealData.satSelections || [], satExtraSet, true));
+      setTueSelections(toMap(mealData.tueSelections || [], tueExtraSet, false));
+      setTueExtras(toMap(mealData.tueSelections || [], tueExtraSet, true));
     } else {
+      const extraSet = new Set((mealData.availableExtras || []).map(e => e.name));
       const mealSels: Record<string, number> = {};
       const extraSels: Record<string, number> = {};
       for (const sel of invite.selections) {
@@ -1341,8 +1352,16 @@ function AdminSelectionDialog({ invite, open, onOpenChange }: {
 
   const availableMeals = mealData?.availableMeals || [];
   const availableExtras = mealData?.availableExtras || [];
+  const satAvailableMeals = mealData?.satAvailableMeals ?? availableMeals;
+  const satAvailableExtras = mealData?.satAvailableExtras ?? availableExtras;
+  const tueAvailableMeals = mealData?.tueAvailableMeals ?? availableMeals;
+  const tueAvailableExtras = mealData?.tueAvailableExtras ?? availableExtras;
   const availableMealNamesSet = new Set(availableMeals.map(m => m.name));
   const availableExtraNamesSet = new Set(availableExtras.map(e => e.name));
+  const satMealNamesSet = new Set(satAvailableMeals.map(m => m.name));
+  const satExtraNamesSet = new Set(satAvailableExtras.map(e => e.name));
+  const tueMealNamesSet = new Set(tueAvailableMeals.map(m => m.name));
+  const tueExtraNamesSet = new Set(tueAvailableExtras.map(e => e.name));
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -1381,7 +1400,7 @@ function AdminSelectionDialog({ invite, open, onOpenChange }: {
           <div className="space-y-2">
             {[1, 2, 3].map(i => <div key={i} className="h-14 bg-muted animate-pulse rounded-lg" />)}
           </div>
-        ) : availableMeals.length === 0 ? (
+        ) : (isDual ? satAvailableMeals.length === 0 && tueAvailableMeals.length === 0 : availableMeals.length === 0) ? (
           <div className="text-center py-8 text-muted-foreground">
             <UtensilsCrossed className="w-10 h-10 mx-auto mb-3 opacity-40" />
             <p className="text-sm">No meals available for this week yet.</p>
@@ -1396,17 +1415,17 @@ function AdminSelectionDialog({ invite, open, onOpenChange }: {
                 <Badge className={`text-xs ${satTotal >= localMax ? "bg-emerald-500 text-white" : "bg-orange-100 text-orange-800"}`}>{satTotal}/{localMax}</Badge>
               </div>
               <OrphanedSelectionRows
-                orphaned={Object.entries(satSelections).filter(([name]) => !availableMealNamesSet.has(name) && (satSelections[name] || 0) > 0)}
+                orphaned={Object.entries(satSelections).filter(([name]) => !satMealNamesSet.has(name) && (satSelections[name] || 0) > 0)}
                 onRemove={(name) => setSatSelections(prev => { const { [name]: _, ...r } = prev; return r; })}
               />
-              <MealRows meals={availableMeals} selections={satSelections} maxMeals={localMax}
+              <MealRows meals={satAvailableMeals} selections={satSelections} maxMeals={localMax}
                 onAdd={makeAdd(setSatSelections, satTotal)} onRemove={makeRemove(setSatSelections)}
                 onAddExtra={makeExtraAdd(setSatExtras)} onRemoveExtra={makeExtraRemove(setSatExtras)} prefix="sat" />
               <OrphanedSelectionRows
-                orphaned={Object.entries(satExtras).filter(([name]) => !availableExtraNamesSet.has(name) && (satExtras[name] || 0) > 0)}
+                orphaned={Object.entries(satExtras).filter(([name]) => !satExtraNamesSet.has(name) && (satExtras[name] || 0) > 0)}
                 onRemove={(name) => setSatExtras(prev => { const { [name]: _, ...r } = prev; return r; })}
               />
-              <ExtraRows extrasData={availableExtras} extras={satExtras}
+              <ExtraRows extrasData={satAvailableExtras} extras={satExtras}
                 onAdd={makeExtraAdd(setSatExtras)} onRemove={makeExtraRemove(setSatExtras)} prefix="sat-extra" />
             </div>
 
@@ -1417,17 +1436,17 @@ function AdminSelectionDialog({ invite, open, onOpenChange }: {
                 <Badge className={`text-xs ${tueTotal >= localMax ? "bg-emerald-500 text-white" : "bg-blue-100 text-blue-800"}`}>{tueTotal}/{localMax}</Badge>
               </div>
               <OrphanedSelectionRows
-                orphaned={Object.entries(tueSelections).filter(([name]) => !availableMealNamesSet.has(name) && (tueSelections[name] || 0) > 0)}
+                orphaned={Object.entries(tueSelections).filter(([name]) => !tueMealNamesSet.has(name) && (tueSelections[name] || 0) > 0)}
                 onRemove={(name) => setTueSelections(prev => { const { [name]: _, ...r } = prev; return r; })}
               />
-              <MealRows meals={availableMeals} selections={tueSelections} maxMeals={localMax}
+              <MealRows meals={tueAvailableMeals} selections={tueSelections} maxMeals={localMax}
                 onAdd={makeAdd(setTueSelections, tueTotal)} onRemove={makeRemove(setTueSelections)}
                 onAddExtra={makeExtraAdd(setTueExtras)} onRemoveExtra={makeExtraRemove(setTueExtras)} prefix="tue" />
               <OrphanedSelectionRows
-                orphaned={Object.entries(tueExtras).filter(([name]) => !availableExtraNamesSet.has(name) && (tueExtras[name] || 0) > 0)}
+                orphaned={Object.entries(tueExtras).filter(([name]) => !tueExtraNamesSet.has(name) && (tueExtras[name] || 0) > 0)}
                 onRemove={(name) => setTueExtras(prev => { const { [name]: _, ...r } = prev; return r; })}
               />
-              <ExtraRows extrasData={availableExtras} extras={tueExtras}
+              <ExtraRows extrasData={tueAvailableExtras} extras={tueExtras}
                 onAdd={makeExtraAdd(setTueExtras)} onRemove={makeExtraRemove(setTueExtras)} prefix="tue-extra" />
             </div>
           </div>

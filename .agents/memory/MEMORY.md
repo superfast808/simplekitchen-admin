@@ -1,2 +1,3 @@
 - [WooCommerce sync race condition](woo-sync-race-condition.md) — manual sync lacked re-check before insert; concurrent auto+manual sync created duplicate order rows for same woo_id.
 - [Development schema push prompt](development-schema-push.md) — schema push may prompt to truncate ingredient data for an unrelated unique constraint; avoid accepting destructive prompts.
+- [Subscription add-on payment gating](subscription-payment-gating.md) — payable subscription orders should remain on hold until the matching Stripe payment is verified.

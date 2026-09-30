@@ -21,6 +21,9 @@ type InviteData = {
   status: string;
   addonPaid?: boolean;
   addonAmountPence?: number;
+  paymentUrl?: string | null;
+  includedOats?: number;
+  includedSweetTreats?: number;
   isTuesday?: boolean;
   isDual?: boolean;
   weekNumber?: number;
@@ -36,6 +39,71 @@ type InviteData = {
   satSelections?: Array<{ productName: string; quantity: number }>;
   tueSelections?: Array<{ productName: string; quantity: number }>;
 };
+
+function getChargeableExtrasTotal(
+  selectionsByDelivery: Array<{ selections: SelectionMap; availableExtras: AvailableMeal[] }>,
+  includedOats: number,
+  includedSweetTreats: number,
+) {
+  let oatsLeft = includedOats;
+  let treatsLeft = includedSweetTreats;
+  let total = 0;
+
+  for (const { selections, availableExtras } of selectionsByDelivery) {
+    for (const [name, quantity] of Object.entries(selections)) {
+      const product = availableExtras.find(extra => extra.name === name);
+      const price = product?.price ? parseFloat(product.price) : 0;
+      if (price <= 0) continue;
+
+      const isOat = /oat/i.test(name);
+      const isSoup = /soup/i.test(name);
+      let chargeableQuantity = quantity;
+      if (isOat && oatsLeft > 0) {
+        const included = Math.min(chargeableQuantity, oatsLeft);
+        oatsLeft -= included;
+        chargeableQuantity -= included;
+      } else if (!isOat && !isSoup && treatsLeft > 0) {
+        const included = Math.min(chargeableQuantity, treatsLeft);
+        treatsLeft -= included;
+        chargeableQuantity -= included;
+      }
+      total += price * chargeableQuantity;
+    }
+  }
+
+  return total;
+}
+
+function getChargeableExtraQuantities(
+  selections: SelectionMap,
+  availableExtras: AvailableMeal[],
+  includedOats: number,
+  includedSweetTreats: number,
+) {
+  let oatsLeft = includedOats;
+  let treatsLeft = includedSweetTreats;
+  const chargeable: Record<string, number> = {};
+
+  for (const [name, quantity] of Object.entries(selections)) {
+    const product = availableExtras.find(extra => extra.name === name);
+    const price = product?.price ? parseFloat(product.price) : 0;
+    let chargeableQuantity = price > 0 ? quantity : 0;
+    const isOat = /oat/i.test(name);
+    const isSoup = /soup/i.test(name);
+    if (isOat && oatsLeft > 0) {
+      const included = Math.min(chargeableQuantity, oatsLeft);
+      oatsLeft -= included;
+      chargeableQuantity -= included;
+    } else if (!isOat && !isSoup && treatsLeft > 0) {
+      const included = Math.min(chargeableQuantity, treatsLeft);
+      treatsLeft -= included;
+      chargeableQuantity -= included;
+    }
+    chargeable[name] = chargeableQuantity;
+  }
+
+  return chargeable;
+}
 
 function BrandLogo({ size = "lg" }: { size?: "lg" | "sm" }) {
   const { data: logoData } = useQuery<{ logo: string }>({
@@ -407,8 +475,20 @@ export default function SubscribePage({ params }: { params: { token: string } })
         <Card className="w-full max-w-md text-center">
           <CardContent className="p-8">
             <Check className="w-12 h-12 mx-auto text-emerald-500 mb-4" />
-            <h2 className="text-xl font-bold mb-2">Already Submitted</h2>
-            <p className="text-muted-foreground">You've already chosen your meals for this week. If you need to make changes, please get in touch.</p>
+            <h2 className="text-xl font-bold mb-2">{!data.addonPaid && data.addonAmountPence ? "Payment pending" : "Already Submitted"}</h2>
+            <p className="text-muted-foreground">
+              {!data.addonPaid && data.addonAmountPence
+                ? "Your meals are saved but will not be processed until the add-on payment is complete."
+                : "You've already chosen your meals for this week. If you need to make changes, please get in touch."}
+            </p>
+            {!data.addonPaid && data.paymentUrl && (
+              <Button className="mt-4 bg-emerald-600" onClick={() => window.location.assign(data.paymentUrl!)}>
+                Continue to payment
+              </Button>
+            )}
+            {!data.addonPaid && data.addonAmountPence && !data.paymentUrl && (
+              <p className="text-sm text-muted-foreground mt-4">Please get in touch for a new payment link.</p>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -510,6 +590,11 @@ export default function SubscribePage({ params }: { params: { token: string } })
           </div>
 
           <div className="space-y-6">
+            {((data.includedOats || 0) > 0 || (data.includedSweetTreats || 0) > 0) && (
+              <p className="text-xs text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/20 rounded-lg px-3 py-2">
+                Across both deliveries, {data.includedOats || 0} oats and {data.includedSweetTreats || 0} sweet treats are included at no extra charge. Additional add-ons are charged at the prices shown.
+              </p>
+            )}
             <MealSelectorPanel
               label="Saturday Delivery"
               colorScheme="emerald"
@@ -556,6 +641,34 @@ export default function SubscribePage({ params }: { params: { token: string } })
               <span className="text-orange-600 font-medium">Sat: {satTotal}/{maxMeals}</span>
               <span className="text-blue-600 font-medium">Tue: {tueTotal}/{maxMeals}</span>
             </div>
+            {(() => {
+              const specialsSurcharge = [
+                { selections: satSelections, meals: data.satAvailableMeals || data.availableMeals },
+                { selections: tueSelections, meals: data.tueAvailableMeals || data.availableMeals },
+              ].reduce((total, delivery) => total + Object.entries(delivery.selections).reduce((subtotal, [name, quantity]) => {
+                const meal = delivery.meals.find(item => item.name === name);
+                const price = meal?.price ? parseFloat(meal.price) : 7.75;
+                return subtotal + Math.max(0, price - 7.75) * quantity;
+              }, 0), 0);
+              const addonTotal = getChargeableExtrasTotal([
+                { selections: satExtras, availableExtras: data.satAvailableExtras || data.availableExtras || [] },
+                { selections: tueExtras, availableExtras: data.tueAvailableExtras || data.availableExtras || [] },
+              ], data.includedOats || 0, data.includedSweetTreats || 0);
+              return specialsSurcharge > 0 || addonTotal > 0 ? (
+                <div className="mb-2 space-y-0.5">
+                  {specialsSurcharge > 0 && (
+                    <p className="text-xs text-amber-700 dark:text-amber-400 font-medium">
+                      Premium meal surcharge: £{specialsSurcharge.toFixed(2)} — payment required at checkout
+                    </p>
+                  )}
+                  {addonTotal > 0 && (
+                    <p className="text-xs text-blue-700 dark:text-blue-300 font-medium">
+                      Chargeable add-ons: £{addonTotal.toFixed(2)} — included allowances have been applied
+                    </p>
+                  )}
+                </div>
+              ) : null;
+            })()}
             {!canSubmit && (
               <p className="text-xs text-muted-foreground mb-2">
                 {satTotal === 0 && tueTotal === 0 ? "Select meals for both deliveries to continue" :
@@ -577,6 +690,13 @@ export default function SubscribePage({ params }: { params: { token: string } })
       </div>
     );
   }
+
+  const chargeableExtraQuantities = getChargeableExtraQuantities(
+    extras,
+    data.availableExtras || [],
+    data.includedOats || 0,
+    data.includedSweetTreats || 0,
+  );
 
   // ---- SINGLE DAY ----
   return (
@@ -608,6 +728,9 @@ export default function SubscribePage({ params }: { params: { token: string } })
           {data.availableMeals.map((meal) => {
             const qty = selections[meal.name] || 0;
             const isSelected = qty > 0;
+            const mealPrice = meal.price ? parseFloat(meal.price) : 7.75;
+            const isSpecialMeal = mealPrice > 7.75;
+            const surcharge = isSpecialMeal ? (mealPrice - 7.75).toFixed(2) : null;
             return (
               <Card key={meal.name}
                 className={`transition-all ${isSelected ? "border-emerald-400 bg-emerald-50/50 dark:bg-emerald-950/20 shadow-sm" : ""}`}
@@ -615,7 +738,13 @@ export default function SubscribePage({ params }: { params: { token: string } })
                 <CardContent className="p-4 flex items-center justify-between gap-3">
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-sm truncate">{meal.name}</p>
-                    <p className="text-xs text-muted-foreground">£7.75</p>
+                    {isSpecialMeal ? (
+                      <p className="text-xs text-amber-600 dark:text-amber-400 font-medium">
+                        £{mealPrice.toFixed(2)} <span className="text-muted-foreground font-normal">(+£{surcharge} special)</span>
+                      </p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">£7.75</p>
+                    )}
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     {isSelected ? (
@@ -659,8 +788,13 @@ export default function SubscribePage({ params }: { params: { token: string } })
           </Card>
         )}
 
+        {((data.includedOats || 0) > 0 || (data.includedSweetTreats || 0) > 0) && (
+          <p className="mt-6 text-xs text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/20 rounded-lg px-3 py-2">
+            Included at no extra charge: {data.includedOats || 0} oats and {data.includedSweetTreats || 0} sweet treats. Additional add-ons are charged at the prices shown.
+          </p>
+        )}
         {(data.availableExtras || []).length > 0 && (
-          <div className="mt-6 space-y-2">
+          <div className="mt-2 space-y-2">
             <div className="flex items-center gap-2">
               <div className="flex-1 border-t" />
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide shrink-0">Add-ons (optional)</p>
@@ -725,9 +859,15 @@ export default function SubscribePage({ params }: { params: { token: string } })
               {Object.entries(extras).filter(([_, q]) => q > 0).map(([name, qty]) => {
                 const extraProduct = data.availableExtras.find(e => e.name === name);
                 const price = extraProduct?.price ? parseFloat(extraProduct.price) : 0;
+                const chargeableQuantity = chargeableExtraQuantities[name] || 0;
+                const includedQuantity = qty - chargeableQuantity;
                 return (
                   <Badge key={name} className="shrink-0 text-xs bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
-                    {name} ×{qty}{price > 0 ? ` (£${(price * qty).toFixed(2)})` : ""}
+                    {name} ×{qty}{price > 0
+                      ? includedQuantity > 0
+                        ? ` (${includedQuantity} included${chargeableQuantity > 0 ? `; £${(price * chargeableQuantity).toFixed(2)} charged` : ""})`
+                        : ` (£${(price * chargeableQuantity).toFixed(2)} charged)`
+                      : ""}
                   </Badge>
                 );
               })}
@@ -738,11 +878,11 @@ export default function SubscribePage({ params }: { params: { token: string } })
                 const price = mp?.price ? parseFloat(mp.price) : 7.75;
                 return price > 7.75 ? sum + (price - 7.75) * qty : sum;
               }, 0) : 0;
-              const addonTotal = Object.entries(extras).reduce((sum, [name, qty]) => {
-                const ep = data.availableExtras.find(e => e.name === name);
-                const price = ep?.price ? parseFloat(ep.price) : 0;
-                return sum + price * qty;
-              }, 0);
+              const addonTotal = getChargeableExtrasTotal(
+                [{ selections: extras, availableExtras: data.availableExtras || [] }],
+                data.includedOats || 0,
+                data.includedSweetTreats || 0,
+              );
               const totalCharge = specialsSurcharge + addonTotal;
               return totalCharge > 0 ? (
                 <div className="mb-2 space-y-0.5">

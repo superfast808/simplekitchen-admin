@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { eq, gte, lte, and, sql, desc, isNotNull, isNull, inArray } from "drizzle-orm";
+import { eq, gte, lte, and, or, ne, sql, desc, isNotNull, isNull, inArray } from "drizzle-orm";
 import {
   products, ingredients, orders, orderItems, manualQuantities, settings, users,
   subscriptionInvites, subscriptionSelections, recurringOrders, recurringOrderItems,
@@ -72,6 +72,15 @@ export interface IStorage {
   setSubscriptionInviteTuesdayOrder(id: number, orderId: number): Promise<void>;
   getSubscriptionInviteById(id: number): Promise<SubscriptionInvite | undefined>;
   updateSubscriptionInvitePayment(id: number, data: { stripePaymentIntentId?: string; addonAmountPence?: number; addonPaid?: boolean; addonPaymentToken?: string }): Promise<void>;
+  submitSubscriptionInviteChoices(input: {
+    inviteId: number;
+    choices: Array<{ productName: string; quantity: number; price: string; deliveryDay: "sat" | "tue" }>;
+    address: string | null;
+    fulfillment: "delivery" | "collection";
+    checkoutSessionId: string | null;
+    addonAmountPence: number;
+  }): Promise<{ orderId: number; tuesdayOrderId: number | null }>;
+  confirmSubscriptionInvitePayment(id: number, reference: string, amountPence: number, kind: "session" | "intent"): Promise<{ valid: boolean; newlyPaid: boolean }>;
   createSubscriptionSelection(selection: InsertSubscriptionSelection): Promise<SubscriptionSelection>;
   getSubscriptionSelections(inviteId: number): Promise<SubscriptionSelection[]>;
   deleteSubscriptionSelectionsByInviteId(inviteId: number): Promise<void>;
@@ -254,7 +263,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getOrderItemsByDateRange(from?: Date, to?: Date): Promise<(OrderItem & { orderId: number; isManual: boolean; isTuesday: boolean })[]> {
-    const conditions = [];
+    const conditions = [or(ne(orders.status, "on-hold"), eq(orders.isManual, false))!];
     if (from) conditions.push(gte(orders.orderDate, from));
     if (to) conditions.push(lte(orders.orderDate, to));
 
@@ -424,15 +433,95 @@ export class DatabaseStorage implements IStorage {
     const [invite] = await db.select().from(subscriptionInvites).where(eq(subscriptionInvites.id, id));
     if (!invite) return { deletedOrderId: null };
     const selectionsOrderId = invite.selectionsOrderId ?? null;
-    await db.delete(subscriptionSelections).where(eq(subscriptionSelections.inviteId, id));
-    await db.update(subscriptionInvites)
-      .set({ status: "pending", selectionsOrderId: null, addonAmountPence: null, addonPaid: false, stripePaymentIntentId: null, addonPaymentToken: null })
-      .where(eq(subscriptionInvites.id, id));
-    if (selectionsOrderId) {
-      await db.delete(orderItems).where(eq(orderItems.orderId, selectionsOrderId));
-      await db.delete(orders).where(and(eq(orders.id, selectionsOrderId), eq(orders.isManual, true)));
-    }
+    const tuesdayOrderId = invite.tuesdaySelectionsOrderId ?? null;
+    await db.transaction(async tx => {
+      await tx.delete(subscriptionSelections).where(eq(subscriptionSelections.inviteId, id));
+      await tx.update(subscriptionInvites)
+        .set({ status: "pending", selectionsOrderId: null, tuesdaySelectionsOrderId: null, addonAmountPence: null, addonPaid: false, stripePaymentIntentId: null, addonPaymentToken: null })
+        .where(eq(subscriptionInvites.id, id));
+      for (const orderId of Array.from(new Set([selectionsOrderId, tuesdayOrderId].filter((v): v is number => v !== null)))) {
+        const [manualOrder] = await tx.select({ id: orders.id }).from(orders).where(and(eq(orders.id, orderId), eq(orders.isManual, true)));
+        if (manualOrder) {
+          await tx.delete(orderItems).where(eq(orderItems.orderId, orderId));
+          await tx.delete(orders).where(eq(orders.id, orderId));
+        }
+      }
+    });
     return { deletedOrderId: selectionsOrderId };
+  }
+
+  async confirmSubscriptionInvitePayment(id: number, reference: string, amountPence: number, kind: "session" | "intent"): Promise<{ valid: boolean; newlyPaid: boolean }> {
+    return db.transaction(async tx => {
+      const [invite] = await tx.select().from(subscriptionInvites).where(eq(subscriptionInvites.id, id));
+      if (!invite || invite.status !== "completed" || invite.addonAmountPence !== amountPence
+        || (kind === "session" ? invite.addonPaymentToken : invite.stripePaymentIntentId) !== reference) {
+        return { valid: false, newlyPaid: false };
+      }
+      const updated = await tx.update(subscriptionInvites)
+        .set({ addonPaid: true })
+        .where(and(eq(subscriptionInvites.id, id), eq(subscriptionInvites.addonPaid, false)))
+        .returning({ id: subscriptionInvites.id });
+      for (const orderId of [invite.selectionsOrderId, invite.tuesdaySelectionsOrderId]) {
+        if (orderId) {
+          await tx.update(orders).set({ status: "processing" })
+            .where(and(eq(orders.id, orderId), eq(orders.status, "on-hold"), eq(orders.isManual, true)));
+        }
+      }
+      return { valid: true, newlyPaid: updated.length > 0 };
+    });
+  }
+
+  async submitSubscriptionInviteChoices(input: {
+    inviteId: number;
+    choices: Array<{ productName: string; quantity: number; price: string; deliveryDay: "sat" | "tue" }>;
+    address: string | null;
+    fulfillment: "delivery" | "collection";
+    checkoutSessionId: string | null;
+    addonAmountPence: number;
+  }): Promise<{ orderId: number; tuesdayOrderId: number | null }> {
+    return db.transaction(async tx => {
+      // Lock the invitation to make concurrent POSTs from the same link idempotent.
+      const [invite] = await tx.select().from(subscriptionInvites)
+        .where(eq(subscriptionInvites.id, input.inviteId)).for("update");
+      if (!invite || invite.status !== "pending") throw new Error("Meal choices have already been submitted");
+      const isDual = invite.isDual === true;
+      for (const choice of input.choices) {
+        await tx.insert(subscriptionSelections).values({
+          inviteId: invite.id, productName: choice.productName,
+          quantity: choice.quantity, deliveryDay: choice.deliveryDay,
+        });
+      }
+      const createDeliveryOrder = async (day: "sat" | "tue") => {
+        const [order] = await tx.insert(orders).values({
+          customerName: invite.customerName,
+          customerEmail: invite.customerEmail,
+          deliveryAddress: input.address,
+          orderDate: invite.weekFrom,
+          status: input.checkoutSessionId ? "on-hold" : "processing",
+          fulfillmentType: input.fulfillment,
+          isManual: true,
+          isTuesday: day === "tue",
+        }).returning();
+        for (const choice of input.choices.filter(item => item.deliveryDay === day)) {
+          await tx.insert(orderItems).values({
+            orderId: order.id, productId: null, productName: choice.productName,
+            quantity: choice.quantity, price: choice.price,
+          });
+        }
+        return order.id;
+      };
+      const orderId = await createDeliveryOrder(isDual ? "sat" : (invite.isTuesday ? "tue" : "sat"));
+      const tuesdayOrderId = isDual ? await createDeliveryOrder("tue") : null;
+      await tx.update(subscriptionInvites).set({
+        status: "completed",
+        selectionsOrderId: orderId,
+        tuesdaySelectionsOrderId: tuesdayOrderId,
+        addonAmountPence: input.checkoutSessionId ? input.addonAmountPence : null,
+        addonPaid: false,
+        addonPaymentToken: input.checkoutSessionId,
+      }).where(eq(subscriptionInvites.id, invite.id));
+      return { orderId, tuesdayOrderId };
+    });
   }
 
   async getRecurringOrders(): Promise<RecurringOrder[]> {

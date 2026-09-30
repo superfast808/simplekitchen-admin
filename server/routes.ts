@@ -3327,6 +3327,15 @@ export async function registerRoutes(
 
     if (event.type === "checkout.session.completed") {
       const session = event.data.object as any;
+      const inviteId = Number(session.metadata?.inviteId);
+      if (Number.isSafeInteger(inviteId) && inviteId > 0 && session.payment_status === "paid") {
+        try {
+          await storage.confirmSubscriptionInvitePayment(inviteId, session.id, session.amount_total, "session");
+        } catch (err: any) {
+          log(`Subscription payment webhook failed: ${err.message}`, "stripe");
+          return res.status(500).json({ message: "Subscription payment update failed" });
+        }
+      }
       const subscriberId = session.metadata?.subscriberId;
       if (subscriberId) {
         try {
@@ -3566,20 +3575,38 @@ export async function registerRoutes(
 
       const invites = await storage.getSubscriptionInvites(from, to);
       const allProducts = await storage.getProducts();
-      const productPriceByName = new Map<string, number>();
-      for (const p of allProducts) {
-        const price = parseFloat(p.price || "0");
-        productPriceByName.set(p.name.toLowerCase(), price);
-      }
-      const STANDARD_PRICE = 7.75;
       const result = await Promise.all(
         invites.map(async (invite) => {
           const selections = await storage.getSubscriptionSelections(invite.id);
+          const { categoryName } = await getCurrentWeekInfo(invite.weekFrom);
+          const prices = new Map(allProducts.map(p => [p.name.toLowerCase(), parseFloat(p.price || "0")]));
+          const weekProducts = allProducts.filter(p =>
+            (p.category || "").trim().toLowerCase() === categoryName.toLowerCase());
+          for (const p of weekProducts) prices.set(p.name.toLowerCase(), parseFloat(p.price || "0"));
+          const mealNames = new Set(weekProducts
+            .filter(p => [7.75, 9.75].includes(parseFloat(p.price || "0"))
+              && !/oat|soup|subscription|add\s+delivery|gift\s*card|voucher/i.test(p.name))
+            .map(p => p.name.toLowerCase()));
+          let oatsLeft = invite.includedOats || 0;
+          let treatsLeft = invite.includedSweetTreats || 0;
           let computedAddonAmountPence = 0;
           for (const sel of selections) {
-            const price = productPriceByName.get(sel.productName.toLowerCase());
-            if (price !== undefined && price !== STANDARD_PRICE) {
-              computedAddonAmountPence += Math.round(price * 100) * sel.quantity;
+            const key = sel.productName.toLowerCase();
+            const price = prices.get(key) || 0;
+            if (mealNames.has(key)) {
+              if (price === 9.75 && sel.deliveryDay !== "tue") computedAddonAmountPence += 200 * sel.quantity;
+            } else if (price > 0) {
+              let chargeable = sel.quantity;
+              if (/oat/i.test(sel.productName)) {
+                const free = Math.min(chargeable, oatsLeft);
+                chargeable -= free;
+                oatsLeft -= free;
+              } else if (!/soup/i.test(sel.productName)) {
+                const free = Math.min(chargeable, treatsLeft);
+                chargeable -= free;
+                treatsLeft -= free;
+              }
+              computedAddonAmountPence += Math.round(price * 100) * chargeable;
             }
           }
           // Flag if the customer chose meals but the manual order was deleted
@@ -3608,11 +3635,20 @@ export async function registerRoutes(
       // so a late click never shows the next week's menu.
       const inviteWeekDate = invite.weekFrom ? new Date(invite.weekFrom) : undefined;
       const { weekNumber, categoryName } = await getCurrentWeekInfo(inviteWeekDate);
-      const allProducts = await storage.getProducts();
-      const weekProducts = allProducts.filter(p => p.category === categoryName);
+      let allProducts = await storage.getProducts();
+      let weekProducts = allProducts.filter(p => (p.category || "").trim().toLowerCase() === categoryName.toLowerCase());
+      if (weekProducts.length === 0) {
+        try {
+          await runProductSync();
+          allProducts = await storage.getProducts();
+          weekProducts = allProducts.filter(p => (p.category || "").trim().toLowerCase() === categoryName.toLowerCase());
+        } catch (err: any) {
+          log(`Subscription menu refresh failed: ${err.message}`, "sync");
+        }
+      }
 
-      let availableMeals: Array<{ name: string; popularity: number }>;
-      let availableExtras: Array<{ name: string; popularity: number }>;
+      let availableMeals: Array<{ name: string; popularity: number; price: string }>;
+      let availableExtras: Array<{ name: string; popularity: number; price: string }>;
 
       // Build a price map: product name -> price string from products DB
       const extraPriceMap: Record<string, string> = {};
@@ -3620,13 +3656,30 @@ export async function registerRoutes(
         extraPriceMap[p.name] = p.price || "0";
       }
 
-      const SKIP_PAT = /subscription|add\s+delivery/i;
+      const SKIP_PAT = /subscription|add\s+delivery|gift\s*card|voucher/i;
       const OAT_PAT = /oat/i;
       const SOUP_PAT = /soup/i;
+      const SWEET_PAT = /sweet\s*treat|brownie|cookie|cake|dessert/i;
+      const UPGRADE_PAT = /premium.*upgrade|upgrade.*premium|protein.*upgrade|upgrade.*protein/i;
       const MEAL_PRICE = 7.75;
       const SPECIAL_PRICE = 9.75;
 
-      const productPool = weekProducts.length > 0 ? weekProducts : allProducts.filter(p => !SKIP_PAT.test(p.name));
+      // Only this invite's week can supply meals; historical products may supply
+      // recognisable add-ons but must never become the meal menu.
+      const namedUpgrade = (name: string) =>
+        OAT_PAT.test(name) || SOUP_PAT.test(name) || SWEET_PAT.test(name) || UPGRADE_PAT.test(name);
+      const extrasByName = new Map<string, (typeof allProducts)[number]>();
+      const normaliseName = (name: string) => name.toLowerCase().replace(/\s*[-–—]\s*(week\s*\d+|w\d+)\s*$/i, "").replace(/\s+/g, " ").trim();
+      for (const p of allProducts) {
+        if (!SKIP_PAT.test(p.name) && namedUpgrade(p.name) && parseFloat(p.price || "0") > 0) {
+          const key = normaliseName(p.name);
+          if (!extrasByName.has(key)) extrasByName.set(key, p);
+        }
+      }
+      for (const p of weekProducts) {
+        if (!SKIP_PAT.test(p.name)) extrasByName.set(normaliseName(p.name), p);
+      }
+      const extrasPool = Array.from(extrasByName.values());
 
       // Helper to check product type — specials are identified by price (£9.75), not name
       const isSpecial = (p: { name: string; price?: string | null }) =>
@@ -3640,29 +3693,29 @@ export async function registerRoutes(
 
       // --- Saturday product lists ---
       // Meals: regular £7.75 meals + specials (specials count toward meal quota; price shown is actual)
-      const satAvailableMeals = productPool
+      const satAvailableMeals = weekProducts
         .filter(p => !SKIP_PAT.test(p.name))
         .filter(p => isRegularMeal(p) || isSpecial(p))
         .sort((a, b) => a.name.localeCompare(b.name))
         .map(p => ({ name: p.name, popularity: 0, price: p.price || "7.75" }));
       // Extras: oats + soups (always add-ons, never count as meals) + any other non-standard non-special items
-      const satAvailableExtras = productPool
-        .filter(p => !SKIP_PAT.test(p.name) && !isSpecial(p))
-        .filter(p => { const pr = parseFloat(p.price || "0"); return pr > 0 && Math.abs(pr - MEAL_PRICE) >= 0.01; })
+      const satAvailableExtras = extrasPool
+        .filter(p => namedUpgrade(p.name) && !isSpecial(p) && !isRegularMeal(p))
+        .filter(p => parseFloat(p.price || "0") > 0)
         .sort((a, b) => a.name.localeCompare(b.name))
         .map(p => ({ name: p.name, popularity: 0, price: p.price || "0" }));
 
       // --- Tuesday product lists ---
       // Meals: regular £7.75 only (no specials on Tuesdays)
-      const tueAvailableMeals = productPool
+      const tueAvailableMeals = weekProducts
         .filter(p => !SKIP_PAT.test(p.name) && !isSpecial(p) && !isOatOrSoup(p.name))
         .filter(p => isRegularMeal(p))
         .sort((a, b) => a.name.localeCompare(b.name))
         .map(p => ({ name: p.name, popularity: 0, price: p.price || "7.75" }));
       // Extras: oats and soups ONLY
-      const tueAvailableExtras = productPool
-        .filter(p => !SKIP_PAT.test(p.name) && isOatOrSoup(p.name))
-        .filter(p => { const pr = parseFloat(p.price || "0"); return pr > 0 && Math.abs(pr - MEAL_PRICE) >= 0.01; })
+      const tueAvailableExtras = extrasPool
+        .filter(p => namedUpgrade(p.name) && !isSpecial(p) && !isRegularMeal(p))
+        .filter(p => parseFloat(p.price || "0") > 0)
         .sort((a, b) => a.name.localeCompare(b.name))
         .map(p => ({ name: p.name, popularity: 0, price: p.price || "0" }));
 
@@ -3671,6 +3724,16 @@ export async function registerRoutes(
       availableExtras = isTuesday ? tueAvailableExtras : satAvailableExtras;
 
       const existingSelections = await storage.getSubscriptionSelections(invite.id);
+      let paymentUrl: string | null = null;
+      if (invite.status === "completed" && !invite.addonPaid && invite.addonPaymentToken) {
+        try {
+          const stripe = await getUncachableStripeClient(await getActiveStripeSecretKey());
+          const checkout = await stripe.checkout.sessions.retrieve(invite.addonPaymentToken);
+          if (checkout.status === "open") paymentUrl = checkout.url;
+        } catch (err: any) {
+          log(`Unable to reopen subscription checkout: ${err.message}`, "stripe");
+        }
+      }
 
       res.json({
         customerName: invite.customerName,
@@ -3678,6 +3741,9 @@ export async function registerRoutes(
         status: invite.status,
         addonPaid: invite.addonPaid,
         addonAmountPence: invite.addonAmountPence,
+        paymentUrl,
+        includedOats: invite.includedOats,
+        includedSweetTreats: invite.includedSweetTreats,
         isTuesday: invite.isTuesday,
         isDual,
         weekNumber,
@@ -3720,6 +3786,59 @@ export async function registerRoutes(
       for (const p of allProductsList) {
         productPriceMap[p.name] = p.price || "0";
       }
+      const { categoryName: selectionCategory } = await getCurrentWeekInfo(invite.weekFrom);
+      const currentWeekProducts = allProductsList.filter(p =>
+        (p.category || "").trim().toLowerCase() === selectionCategory.toLowerCase());
+      const isUpgradeName = (name: string) =>
+        /oat|soup|sweet\s*treat|brownie|cookie|cake|dessert|premium.*upgrade|upgrade.*premium|protein.*upgrade|upgrade.*protein/i.test(name);
+      const validExtras = new Set(allProductsList
+        .filter(p => isUpgradeName(p.name) && !/subscription|add\s+delivery|gift\s*card|voucher/i.test(p.name)
+          && parseFloat(p.price || "0") > 0 && parseFloat(p.price || "0") !== 7.75
+          && (parseFloat(p.price || "0") !== 9.75 || /oat|soup/i.test(p.name)))
+        .map(p => p.name));
+      const satMeals = new Set(currentWeekProducts.filter(p =>
+        !/subscription|add\s+delivery|gift\s*card|voucher/i.test(p.name)
+        && [7.75, 9.75].includes(parseFloat(p.price || "0"))).map(p => p.name));
+      const tueMeals = new Set(currentWeekProducts.filter(p =>
+        !/subscription|add\s+delivery|gift\s*card|voucher|oat|soup/i.test(p.name)
+        && parseFloat(p.price || "0") === 7.75).map(p => p.name));
+      // Prefer the current week's version if a name also exists in an older category.
+      for (const p of currentWeekProducts) productPriceMap[p.name] = p.price || "0";
+      const validateItems = (items: unknown, allowed: Set<string>, label: string): string | null => {
+        if (!Array.isArray(items)) return `${label} must be a list`;
+        const seen = new Set<string>();
+        for (const item of items) {
+          if (!item || typeof item.productName !== "string" || !allowed.has(item.productName)
+            || !Number.isSafeInteger(item.quantity) || item.quantity < 1 || seen.has(item.productName)) {
+            return `Invalid ${label} selection or quantity`;
+          }
+          seen.add(item.productName);
+        }
+        return null;
+      };
+      const createAddonCheckout = async (
+        amount: number,
+        lineItems: Array<{ name: string; pricePence: number; quantity: number }>,
+      ) => {
+        if (amount === 0) return null;
+        if (amount < 50) throw new Error("Add-on total is below the 50p checkout minimum");
+        const baseUrl = await getPortalBaseUrl();
+        const stripe = await getUncachableStripeClient(await getActiveStripeSecretKey());
+        const session = await stripe.checkout.sessions.create({
+          payment_method_types: ["card"],
+          line_items: lineItems.map(item => ({
+            price_data: { currency: "gbp", unit_amount: item.pricePence, product_data: { name: item.name } },
+            quantity: item.quantity,
+          })),
+          mode: "payment",
+          customer_email: invite.customerEmail || undefined,
+          success_url: `${baseUrl}/subscribe/${invite.token}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${baseUrl}/subscribe/${invite.token}`,
+          metadata: { inviteId: String(invite.id), customerName: invite.customerName },
+        });
+        if (!session.url) throw new Error("Checkout did not return a payment link");
+        return session;
+      };
 
       if (isDual) {
         // ---- DUAL DAY (Saturday + Tuesday) ----
@@ -3730,6 +3849,11 @@ export async function registerRoutes(
         }
         const satExtList: any[] = Array.isArray(satExtras) ? satExtras : [];
         const tueExtList: any[] = Array.isArray(tueExtras) ? tueExtras : [];
+        const invalid = validateItems(satSels, satMeals, "Saturday meal")
+          || validateItems(tueSels, tueMeals, "Tuesday meal")
+          || validateItems(satExtList, validExtras, "Saturday add-on")
+          || validateItems(tueExtList, validExtras, "Tuesday add-on");
+        if (invalid) return res.status(400).json({ message: invalid });
 
         const satTotalQty = satSels.reduce((sum: number, s: any) => sum + parseInt(s.quantity, 10), 0);
         const tueTotalQty = tueSels.reduce((sum: number, s: any) => sum + parseInt(s.quantity, 10), 0);
@@ -3795,116 +3919,31 @@ export async function registerRoutes(
             addonLineItems.push({ name: ext.productName, pricePence, quantity: chargeableQty });
           }
         }
+        // Do not create operational orders if a payable checkout cannot be opened.
+        const checkout = await createAddonCheckout(addonAmountPence, addonLineItems);
 
-        // Save all selections with deliveryDay tag
-        await storage.deleteSubscriptionSelectionsByInviteId(invite.id);
-        for (const sel of [...satSels, ...satExtList]) {
-          await storage.createSubscriptionSelection({
-            inviteId: invite.id,
-            productName: sel.productName,
-            quantity: parseInt(sel.quantity, 10),
-            deliveryDay: 'sat',
-          } as any);
-        }
-        for (const sel of [...tueSels, ...tueExtList]) {
-          await storage.createSubscriptionSelection({
-            inviteId: invite.id,
-            productName: sel.productName,
-            quantity: parseInt(sel.quantity, 10),
-            deliveryDay: 'tue',
-          } as any);
-        }
-
-        // Create Saturday order
-        const satOrder = await storage.createOrder({
-          customerName: invite.customerName,
-          customerEmail: invite.customerEmail,
-          deliveryAddress: resolvedAddress,
-          orderDate: invite.weekFrom,
-          status: "processing",
-          fulfillmentType: resolvedFulfillment as "delivery" | "collection",
-          isManual: true,
-          isTuesday: false,
-        });
-        for (const sel of satSels) {
-          const qty = parseInt(sel.quantity, 10);
-          const unitPrice = parseFloat(productPriceMap[sel.productName] || "7.75");
-          // Specials stored at actual price; regular meals at £7.75
-          const itemPrice = Math.abs(unitPrice - SPECIAL_PRICE_POST) < 0.01
-            ? String(unitPrice) : "7.75";
-          await storage.createOrderItem({ orderId: satOrder.id, productId: null, productName: sel.productName, quantity: qty, price: itemPrice });
-        }
-        for (const ext of satExtList) {
-          if (!ext.productName?.trim()) continue;
-          const qty = parseInt(ext.quantity, 10) || 1;
-          const price = parseFloat(productPriceMap[ext.productName] || "0");
-          await storage.createOrderItem({ orderId: satOrder.id, productId: null, productName: ext.productName, quantity: qty, price: price > 0 ? String(price) : "0" });
-        }
-
-        // Create Tuesday order
-        const tueOrder = await storage.createOrder({
-          customerName: invite.customerName,
-          customerEmail: invite.customerEmail,
-          deliveryAddress: resolvedAddress,
-          orderDate: invite.weekFrom,
-          status: "processing",
-          fulfillmentType: resolvedFulfillment as "delivery" | "collection",
-          isManual: true,
-          isTuesday: true,
-        });
-        for (const sel of tueSels) {
-          await storage.createOrderItem({ orderId: tueOrder.id, productId: null, productName: sel.productName, quantity: parseInt(sel.quantity, 10), price: "7.75" });
-        }
-        for (const ext of tueExtList) {
-          if (!ext.productName?.trim()) continue;
-          const qty = parseInt(ext.quantity, 10) || 1;
-          const price = parseFloat(productPriceMap[ext.productName] || "0");
-          await storage.createOrderItem({ orderId: tueOrder.id, productId: null, productName: ext.productName, quantity: qty, price: price > 0 ? String(price) : "0" });
-        }
-
-        await storage.updateSubscriptionInviteStatus(invite.id, "completed");
-        await storage.setSubscriptionInviteSelectionsOrder(invite.id, satOrder.id);
-        await storage.setSubscriptionInviteTuesdayOrder(invite.id, tueOrder.id);
-
-        // If there are paid add-ons (specials surcharge + extras), create Stripe checkout
-        if (addonAmountPence >= 50) {
-          try {
-            const baseUrl = await getPortalBaseUrl();
-            const stripe = await getUncachableStripeClient(await getActiveStripeSecretKey());
-            const session = await stripe.checkout.sessions.create({
-              payment_method_types: ["card"],
-              line_items: addonLineItems.map(item => ({
-                price_data: {
-                  currency: "gbp",
-                  unit_amount: item.pricePence,
-                  product_data: { name: item.name },
-                },
-                quantity: item.quantity,
-              })),
-              mode: "payment",
-              customer_email: invite.customerEmail || undefined,
-              success_url: `${baseUrl}/subscribe/${invite.token}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
-              cancel_url: `${baseUrl}/subscribe/${invite.token}`,
-              metadata: {
-                inviteId: String(invite.id),
-                customerName: invite.customerName,
-                orderId: String(satOrder.id),
-              },
-            });
-            await storage.updateSubscriptionInvitePayment(invite.id, {
-              addonAmountPence,
-              addonPaid: false,
-              addonPaymentToken: session.id,
-            });
-            return res.json({ success: true, orderId: satOrder.id, tuesdayOrderId: tueOrder.id, checkoutUrl: session.url });
-          } catch (stripeError: any) {
-            log(`Stripe checkout creation failed (dual): ${stripeError.message}`);
+        try {
+          const choices = [
+            ...satSels.map(sel => ({ productName: sel.productName, quantity: sel.quantity, deliveryDay: "sat" as const, price: productPriceMap[sel.productName] || "7.75" })),
+            ...satExtList.map(ext => ({ productName: ext.productName, quantity: ext.quantity, deliveryDay: "sat" as const, price: productPriceMap[ext.productName] || "0" })),
+            ...tueSels.map(sel => ({ productName: sel.productName, quantity: sel.quantity, deliveryDay: "tue" as const, price: "7.75" })),
+            ...tueExtList.map(ext => ({ productName: ext.productName, quantity: ext.quantity, deliveryDay: "tue" as const, price: productPriceMap[ext.productName] || "0" })),
+          ];
+          const saved = await storage.submitSubscriptionInviteChoices({
+            inviteId: invite.id, choices, address: resolvedAddress,
+            fulfillment: resolvedFulfillment as "delivery" | "collection",
+            checkoutSessionId: checkout?.id || null, addonAmountPence,
+          });
+          return res.json({ success: true, ...saved, checkoutUrl: checkout?.url });
+        } catch (err) {
+          if (checkout) {
+            try {
+              const stripe = await getUncachableStripeClient(await getActiveStripeSecretKey());
+              await stripe.checkout.sessions.expire(checkout.id);
+            } catch (expireErr: any) { log(`Could not expire unused checkout: ${expireErr.message}`, "stripe"); }
           }
-        } else if (addonAmountPence > 0) {
-          await storage.updateSubscriptionInvitePayment(invite.id, { addonAmountPence, addonPaid: false });
+          throw err;
         }
-
-        return res.json({ success: true, orderId: satOrder.id, tuesdayOrderId: tueOrder.id });
       }
 
       // ---- SINGLE DAY (original logic) ----
@@ -3928,6 +3967,9 @@ export async function registerRoutes(
       }
 
       const extrasList: any[] = Array.isArray(extras) ? extras : [];
+      const invalid = validateItems(selections, invite.isTuesday ? tueMeals : satMeals, "meal")
+        || validateItems(extrasList, validExtras, "add-on");
+      if (invalid) return res.status(400).json({ message: invalid });
 
       // Calculate addon cost: specials surcharge (meals at £9.75 → charge difference) + extras at full price
       const STANDARD_PRICE_SINGLE = 7.75;
@@ -3973,16 +4015,7 @@ export async function registerRoutes(
           addonLineItems.push({ name: extra.productName, pricePence, quantity: chargeableQty });
         }
       }
-
-      await storage.deleteSubscriptionSelectionsByInviteId(invite.id);
-      for (const sel of [...selections, ...extrasList]) {
-        await storage.createSubscriptionSelection({
-          inviteId: invite.id,
-          productName: sel.productName,
-          quantity: parseInt(sel.quantity, 10),
-          deliveryDay: invite.isTuesday ? 'tue' : 'sat',
-        } as any);
-      }
+      const checkout = await createAddonCheckout(addonAmountPence, addonLineItems);
 
       // Resolve address: use invite address, or fall back to customer's order history
       let resolvedAddress = invite.deliveryAddress || null;
@@ -3998,88 +4031,27 @@ export async function registerRoutes(
         }
       }
 
-      const order = await storage.createOrder({
-        customerName: invite.customerName,
-        customerEmail: invite.customerEmail,
-        deliveryAddress: resolvedAddress,
-        orderDate: invite.weekFrom,
-        status: "processing",
-        fulfillmentType: resolvedFulfillment as "delivery" | "collection",
-        isManual: true,
-        isTuesday: invite.isTuesday ?? false,
-      });
-
-      for (const sel of selections) {
-        const unitPrice = parseFloat(productPriceMap[sel.productName] || "0");
-        const itemPrice = !invite.isTuesday && Math.abs(unitPrice - SPECIAL_PRICE_SINGLE) < 0.01
-          ? String(unitPrice) : "7.75";
-        await storage.createOrderItem({
-          orderId: order.id,
-          productId: null,
-          productName: sel.productName,
-          quantity: parseInt(sel.quantity, 10),
-          price: itemPrice,
+      try {
+        const deliveryDay = invite.isTuesday ? "tue" as const : "sat" as const;
+        const choices = [
+          ...selections.map((sel: any) => ({ productName: sel.productName, quantity: sel.quantity, deliveryDay, price: productPriceMap[sel.productName] || "7.75" })),
+          ...extrasList.map(ext => ({ productName: ext.productName, quantity: ext.quantity, deliveryDay, price: productPriceMap[ext.productName] || "0" })),
+        ];
+        const saved = await storage.submitSubscriptionInviteChoices({
+          inviteId: invite.id, choices, address: resolvedAddress,
+          fulfillment: resolvedFulfillment as "delivery" | "collection",
+          checkoutSessionId: checkout?.id || null, addonAmountPence,
         });
-      }
-      for (const extra of extrasList) {
-        if (!extra.productName?.trim()) continue;
-        const qty = parseInt(extra.quantity, 10) || 1;
-        const unitPrice = parseFloat(productPriceMap[extra.productName] || "0");
-        await storage.createOrderItem({
-          orderId: order.id,
-          productId: null,
-          productName: extra.productName,
-          quantity: qty,
-          price: unitPrice > 0 ? String(unitPrice) : "0",
-        });
-      }
-
-      await storage.updateSubscriptionInviteStatus(invite.id, "completed");
-      await storage.setSubscriptionInviteSelectionsOrder(invite.id, order.id);
-
-      // If there are paid addons, create a Stripe Checkout session
-      if (addonAmountPence >= 50) {
-        try {
-          const baseUrl = await getPortalBaseUrl();
-          const stripe = await getUncachableStripeClient(await getActiveStripeSecretKey());
-          const session = await stripe.checkout.sessions.create({
-            payment_method_types: ["card"],
-            line_items: addonLineItems.map(item => ({
-              price_data: {
-                currency: "gbp",
-                unit_amount: item.pricePence,
-                product_data: { name: item.name },
-              },
-              quantity: item.quantity,
-            })),
-            mode: "payment",
-            customer_email: invite.customerEmail || undefined,
-            success_url: `${baseUrl}/subscribe/${invite.token}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
-            cancel_url: `${baseUrl}/subscribe/${invite.token}`,
-            metadata: {
-              inviteId: String(invite.id),
-              customerName: invite.customerName,
-              orderId: String(order.id),
-            },
-          });
-          await storage.updateSubscriptionInvitePayment(invite.id, {
-            addonAmountPence,
-            addonPaid: false,
-            addonPaymentToken: session.id,
-          });
-          return res.json({ success: true, orderId: order.id, checkoutUrl: session.url });
-        } catch (stripeError: any) {
-          log(`Stripe checkout creation failed: ${stripeError.message}`);
-          // Fall through and complete without payment link
+        res.json({ success: true, ...saved, checkoutUrl: checkout?.url });
+      } catch (err) {
+        if (checkout) {
+          try {
+            const stripe = await getUncachableStripeClient(await getActiveStripeSecretKey());
+            await stripe.checkout.sessions.expire(checkout.id);
+          } catch (expireErr: any) { log(`Could not expire unused checkout: ${expireErr.message}`, "stripe"); }
         }
-      } else if (addonAmountPence > 0) {
-        await storage.updateSubscriptionInvitePayment(invite.id, {
-          addonAmountPence,
-          addonPaid: false,
-        });
+        throw err;
       }
-
-      res.json({ success: true, orderId: order.id });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
@@ -4093,13 +4065,22 @@ export async function registerRoutes(
       // Anchor product pool to the invite's own week, not today
       const inviteWeekDate = invite.weekFrom ? new Date(invite.weekFrom) : undefined;
       const { weekNumber, categoryName } = await getCurrentWeekInfo(inviteWeekDate);
-      const allProducts = await storage.getProducts();
-      const weekProducts = allProducts.filter(p => p.category === categoryName);
+      let allProducts = await storage.getProducts();
+      let weekProducts = allProducts.filter(p => (p.category || "").trim().toLowerCase() === categoryName.toLowerCase());
+      if (weekProducts.length === 0) {
+        try {
+          await runProductSync();
+          allProducts = await storage.getProducts();
+          weekProducts = allProducts.filter(p => (p.category || "").trim().toLowerCase() === categoryName.toLowerCase());
+        } catch (err: any) {
+          log(`Admin subscription menu refresh failed: ${err.message}`, "sync");
+        }
+      }
 
-      let availableMeals: Array<{ name: string; popularity: number }>;
-      let availableExtras: Array<{ name: string; popularity: number }>;
+      let availableMeals: Array<{ name: string; popularity: number; price: string }>;
+      let availableExtras: Array<{ name: string; popularity: number; price: string }>;
 
-      const SKIP_PAT = /subscription|add\s+delivery/i;
+      const SKIP_PAT = /subscription|add\s+delivery|gift\s*card|voucher/i;
       const OAT_PAT_SD = /oat/i;
       const SOUP_PAT_SD = /soup/i;
       const SPECIAL_PRICE_SD = 9.75;
@@ -4111,29 +4092,42 @@ export async function registerRoutes(
       const isRegularMealSD = (p: { name: string; price?: string | null }) =>
         Math.abs(parseFloat(p.price || "0") - STANDARD_PRICE_SD) < 0.01;
 
-      const productPool = weekProducts.length > 0 ? weekProducts : allProducts.filter(p => !SKIP_PAT.test(p.name));
+      const isNamedUpgradeSD = (name: string) =>
+        /oat|soup|sweet\s*treat|brownie|cookie|cake|dessert|premium.*upgrade|upgrade.*premium|protein.*upgrade|upgrade.*protein/i.test(name);
+      const extrasByName = new Map<string, (typeof allProducts)[number]>();
+      const normaliseName = (name: string) => name.toLowerCase().replace(/\s*[-–—]\s*(week\s*\d+|w\d+)\s*$/i, "").replace(/\s+/g, " ").trim();
+      for (const p of allProducts) {
+        if (!SKIP_PAT.test(p.name) && isNamedUpgradeSD(p.name) && parseFloat(p.price || "0") > 0) {
+          const key = normaliseName(p.name);
+          if (!extrasByName.has(key)) extrasByName.set(key, p);
+        }
+      }
+      for (const p of weekProducts) {
+        if (!SKIP_PAT.test(p.name)) extrasByName.set(normaliseName(p.name), p);
+      }
+      const extrasPool = Array.from(extrasByName.values());
       const isTuesdayInvite = !!(invite as any).isTuesday;
 
       if (isTuesdayInvite) {
         // Tuesday: regular meals only, no specials; extras = oats + soups
-        availableMeals = productPool
+        availableMeals = weekProducts
           .filter(p => !SKIP_PAT.test(p.name) && isRegularMealSD(p) && !OAT_PAT_SD.test(p.name) && !SOUP_PAT_SD.test(p.name))
           .sort((a, b) => a.name.localeCompare(b.name))
-          .map(p => ({ name: p.name, popularity: 0 }));
-        availableExtras = productPool
-          .filter(p => !SKIP_PAT.test(p.name) && (OAT_PAT_SD.test(p.name) || SOUP_PAT_SD.test(p.name)))
+          .map(p => ({ name: p.name, popularity: 0, price: p.price || "7.75" }));
+        availableExtras = extrasPool
+          .filter(p => isNamedUpgradeSD(p.name) && !isRegularMealSD(p) && !isSpecialSD(p))
           .sort((a, b) => a.name.localeCompare(b.name))
-          .map(p => ({ name: p.name, popularity: 0 }));
+          .map(p => ({ name: p.name, popularity: 0, price: p.price || "0" }));
       } else {
         // Saturday: regular meals + specials (£9.75) count as meals; extras = oats/soups/other non-meal
-        availableMeals = productPool
+        availableMeals = weekProducts
           .filter(p => !SKIP_PAT.test(p.name) && (isRegularMealSD(p) || isSpecialSD(p)))
           .sort((a, b) => a.name.localeCompare(b.name))
-          .map(p => ({ name: p.name, popularity: 0 }));
-        availableExtras = productPool
-          .filter(p => !SKIP_PAT.test(p.name) && !isRegularMealSD(p) && !isSpecialSD(p) && parseFloat(p.price || "0") > 0)
+          .map(p => ({ name: p.name, popularity: 0, price: p.price || "7.75" }));
+        availableExtras = extrasPool
+          .filter(p => isNamedUpgradeSD(p.name) && !isRegularMealSD(p) && !isSpecialSD(p))
           .sort((a, b) => a.name.localeCompare(b.name))
-          .map(p => ({ name: p.name, popularity: 0 }));
+          .map(p => ({ name: p.name, popularity: 0, price: p.price || "0" }));
       }
 
       const existingSelections = await storage.getSubscriptionSelections(invite.id);
@@ -4147,6 +4141,22 @@ export async function registerRoutes(
         categoryName,
         availableMeals,
         availableExtras,
+        satAvailableMeals: isDual ? weekProducts
+          .filter(p => !SKIP_PAT.test(p.name) && (isRegularMealSD(p) || isSpecialSD(p)))
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .map(p => ({ name: p.name, popularity: 0, price: p.price || "7.75" })) : undefined,
+        satAvailableExtras: isDual ? extrasPool
+          .filter(p => isNamedUpgradeSD(p.name) && !isRegularMealSD(p) && !isSpecialSD(p))
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .map(p => ({ name: p.name, popularity: 0, price: p.price || "0" })) : undefined,
+        tueAvailableMeals: isDual ? weekProducts
+          .filter(p => !SKIP_PAT.test(p.name) && isRegularMealSD(p) && !OAT_PAT_SD.test(p.name) && !SOUP_PAT_SD.test(p.name))
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .map(p => ({ name: p.name, popularity: 0, price: p.price || "7.75" })) : undefined,
+        tueAvailableExtras: isDual ? extrasPool
+          .filter(p => isNamedUpgradeSD(p.name) && !isRegularMealSD(p) && !isSpecialSD(p))
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .map(p => ({ name: p.name, popularity: 0, price: p.price || "0" })) : undefined,
         selections: existingSelections,
         satSelections: isDual ? existingSelections.filter((s: any) => (s.deliveryDay || 'sat') === 'sat') : existingSelections,
         tueSelections: isDual ? existingSelections.filter((s: any) => s.deliveryDay === 'tue') : [],
@@ -4162,6 +4172,9 @@ export async function registerRoutes(
       const id = parseInt(req.params.id);
       const invite = await storage.getSubscriptionInviteById(id);
       if (!invite) return res.status(404).json({ message: "Invite not found" });
+      if ((invite.addonPaymentToken || invite.stripePaymentIntentId) && !invite.addonPaid) {
+        return res.status(409).json({ message: "This selection has an outstanding payment. Reconcile it before editing the order." });
+      }
 
       const { selections, extras, subscriptionQuantity, satSelections, tueSelections, satExtras, tueExtras } = req.body;
       const isDualInvite = (invite as any).isDual === true;
@@ -4169,9 +4182,51 @@ export async function registerRoutes(
       const effectiveMax = subscriptionQuantity && Number.isInteger(subscriptionQuantity) && subscriptionQuantity > 0
         ? subscriptionQuantity
         : invite.subscriptionQuantity;
-      if (effectiveMax !== invite.subscriptionQuantity) {
-        await storage.updateSubscriptionInviteQuantity(id, effectiveMax);
-      }
+      const allProducts = await storage.getProducts();
+      const { categoryName: inviteCategory } = await getCurrentWeekInfo(invite.weekFrom);
+      const weekProducts = allProducts.filter(p => (p.category || "").trim().toLowerCase() === inviteCategory.toLowerCase());
+      const satNames = new Set(weekProducts.filter(p => [7.75, 9.75].includes(parseFloat(p.price || "0"))
+        && !/subscription|add\s+delivery|gift\s*card|voucher/i.test(p.name)).map(p => p.name));
+      const tueNames = new Set(weekProducts.filter(p => parseFloat(p.price || "0") === 7.75
+        && !/subscription|add\s+delivery|gift\s*card|voucher|oat|soup/i.test(p.name)).map(p => p.name));
+      const extraNames = new Set(allProducts.filter(p =>
+        /oat|soup|sweet\s*treat|brownie|cookie|cake|dessert|premium.*upgrade|upgrade.*premium|protein.*upgrade|upgrade.*protein/i.test(p.name)
+        && !/subscription|add\s+delivery|gift\s*card|voucher/i.test(p.name)
+        && parseFloat(p.price || "0") > 0 && parseFloat(p.price || "0") !== 7.75
+        && (parseFloat(p.price || "0") !== 9.75 || /oat|soup/i.test(p.name))).map(p => p.name));
+      const prices = new Map(allProducts.map(p => [p.name, p.price || "0"]));
+      for (const p of weekProducts) prices.set(p.name, p.price || "0");
+      const validateItems = (list: unknown, names: Set<string>, label: string) =>
+        !Array.isArray(list) || list.some((s: any) =>
+          !s || !names.has(s.productName) || !Number.isSafeInteger(s.quantity) || s.quantity < 1)
+          ? `Invalid ${label} selection or quantity` : null;
+      const paidEditChangesCharge = (
+        saturdayMeals: Array<{ productName: string; quantity: number }>,
+        saturdayExtras: Array<{ productName: string; quantity: number }>,
+        tuesdayExtras: Array<{ productName: string; quantity: number }>,
+      ) => {
+        if (!invite.addonPaid || !(invite.addonPaymentToken || invite.stripePaymentIntentId)) return false;
+        let amountPence = saturdayMeals.reduce((sum, item) => {
+          const price = parseFloat(prices.get(item.productName) || "0");
+          return sum + (Math.abs(price - 9.75) < 0.01 ? 200 * item.quantity : 0);
+        }, 0);
+        let oatsLeft = invite.includedOats || 0;
+        let treatsLeft = invite.includedSweetTreats || 0;
+        for (const extra of [...saturdayExtras, ...tuesdayExtras]) {
+          let chargeable = extra.quantity;
+          if (/oat/i.test(extra.productName)) {
+            const free = Math.min(chargeable, oatsLeft);
+            chargeable -= free;
+            oatsLeft -= free;
+          } else if (!/soup/i.test(extra.productName)) {
+            const free = Math.min(chargeable, treatsLeft);
+            chargeable -= free;
+            treatsLeft -= free;
+          }
+          amountPence += Math.round(parseFloat(prices.get(extra.productName) || "0") * 100) * chargeable;
+        }
+        return amountPence !== invite.addonAmountPence;
+      };
 
       // Backfill address from order history if the invite was created without one
       let resolvedAddress = invite.deliveryAddress || null;
@@ -4194,6 +4249,19 @@ export async function registerRoutes(
         if (satSels.length === 0 || tueSels.length === 0) {
           return res.status(400).json({ message: "Please select meals for both Saturday and Tuesday deliveries" });
         }
+        const invalid = validateItems(satSels, satNames, "Saturday meal")
+          || validateItems(tueSels, tueNames, "Tuesday meal")
+          || validateItems(satExtList, extraNames, "Saturday add-on")
+          || validateItems(tueExtList, extraNames, "Tuesday add-on");
+        if (invalid) return res.status(400).json({ message: invalid });
+        if (satSels.reduce((sum, s) => sum + s.quantity, 0) > effectiveMax ||
+          tueSels.reduce((sum, s) => sum + s.quantity, 0) > effectiveMax) {
+          return res.status(400).json({ message: `Maximum ${effectiveMax} meals per delivery` });
+        }
+        if (paidEditChangesCharge(satSels, satExtList, tueExtList)) {
+          return res.status(409).json({ message: "These changes alter an amount already paid. Reconcile the payment before changing paid selections." });
+        }
+        if (effectiveMax !== invite.subscriptionQuantity) await storage.updateSubscriptionInviteQuantity(id, effectiveMax);
 
         await storage.deleteSubscriptionSelectionsByInviteId(id);
         for (const sel of [...satSels, ...satExtList]) {
@@ -4217,20 +4285,20 @@ export async function registerRoutes(
           await storage.setSubscriptionInviteSelectionsOrder(id, satOrderId);
         }
         await storage.deleteOrderItemsByOrderId(satOrderId);
-        for (const sel of satSels) { if (!sel.productName?.trim()) continue; await storage.createOrderItem({ orderId: satOrderId!, productId: null, productName: sel.productName, quantity: parseInt(sel.quantity, 10) || 1, price: "7.75" }); }
-        for (const ext of satExtList) { if (!ext.productName?.trim()) continue; await storage.createOrderItem({ orderId: satOrderId!, productId: null, productName: ext.productName, quantity: parseInt(ext.quantity, 10) || 1, price: "0" }); }
+        for (const sel of satSels) { await storage.createOrderItem({ orderId: satOrderId!, productId: null, productName: sel.productName, quantity: sel.quantity, price: prices.get(sel.productName) || "7.75" }); }
+        for (const ext of satExtList) { await storage.createOrderItem({ orderId: satOrderId!, productId: null, productName: ext.productName, quantity: ext.quantity, price: prices.get(ext.productName) || "0" }); }
 
         // Update or create Tuesday order
         const tueOrderId = (invite as any).tuesdaySelectionsOrderId as number | null;
         if (tueOrderId) {
           await storage.updateOrder(tueOrderId, { orderDate: invite.weekFrom, deliveryAddress: resolvedAddress, fulfillmentType: resolvedFulfillment as "delivery" | "collection" });
           await storage.deleteOrderItemsByOrderId(tueOrderId);
-          for (const sel of tueSels) { if (!sel.productName?.trim()) continue; await storage.createOrderItem({ orderId: tueOrderId, productId: null, productName: sel.productName, quantity: parseInt(sel.quantity, 10) || 1, price: "7.75" }); }
-          for (const ext of tueExtList) { if (!ext.productName?.trim()) continue; await storage.createOrderItem({ orderId: tueOrderId, productId: null, productName: ext.productName, quantity: parseInt(ext.quantity, 10) || 1, price: "0" }); }
+          for (const sel of tueSels) { await storage.createOrderItem({ orderId: tueOrderId, productId: null, productName: sel.productName, quantity: sel.quantity, price: prices.get(sel.productName) || "7.75" }); }
+          for (const ext of tueExtList) { await storage.createOrderItem({ orderId: tueOrderId, productId: null, productName: ext.productName, quantity: ext.quantity, price: prices.get(ext.productName) || "0" }); }
         } else {
           const tueOrder = await storage.createOrder({ customerName: invite.customerName, customerEmail: invite.customerEmail, deliveryAddress: resolvedAddress, orderDate: invite.weekFrom, status: "processing", fulfillmentType: resolvedFulfillment as "delivery" | "collection", isManual: true, isTuesday: true });
-          for (const sel of tueSels) { if (!sel.productName?.trim()) continue; await storage.createOrderItem({ orderId: tueOrder.id, productId: null, productName: sel.productName, quantity: parseInt(sel.quantity, 10) || 1, price: "7.75" }); }
-          for (const ext of tueExtList) { if (!ext.productName?.trim()) continue; await storage.createOrderItem({ orderId: tueOrder.id, productId: null, productName: ext.productName, quantity: parseInt(ext.quantity, 10) || 1, price: "0" }); }
+          for (const sel of tueSels) { await storage.createOrderItem({ orderId: tueOrder.id, productId: null, productName: sel.productName, quantity: sel.quantity, price: prices.get(sel.productName) || "7.75" }); }
+          for (const ext of tueExtList) { await storage.createOrderItem({ orderId: tueOrder.id, productId: null, productName: ext.productName, quantity: ext.quantity, price: prices.get(ext.productName) || "0" }); }
           await storage.setSubscriptionInviteTuesdayOrder(id, tueOrder.id);
         }
 
@@ -4251,6 +4319,13 @@ export async function registerRoutes(
       }
 
       const extrasList: any[] = Array.isArray(extras) ? extras : [];
+      const invalid = validateItems(selections, invite.isTuesday ? tueNames : satNames, "meal")
+        || validateItems(extrasList, extraNames, "add-on");
+      if (invalid) return res.status(400).json({ message: invalid });
+      if (paidEditChangesCharge(invite.isTuesday ? [] : selections, invite.isTuesday ? [] : extrasList, invite.isTuesday ? extrasList : [])) {
+        return res.status(409).json({ message: "These changes alter an amount already paid. Reconcile the payment before changing paid selections." });
+      }
+      if (effectiveMax !== invite.subscriptionQuantity) await storage.updateSubscriptionInviteQuantity(id, effectiveMax);
       const allSelections = [...selections, ...extrasList];
 
       await storage.deleteSubscriptionSelectionsByInviteId(id);
@@ -4292,23 +4367,21 @@ export async function registerRoutes(
       }
       await storage.deleteOrderItemsByOrderId(targetOrderId);
       for (const sel of selections) {
-        if (!sel.productName?.trim()) continue;
         await storage.createOrderItem({
           orderId: targetOrderId,
           productId: null,
           productName: sel.productName,
-          quantity: parseInt(sel.quantity, 10) || 1,
-          price: "7.75",
+          quantity: sel.quantity,
+          price: prices.get(sel.productName) || "7.75",
         });
       }
       for (const extra of extrasList) {
-        if (!extra.productName?.trim()) continue;
         await storage.createOrderItem({
           orderId: targetOrderId,
           productId: null,
           productName: extra.productName,
-          quantity: parseInt(extra.quantity, 10) || 1,
-          price: "0",
+          quantity: extra.quantity,
+          price: prices.get(extra.productName) || "0",
         });
       }
 
@@ -4437,6 +4510,25 @@ export async function registerRoutes(
       const id = parseInt(req.params.id);
       const invite = await storage.getSubscriptionInviteById(id);
       if (!invite) return res.status(404).json({ message: "Invite not found" });
+      if (invite.addonPaid && (invite.addonAmountPence || 0) > 0) {
+        return res.status(409).json({ message: "This invitation has a paid add-on. Reconcile or refund the payment before resetting it." });
+      }
+      if (invite.addonPaymentToken) {
+        const stripe = await getUncachableStripeClient(await getActiveStripeSecretKey());
+        const checkout = await stripe.checkout.sessions.retrieve(invite.addonPaymentToken);
+        if (checkout.status === "complete") {
+          return res.status(409).json({ message: "Checkout completed. Verify or reconcile the payment before resetting." });
+        }
+        if (checkout.status === "open") await stripe.checkout.sessions.expire(checkout.id);
+      }
+      if (invite.stripePaymentIntentId) {
+        const stripe = await getUncachableStripeClient(await getActiveStripeSecretKey());
+        const intent = await stripe.paymentIntents.retrieve(invite.stripePaymentIntentId);
+        if (intent.status === "succeeded" || intent.status === "processing") {
+          return res.status(409).json({ message: "Payment is processing or complete. Reconcile it before resetting." });
+        }
+        if (intent.status !== "canceled") await stripe.paymentIntents.cancel(intent.id);
+      }
 
       const { deletedOrderId } = await storage.resetSubscriptionInvite(id);
 
@@ -5330,8 +5422,9 @@ export async function registerRoutes(
       if (!invite) return res.status(404).json({ message: "Invitation not found" });
 
       const { amountPence, description, items } = req.body;
-      if (!amountPence || amountPence < 50) {
-        return res.status(400).json({ message: "Amount must be at least 50p" });
+      if (invite.status !== "completed" || !Number.isSafeInteger(amountPence)
+        || amountPence < 50 || amountPence !== invite.addonAmountPence || invite.addonPaid) {
+        return res.status(400).json({ message: "No matching outstanding add-on payment" });
       }
 
       const stripe = await getUncachableStripeClient(await getActiveStripeSecretKey());
@@ -5367,13 +5460,17 @@ export async function registerRoutes(
       if (!invite) return res.status(404).json({ message: "Invitation not found" });
 
       const { paymentIntentId } = req.body;
-      if (!paymentIntentId) return res.status(400).json({ message: "paymentIntentId required" });
+      if (!paymentIntentId || invite.stripePaymentIntentId !== paymentIntentId) {
+        return res.status(400).json({ message: "Payment does not belong to this invitation" });
+      }
 
       const stripe = await getUncachableStripeClient(await getActiveStripeSecretKey());
       const pi = await stripe.paymentIntents.retrieve(paymentIntentId);
 
-      if (pi.status === "succeeded") {
-        await storage.updateSubscriptionInvitePayment(invite.id, { addonPaid: true });
+      if (pi.status === "succeeded" && pi.metadata?.inviteId === String(invite.id)
+        && pi.currency === "gbp") {
+        const payment = await storage.confirmSubscriptionInvitePayment(invite.id, pi.id, pi.amount_received, "intent");
+        if (!payment.valid) return res.status(400).json({ message: "Payment does not match the outstanding balance" });
         res.json({ success: true, status: "succeeded" });
       } else {
         res.json({ success: false, status: pi.status });
@@ -5667,17 +5764,21 @@ export async function registerRoutes(
       const session = await stripe.checkout.sessions.retrieve(sessionId, {
         expand: ["line_items"],
       });
+      const inviteId = Number(session.metadata?.inviteId);
+      const invite = Number.isSafeInteger(inviteId) && inviteId > 0
+        ? await storage.getSubscriptionInviteById(inviteId) : undefined;
+      if (!invite || invite.addonPaymentToken !== sessionId || session.currency !== "gbp"
+        || session.amount_total !== invite.addonAmountPence) {
+        return res.status(404).json({ message: "Subscription payment not found" });
+      }
 
       if (session.payment_status === "paid") {
-        const inviteId = session.metadata?.inviteId ? parseInt(session.metadata.inviteId) : null;
-        if (inviteId) {
-          const invite = await storage.getSubscriptionInviteById(inviteId);
-          const alreadyPaid = invite?.addonPaid === true;
-
-          await storage.updateSubscriptionInvitePayment(inviteId, { addonPaid: true });
+        {
+          const payment = await storage.confirmSubscriptionInvitePayment(inviteId, sessionId, session.amount_total!, "session");
+          if (!payment.valid) return res.status(400).json({ message: "Subscription payment no longer active" });
 
           // Send receipt email once, on first confirmation
-          if (!alreadyPaid && invite) {
+          if (payment.newlyPaid) {
             try {
               const transporter = await getSmtpTransporter();
               const fromEmail = await getSmtpFromEmail();
