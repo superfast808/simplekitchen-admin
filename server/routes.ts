@@ -4121,47 +4121,75 @@ export async function registerRoutes(
       // Anchor product pool to the invite's own week, not today
       const inviteWeekDate = invite.weekFrom ? new Date(invite.weekFrom) : undefined;
       const { weekNumber, categoryName } = await getCurrentWeekInfo(inviteWeekDate);
-      const allProducts = await storage.getProducts();
-      const weekProducts = allProducts.filter(p => p.category === categoryName);
+      let allProducts = await storage.getProducts();
+      let weekProducts = allProducts.filter(
+        p => (p.category || "").trim().toLowerCase() === categoryName.toLowerCase()
+      );
 
-      let availableMeals: Array<{ name: string; popularity: number }>;
-      let availableExtras: Array<{ name: string; popularity: number }>;
+      if (weekProducts.length === 0) {
+        try {
+          await runProductSync();
+          allProducts = await storage.getProducts();
+          weekProducts = allProducts.filter(
+            p => (p.category || "").trim().toLowerCase() === categoryName.toLowerCase()
+          );
+        } catch (syncError: any) {
+          log(`Admin subscription menu refresh failed: ${syncError?.message || syncError}`, "sync");
+        }
+      }
 
-      const SKIP_PAT = /subscription|add\s+delivery/i;
+      let availableMeals: Array<{ name: string; popularity: number; price?: string }>;
+      let availableExtras: Array<{ name: string; popularity: number; price?: string }>;
+
+      const SKIP_PAT = /subscription|add\s+delivery|gift\s*card|voucher/i;
       const OAT_PAT_SD = /oat/i;
       const SOUP_PAT_SD = /soup/i;
+      const SWEET_PAT_SD = /sweet\s*treat|brownie|cookie|cake|dessert/i;
+      const UPGRADE_PAT_SD = /premium.*upgrade|upgrade.*premium|protein.*upgrade|upgrade.*protein/i;
       const SPECIAL_PRICE_SD = 9.75;
       const STANDARD_PRICE_SD = 7.75;
+
       const isSpecialSD = (p: { name: string; price?: string | null }) => {
         const pr = parseFloat(p.price || "0");
         return Math.abs(pr - SPECIAL_PRICE_SD) < 0.01 && !OAT_PAT_SD.test(p.name) && !SOUP_PAT_SD.test(p.name);
       };
       const isRegularMealSD = (p: { name: string; price?: string | null }) =>
         Math.abs(parseFloat(p.price || "0") - STANDARD_PRICE_SD) < 0.01;
+      const isNamedUpgradeSD = (name: string) =>
+        OAT_PAT_SD.test(name) || SOUP_PAT_SD.test(name) || SWEET_PAT_SD.test(name) || UPGRADE_PAT_SD.test(name);
 
-      const productPool = weekProducts.length > 0 ? weekProducts : allProducts.filter(p => !SKIP_PAT.test(p.name));
+      const globalUpgrades = allProducts.filter(p =>
+        !SKIP_PAT.test(p.name) &&
+        isNamedUpgradeSD(p.name) &&
+        parseFloat(p.price || "0") > 0
+      );
+      const extraByName = new Map<string, (typeof allProducts)[number]>();
+      for (const product of [...weekProducts, ...globalUpgrades]) {
+        if (!SKIP_PAT.test(product.name)) extraByName.set(product.name.toLowerCase(), product);
+      }
+      const extrasPool = [...extraByName.values()];
       const isTuesdayInvite = !!(invite as any).isTuesday;
 
       if (isTuesdayInvite) {
-        // Tuesday: regular meals only, no specials; extras = oats + soups
-        availableMeals = productPool
-          .filter(p => !SKIP_PAT.test(p.name) && isRegularMealSD(p) && !OAT_PAT_SD.test(p.name) && !SOUP_PAT_SD.test(p.name))
+        availableMeals = weekProducts
+          .filter(p => !SKIP_PAT.test(p.name) && isRegularMealSD(p))
           .sort((a, b) => a.name.localeCompare(b.name))
-          .map(p => ({ name: p.name, popularity: 0 }));
-        availableExtras = productPool
-          .filter(p => !SKIP_PAT.test(p.name) && (OAT_PAT_SD.test(p.name) || SOUP_PAT_SD.test(p.name)))
+          .map(p => ({ name: p.name, popularity: 0, price: p.price || "7.75" }));
+        availableExtras = extrasPool
+          .filter(p => isNamedUpgradeSD(p.name))
+          .filter(p => parseFloat(p.price || "0") > 0)
           .sort((a, b) => a.name.localeCompare(b.name))
-          .map(p => ({ name: p.name, popularity: 0 }));
+          .map(p => ({ name: p.name, popularity: 0, price: p.price || "0" }));
       } else {
-        // Saturday: regular meals + specials (£9.75) count as meals; extras = oats/soups/other non-meal
-        availableMeals = productPool
+        availableMeals = weekProducts
           .filter(p => !SKIP_PAT.test(p.name) && (isRegularMealSD(p) || isSpecialSD(p)))
           .sort((a, b) => a.name.localeCompare(b.name))
-          .map(p => ({ name: p.name, popularity: 0 }));
-        availableExtras = productPool
-          .filter(p => !SKIP_PAT.test(p.name) && !isRegularMealSD(p) && !isSpecialSD(p) && parseFloat(p.price || "0") > 0)
+          .map(p => ({ name: p.name, popularity: 0, price: p.price || "7.75" }));
+        availableExtras = extrasPool
+          .filter(p => !isRegularMealSD(p) && !isSpecialSD(p))
+          .filter(p => parseFloat(p.price || "0") > 0)
           .sort((a, b) => a.name.localeCompare(b.name))
-          .map(p => ({ name: p.name, popularity: 0 }));
+          .map(p => ({ name: p.name, popularity: 0, price: p.price || "0" }));
       }
 
       const existingSelections = await storage.getSubscriptionSelections(invite.id);
