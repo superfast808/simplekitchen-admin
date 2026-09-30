@@ -400,38 +400,31 @@ function isWithinAutoSendWindow(): boolean {
 // For orders that contain both "Saturday Delivery" and "Tuesday Delivery" (dual-day orders),
 // one slot gets isTuesday=false (Saturday) and one gets isTuesday=true (Tuesday).
 // For "2 week" subscription products, one dual-day slot is returned (isDual=true).
-const SUB_PATTERN = /meal\s+subscription(?:\s+\d+\s*week)?\s*-\s*(\d+)/i;
+const SUB_PATTERN = /meal\s+subscription\s*-\s*(\d+)/i;
 const TWO_WEEK_PATTERN = /2\s*week/i;
 const WEEKLY_SUB_PATTERN = /weekly.*meal.*subscription|meal.*subscription.*weekly/i;
-const SUBSCRIPTION_NAME_PATTERN = /meal\s+subscription|weekly.*meal.*subscription|meal.*subscription.*weekly/i;
-
-function isSubscriptionProductName(name: string): boolean {
-  return SUBSCRIPTION_NAME_PATTERN.test(name || "");
-}
-
-function getSubscriptionQuantity(item: { productName: string; quantity?: number }): number {
-  const m = item.productName.match(SUB_PATTERN) || item.productName.match(/-\s*(\d+)\s*$/);
-  return m ? parseInt(m[1], 10) : (item.quantity || 0);
-}
-
 function getSubscriptionSlots(order: { isTuesday: boolean; items: Array<{ productName: string; quantity?: number }> }): Array<{ qty: number; isTuesday: boolean; isDual: boolean }> {
-  const subItems = order.items.filter(i => isSubscriptionProductName(i.productName));
+  const subItems = order.items.filter(i => SUB_PATTERN.test(i.productName) || (WEEKLY_SUB_PATTERN.test(i.productName)));
   if (subItems.length === 0) return [];
 
   const hasSatDelivery = order.items.some(i => /saturday.*delivery|delivery.*saturday/i.test(i.productName));
   const hasTueDelivery = order.items.some(i => /tuesday.*delivery|delivery.*tuesday/i.test(i.productName));
 
   if (subItems.length > 1 && hasSatDelivery && hasTueDelivery) {
-    // Dual-day order — assign alternate days (Sat first, then Tue, then repeat).
-    return subItems.map((item, idx) => ({
-      qty: getSubscriptionQuantity(item),
-      isTuesday: idx % 2 !== 0,
-      isDual: false,
-    })).filter(s => s.qty > 0);
+    // Dual-day order — assign alternate days (Sat first, then Tue, then repeat)
+    return subItems.map((item, idx) => {
+      const m = item.productName.match(SUB_PATTERN);
+      const qty = m ? parseInt(m[1], 10) : (item.quantity || 0);
+      return { qty, isTuesday: idx % 2 !== 0, isDual: false };
+    }).filter(s => s.qty > 0);
   }
 
+  // Single subscription (or same day repeated) — check for "2 week" dual-day flag
   return subItems.map(item => {
-    const qty = getSubscriptionQuantity(item);
+    // Try primary pattern first (e.g. "Meal Subscription - 6"),
+    // then fall back to any trailing "- N" in the name (e.g. "Meal Subscription 2 week - 6")
+    const m = item.productName.match(SUB_PATTERN) || item.productName.match(/-\s*(\d+)\s*$/);
+    const qty = m ? parseInt(m[1], 10) : (item.quantity || 0);
     const isDual = TWO_WEEK_PATTERN.test(item.productName);
     return { qty, isTuesday: isDual ? false : order.isTuesday, isDual };
   }).filter(s => s.qty > 0);
@@ -458,7 +451,7 @@ async function autoSendSubscriptionInvites(): Promise<void> {
       ordersList.map(async (order) => ({ ...order, items: await storage.getOrderItems(order.id) }))
     );
 
-    const subOrders = ordersWithItems.filter(o => o.items.some(i => isSubscriptionProductName(i.productName)));
+    const subOrders = ordersWithItems.filter(o => o.items.some(i => SUB_PATTERN.test(i.productName) || WEEKLY_SUB_PATTERN.test(i.productName)));
     if (subOrders.length === 0) return;
 
     const existingInvites = await storage.getSubscriptionInvites(week.from, week.to);
@@ -1058,18 +1051,12 @@ async function runProductSync(): Promise<{ imported: number; updated: number; mo
       const attrs = wp.attributes.map((a: any) => a.option).filter(Boolean).join(", ");
       if (attrs) name = `${decodeHtmlEntities(wp._parentName)} - ${attrs}`;
     }
-    const categorySource = (wp.categories?.length ? wp.categories : wp._parentCategories) || [];
-    const categoryNames = categorySource
-      .map((category: any) => String(category?.name || "").trim())
-      .filter(Boolean);
-    const weekCategory = categoryNames.find((category: string) => /^Week\s+[1-6]$/i.test(category));
-
     const productData = {
       wooId: wp.id,
       name,
       price: String(wp.price || "0"),
       imageUrl: (wp.images?.[0]?.src || wp._parentImages?.[0]?.src) || null,
-      category: weekCategory || categoryNames[0] || null,
+      category: (wp.categories?.[0]?.name || wp._parentCategories?.[0]?.name) || null,
     };
     if (existing) {
       await storage.updateProduct(existing.id, productData);
@@ -2570,7 +2557,7 @@ export async function registerRoutes(
       );
       applyAddDeliveryUpgrades(ordersWithItems);
       // Exclude any order whose items are subscription products (they show via stamped manual orders instead)
-      const isSubscriptionItem = (name: string) => isSubscriptionProductName(name);
+      const isSubscriptionItem = (name: string) => SUB_PATTERN.test(name) || WEEKLY_SUB_PATTERN.test(name);
       const isAddDeliveryOnly = (items: { productName: string }[]) =>
         items.length > 0 && items.every(i => i.productName.toLowerCase().includes("add delivery"));
       // Subscription-origin orders count as "website" for reconciliation
@@ -3157,7 +3144,7 @@ export async function registerRoutes(
         })
       );
 
-      const subOrders = ordersWithItems.filter(o => o.items.some(i => isSubscriptionProductName(i.productName)));
+      const subOrders = ordersWithItems.filter(o => o.items.some(i => SUB_PATTERN.test(i.productName) || WEEKLY_SUB_PATTERN.test(i.productName)));
 
       if (subOrders.length === 0) {
         return res.json({ sent: 0, message: "No subscription orders found this week" });
@@ -3360,83 +3347,10 @@ export async function registerRoutes(
     res.json({ received: true });
   });
 
-  async function reconcileSubscribersFromCurrentSubscriptionOrders(): Promise<{ created: number; checked: number }> {
-    const existingSubscribers = await storage.getSubscribers();
-    const existingKeys = new Set(
-      existingSubscribers.map(sub =>
-        `${sub.customerEmail.trim().toLowerCase()}|${sub.deliveryDay}`
-      )
-    );
-
-    // The current order window is the best source of truth for who is actively
-    // subscribing now. This avoids resurrecting old/cancelled historical customers.
-    const week = getWeekRange(0);
-    const ordersList = await storage.getOrders(week.from, week.to);
-    const ordersWithItems = await Promise.all(
-      ordersList.map(async order => ({
-        ...order,
-        items: await storage.getOrderItems(order.id),
-      }))
-    );
-
-    let created = 0;
-    let checked = 0;
-
-    for (const order of ordersWithItems) {
-      if (!order.customerEmail) continue;
-      if (!order.items.some(item => isSubscriptionProductName(item.productName))) continue;
-
-      const slots = getSubscriptionSlots(order);
-      for (const slot of slots) {
-        checked++;
-
-        const deliveryDay = slot.isDual ? "dual" : (slot.isTuesday ? "tue" : "sat");
-        const email = order.customerEmail.trim().toLowerCase();
-        const key = `${email}|${deliveryDay}`;
-        if (existingKeys.has(key)) continue;
-
-        let address = order.deliveryAddress || null;
-        if (!address) {
-          const previous = await storage.getCustomerDeliveryAddress(email, order.customerName);
-          address = previous?.deliveryAddress || null;
-        }
-
-        await storage.createSubscriber({
-          customerName: order.customerName,
-          customerEmail: email,
-          deliveryDay,
-          quantity: slot.qty,
-          paymentIntervalWeeks: slot.isDual ? 2 : 1,
-          active: true,
-          lastPaymentSentAt: null,
-          nextPaymentDueAt: null,
-          deliveryAddress: address,
-          deliveryFeePence: 0,
-          includedOats: 0,
-          includedSweetTreats: 0,
-          notes: "Auto-added from current subscription order",
-        } as any);
-
-        existingKeys.add(key);
-        created++;
-      }
-    }
-
-    return { created, checked };
-  }
-
   // ─── Subscribers CRUD ────────────────────────────────────────────────────
   app.get("/api/subscribers", async (req, res) => {
     if (!req.session?.userId) return res.status(401).json({ message: "Not authenticated" });
     try {
-      // Heal gaps left by older imports: any customer with a subscription product
-      // in the current order window should also exist in the Subscribers register.
-      // Existing records are never overwritten here.
-      const reconciliation = await reconcileSubscribersFromCurrentSubscriptionOrders();
-      if (reconciliation.created > 0) {
-        log(`Subscribers: recovered ${reconciliation.created} missing current subscriber(s)`, "sync");
-      }
-
       const activeOnly = req.query.activeOnly === "true";
       const subs = await storage.getSubscribers(activeOnly);
       res.json(subs);
@@ -3614,7 +3528,7 @@ export async function registerRoutes(
         weekOrders.map(async (o) => ({ ...o, items: await storage.getOrderItems(o.id) }))
       );
       const subOrders = weekOrdersWithItems.filter(o =>
-        o.items.some(i => isSubscriptionProductName(i.productName))
+        o.items.some(i => SUB_PATTERN.test(i.productName) || WEEKLY_SUB_PATTERN.test(i.productName))
       );
       const existingThisWeek = await storage.getSubscriptionInvites(week.from, week.to);
       const existingKeys = new Set(existingThisWeek.map(i =>
@@ -3694,105 +3608,61 @@ export async function registerRoutes(
       // so a late click never shows the next week's menu.
       const inviteWeekDate = invite.weekFrom ? new Date(invite.weekFrom) : undefined;
       const { weekNumber, categoryName } = await getCurrentWeekInfo(inviteWeekDate);
-      let allProducts = await storage.getProducts();
-      let weekProducts = allProducts.filter(
-        p => (p.category || "").trim().toLowerCase() === categoryName.toLowerCase()
-      );
+      const allProducts = await storage.getProducts();
+      const weekProducts = allProducts.filter(p => p.category === categoryName);
 
-      // Older product imports stored the first Woo category, which was sometimes
-      // "Meals" rather than "Week N". Repair that once on demand instead of ever
-      // falling back to the entire historical catalogue.
-      if (weekProducts.length === 0) {
-        try {
-          await runProductSync();
-          allProducts = await storage.getProducts();
-          weekProducts = allProducts.filter(
-            p => (p.category || "").trim().toLowerCase() === categoryName.toLowerCase()
-          );
-        } catch (syncError: any) {
-          log(`Subscription menu refresh failed: ${syncError?.message || syncError}`, "sync");
-        }
+      let availableMeals: Array<{ name: string; popularity: number }>;
+      let availableExtras: Array<{ name: string; popularity: number }>;
+
+      // Build a price map: product name -> price string from products DB
+      const extraPriceMap: Record<string, string> = {};
+      for (const p of allProducts) {
+        extraPriceMap[p.name] = p.price || "0";
       }
 
-      let availableMeals: Array<{ name: string; popularity: number; price?: string }>;
-      let availableExtras: Array<{ name: string; popularity: number; price?: string }>;
-
-      const SKIP_PAT = /subscription|add\s+delivery|gift\s*card|voucher/i;
+      const SKIP_PAT = /subscription|add\s+delivery/i;
       const OAT_PAT = /oat/i;
       const SOUP_PAT = /soup/i;
-      const SWEET_PAT = /sweet\s*treat|brownie|cookie|cake|dessert/i;
-      const UPGRADE_PAT = /premium.*upgrade|upgrade.*premium|protein.*upgrade|upgrade.*protein/i;
       const MEAL_PRICE = 7.75;
       const SPECIAL_PRICE = 9.75;
 
+      const productPool = weekProducts.length > 0 ? weekProducts : allProducts.filter(p => !SKIP_PAT.test(p.name));
+
+      // Helper to check product type — specials are identified by price (£9.75), not name
       const isSpecial = (p: { name: string; price?: string | null }) =>
-        Math.abs(parseFloat(p.price || "0") - SPECIAL_PRICE) < 0.01 &&
-        !OAT_PAT.test(p.name) && !SOUP_PAT.test(p.name);
+        Math.abs(parseFloat(p.price || "0") - SPECIAL_PRICE) < 0.01 && !OAT_PAT.test(p.name) && !SOUP_PAT.test(p.name);
+      const isOatOrSoup = (name: string) => OAT_PAT.test(name) || SOUP_PAT.test(name);
       const isRegularMeal = (p: { name: string; price?: string | null }) =>
         Math.abs(parseFloat(p.price || "0") - MEAL_PRICE) < 0.01;
-      const isNamedUpgrade = (name: string) =>
-        OAT_PAT.test(name) || SOUP_PAT.test(name) || SWEET_PAT.test(name) || UPGRADE_PAT.test(name);
-
-      // Keep the customer-facing selector deliberately small. Week products are
-      // authoritative; outside that category we only admit recognisable add-ons.
-      // Collapse historical duplicates/variations by a normalised display name.
-      const normaliseOptionName = (name: string) =>
-        name
-          .toLowerCase()
-          .replace(/\s*[-–—]\s*(week\s*\d+|w\d+)\s*$/i, "")
-          .replace(/\s+/g, " ")
-          .trim();
-
-      const globalUpgrades = allProducts.filter(p =>
-        !SKIP_PAT.test(p.name) &&
-        isNamedUpgrade(p.name) &&
-        parseFloat(p.price || "0") > 0
-      );
-
-      const byName = new Map<string, (typeof allProducts)[number]>();
-
-      // Current-week version always wins where the same option exists historically.
-      for (const product of globalUpgrades) {
-        const key = normaliseOptionName(product.name);
-        if (!byName.has(key)) byName.set(key, product);
-      }
-      for (const product of weekProducts) {
-        if (SKIP_PAT.test(product.name)) continue;
-        byName.set(normaliseOptionName(product.name), product);
-      }
-
-      const extrasPool = [...byName.values()];
 
       const isDual = (invite as any).isDual === true;
       const isTuesday = invite.isTuesday === true;
 
-      // Meals are STRICTLY the invite's Week N menu. Premium Week N meals remain
-      // selectable and count towards meal quota; historical products never leak in.
-      const satAvailableMeals = weekProducts
+      // --- Saturday product lists ---
+      // Meals: regular £7.75 meals + specials (specials count toward meal quota; price shown is actual)
+      const satAvailableMeals = productPool
         .filter(p => !SKIP_PAT.test(p.name))
         .filter(p => isRegularMeal(p) || isSpecial(p))
         .sort((a, b) => a.name.localeCompare(b.name))
         .map(p => ({ name: p.name, popularity: 0, price: p.price || "7.75" }));
-
-      // Add-ons are the current week's non-meal products plus a deliberately small
-      // global set of named upgrades such as oats/soup/sweets/premium upgrades.
-      const satAvailableExtras = extrasPool
-        .filter(p => isNamedUpgrade(p.name))
-        .filter(p => !isRegularMeal(p) && !isSpecial(p))
-        .filter(p => parseFloat(p.price || "0") > 0)
+      // Extras: oats + soups (always add-ons, never count as meals) + any other non-standard non-special items
+      const satAvailableExtras = productPool
+        .filter(p => !SKIP_PAT.test(p.name) && !isSpecial(p))
+        .filter(p => { const pr = parseFloat(p.price || "0"); return pr > 0 && Math.abs(pr - MEAL_PRICE) >= 0.01; })
         .sort((a, b) => a.name.localeCompare(b.name))
         .map(p => ({ name: p.name, popularity: 0, price: p.price || "0" }));
 
-      // Tuesday keeps the standard Week N meals only, plus the explicit upgrade pool.
-      const tueAvailableMeals = weekProducts
-        .filter(p => !SKIP_PAT.test(p.name) && !isSpecial(p))
+      // --- Tuesday product lists ---
+      // Meals: regular £7.75 only (no specials on Tuesdays)
+      const tueAvailableMeals = productPool
+        .filter(p => !SKIP_PAT.test(p.name) && !isSpecial(p) && !isOatOrSoup(p.name))
         .filter(p => isRegularMeal(p))
         .sort((a, b) => a.name.localeCompare(b.name))
         .map(p => ({ name: p.name, popularity: 0, price: p.price || "7.75" }));
-
-      const tueAvailableExtras = extrasPool
-        .filter(p => isNamedUpgrade(p.name))
-        .filter(p => parseFloat(p.price || "0") > 0)
+      // Extras: oats and soups ONLY
+      const tueAvailableExtras = productPool
+        .filter(p => !SKIP_PAT.test(p.name) && isOatOrSoup(p.name))
+        .filter(p => { const pr = parseFloat(p.price || "0"); return pr > 0 && Math.abs(pr - MEAL_PRICE) >= 0.01; })
         .sort((a, b) => a.name.localeCompare(b.name))
         .map(p => ({ name: p.name, popularity: 0, price: p.price || "0" }));
 
@@ -3812,8 +3682,6 @@ export async function registerRoutes(
         isDual,
         weekNumber,
         categoryName,
-        includedOats: (invite as any).includedOats || 0,
-        includedSweetTreats: (invite as any).includedSweetTreats || 0,
         availableMeals,
         availableExtras,
         satAvailableMeals,
@@ -4225,75 +4093,47 @@ export async function registerRoutes(
       // Anchor product pool to the invite's own week, not today
       const inviteWeekDate = invite.weekFrom ? new Date(invite.weekFrom) : undefined;
       const { weekNumber, categoryName } = await getCurrentWeekInfo(inviteWeekDate);
-      let allProducts = await storage.getProducts();
-      let weekProducts = allProducts.filter(
-        p => (p.category || "").trim().toLowerCase() === categoryName.toLowerCase()
-      );
+      const allProducts = await storage.getProducts();
+      const weekProducts = allProducts.filter(p => p.category === categoryName);
 
-      if (weekProducts.length === 0) {
-        try {
-          await runProductSync();
-          allProducts = await storage.getProducts();
-          weekProducts = allProducts.filter(
-            p => (p.category || "").trim().toLowerCase() === categoryName.toLowerCase()
-          );
-        } catch (syncError: any) {
-          log(`Admin subscription menu refresh failed: ${syncError?.message || syncError}`, "sync");
-        }
-      }
+      let availableMeals: Array<{ name: string; popularity: number }>;
+      let availableExtras: Array<{ name: string; popularity: number }>;
 
-      let availableMeals: Array<{ name: string; popularity: number; price?: string }>;
-      let availableExtras: Array<{ name: string; popularity: number; price?: string }>;
-
-      const SKIP_PAT = /subscription|add\s+delivery|gift\s*card|voucher/i;
+      const SKIP_PAT = /subscription|add\s+delivery/i;
       const OAT_PAT_SD = /oat/i;
       const SOUP_PAT_SD = /soup/i;
-      const SWEET_PAT_SD = /sweet\s*treat|brownie|cookie|cake|dessert/i;
-      const UPGRADE_PAT_SD = /premium.*upgrade|upgrade.*premium|protein.*upgrade|upgrade.*protein/i;
       const SPECIAL_PRICE_SD = 9.75;
       const STANDARD_PRICE_SD = 7.75;
-
       const isSpecialSD = (p: { name: string; price?: string | null }) => {
         const pr = parseFloat(p.price || "0");
         return Math.abs(pr - SPECIAL_PRICE_SD) < 0.01 && !OAT_PAT_SD.test(p.name) && !SOUP_PAT_SD.test(p.name);
       };
       const isRegularMealSD = (p: { name: string; price?: string | null }) =>
         Math.abs(parseFloat(p.price || "0") - STANDARD_PRICE_SD) < 0.01;
-      const isNamedUpgradeSD = (name: string) =>
-        OAT_PAT_SD.test(name) || SOUP_PAT_SD.test(name) || SWEET_PAT_SD.test(name) || UPGRADE_PAT_SD.test(name);
 
-      const globalUpgrades = allProducts.filter(p =>
-        !SKIP_PAT.test(p.name) &&
-        isNamedUpgradeSD(p.name) &&
-        parseFloat(p.price || "0") > 0
-      );
-      const extraByName = new Map<string, (typeof allProducts)[number]>();
-      for (const product of [...weekProducts, ...globalUpgrades]) {
-        if (!SKIP_PAT.test(product.name)) extraByName.set(product.name.toLowerCase(), product);
-      }
-      const extrasPool = [...extraByName.values()];
+      const productPool = weekProducts.length > 0 ? weekProducts : allProducts.filter(p => !SKIP_PAT.test(p.name));
       const isTuesdayInvite = !!(invite as any).isTuesday;
 
       if (isTuesdayInvite) {
-        availableMeals = weekProducts
-          .filter(p => !SKIP_PAT.test(p.name) && isRegularMealSD(p))
+        // Tuesday: regular meals only, no specials; extras = oats + soups
+        availableMeals = productPool
+          .filter(p => !SKIP_PAT.test(p.name) && isRegularMealSD(p) && !OAT_PAT_SD.test(p.name) && !SOUP_PAT_SD.test(p.name))
           .sort((a, b) => a.name.localeCompare(b.name))
-          .map(p => ({ name: p.name, popularity: 0, price: p.price || "7.75" }));
-        availableExtras = extrasPool
-          .filter(p => isNamedUpgradeSD(p.name))
-          .filter(p => parseFloat(p.price || "0") > 0)
+          .map(p => ({ name: p.name, popularity: 0 }));
+        availableExtras = productPool
+          .filter(p => !SKIP_PAT.test(p.name) && (OAT_PAT_SD.test(p.name) || SOUP_PAT_SD.test(p.name)))
           .sort((a, b) => a.name.localeCompare(b.name))
-          .map(p => ({ name: p.name, popularity: 0, price: p.price || "0" }));
+          .map(p => ({ name: p.name, popularity: 0 }));
       } else {
-        availableMeals = weekProducts
+        // Saturday: regular meals + specials (£9.75) count as meals; extras = oats/soups/other non-meal
+        availableMeals = productPool
           .filter(p => !SKIP_PAT.test(p.name) && (isRegularMealSD(p) || isSpecialSD(p)))
           .sort((a, b) => a.name.localeCompare(b.name))
-          .map(p => ({ name: p.name, popularity: 0, price: p.price || "7.75" }));
-        availableExtras = extrasPool
-          .filter(p => !isRegularMealSD(p) && !isSpecialSD(p))
-          .filter(p => parseFloat(p.price || "0") > 0)
+          .map(p => ({ name: p.name, popularity: 0 }));
+        availableExtras = productPool
+          .filter(p => !SKIP_PAT.test(p.name) && !isRegularMealSD(p) && !isSpecialSD(p) && parseFloat(p.price || "0") > 0)
           .sort((a, b) => a.name.localeCompare(b.name))
-          .map(p => ({ name: p.name, popularity: 0, price: p.price || "0" }));
+          .map(p => ({ name: p.name, popularity: 0 }));
       }
 
       const existingSelections = await storage.getSubscriptionSelections(invite.id);
