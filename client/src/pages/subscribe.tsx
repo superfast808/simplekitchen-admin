@@ -25,8 +25,6 @@ type InviteData = {
   isDual?: boolean;
   weekNumber?: number;
   categoryName?: string;
-  includedOats?: number;
-  includedSweetTreats?: number;
   availableMeals: AvailableMeal[];
   availableExtras: AvailableMeal[];
   // Day-specific lists for dual (and single-day) invites
@@ -512,18 +510,6 @@ export default function SubscribePage({ params }: { params: { token: string } })
           </div>
 
           <div className="space-y-6">
-            {((data.includedOats || 0) > 0 || (data.includedSweetTreats || 0) > 0) && (
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 dark:bg-emerald-950/20 px-4 py-3 text-sm">
-                <p className="font-medium text-emerald-800 dark:text-emerald-300">Included with your subscription</p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {(data.includedOats || 0) > 0 ? `${data.includedOats} oat${data.includedOats === 1 ? "" : "s"}` : ""}
-                  {(data.includedOats || 0) > 0 && (data.includedSweetTreats || 0) > 0 ? " · " : ""}
-                  {(data.includedSweetTreats || 0) > 0 ? `${data.includedSweetTreats} sweet treat${data.includedSweetTreats === 1 ? "" : "s"}` : ""}
-                  {" "}will be deducted before any add-on payment is calculated.
-                </p>
-              </div>
-            )}
-
             <MealSelectorPanel
               label="Saturday Delivery"
               colorScheme="emerald"
@@ -609,18 +595,6 @@ export default function SubscribePage({ params }: { params: { token: string } })
           </p>
         </div>
 
-        {((data.includedOats || 0) > 0 || (data.includedSweetTreats || 0) > 0) && (
-          <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50/70 dark:bg-emerald-950/20 px-4 py-3 text-sm">
-            <p className="font-medium text-emerald-800 dark:text-emerald-300">Included with your subscription</p>
-            <p className="text-xs text-muted-foreground mt-1">
-              {(data.includedOats || 0) > 0 ? `${data.includedOats} oat${data.includedOats === 1 ? "" : "s"}` : ""}
-              {(data.includedOats || 0) > 0 && (data.includedSweetTreats || 0) > 0 ? " · " : ""}
-              {(data.includedSweetTreats || 0) > 0 ? `${data.includedSweetTreats} sweet treat${data.includedSweetTreats === 1 ? "" : "s"}` : ""}
-              {" "}will be deducted before any add-on payment is calculated.
-            </p>
-          </div>
-        )}
-
         <div className="mb-4 flex items-center justify-center gap-2">
           <Badge
             className={`text-sm px-3 py-1 ${remaining === 0 ? "bg-emerald-500 text-white" : "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300"}`}
@@ -641,17 +615,7 @@ export default function SubscribePage({ params }: { params: { token: string } })
                 <CardContent className="p-4 flex items-center justify-between gap-3">
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-sm truncate">{meal.name}</p>
-                    {(() => {
-                      const mealPrice = meal.price ? parseFloat(meal.price) : 7.75;
-                      const premium = mealPrice > 7.75;
-                      return premium ? (
-                        <p className="text-xs text-amber-600 dark:text-amber-400 font-medium">
-                          £{mealPrice.toFixed(2)} <span className="text-muted-foreground font-normal">(+£{(mealPrice - 7.75).toFixed(2)} premium)</span>
-                        </p>
-                      ) : (
-                        <p className="text-xs text-muted-foreground">£7.75</p>
-                      );
-                    })()}
+                    <p className="text-xs text-muted-foreground">£7.75</p>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     {isSelected ? (
