@@ -2662,15 +2662,27 @@ export async function registerRoutes(
 
       // OSRM's public demo router uses OpenStreetMap's road graph, so the route
       // follows actual drivable roads instead of straight-line point hopping.
-      // Keep the depot as the fixed first coordinate and let Trip optimise the rest.
+      // For a non-round-trip OSRM requires a fixed destination. Use the stop
+      // furthest from the depot as the end point, which is a good delivery-route
+      // heuristic and avoids finishing by doubling back across the service area.
+      const furthestStop = [...stops].sort((a: any, b: any) =>
+        haversineKm(DELIVERY_DEPOT.lat, DELIVERY_DEPOT.lng, b.lat, b.lng) -
+        haversineKm(DELIVERY_DEPOT.lat, DELIVERY_DEPOT.lng, a.lat, a.lng)
+      )[0];
+
+      const orderedInputStops = [
+        ...stops.filter((stop: any) => stop.id !== furthestStop.id),
+        furthestStop,
+      ];
+
       const coordinates = [
         `${DELIVERY_DEPOT.lng},${DELIVERY_DEPOT.lat}`,
-        ...stops.map((stop: any) => `${stop.lng},${stop.lat}`),
+        ...orderedInputStops.map((stop: any) => `${stop.lng},${stop.lat}`),
       ].join(";");
 
       const url =
         `https://router.project-osrm.org/trip/v1/driving/${coordinates}` +
-        "?source=first&roundtrip=false&overview=full&geometries=geojson&steps=false";
+        "?source=first&destination=last&roundtrip=false&overview=full&geometries=geojson&steps=false";
 
       const response = await fetch(url, {
         headers: { "User-Agent": "SimpleKitchenPrepDeliveryRoutes/1.0" },
@@ -2688,7 +2700,7 @@ export async function registerRoutes(
         throw new Error("Road router returned no usable trip");
       }
 
-      const orderedStops = stops
+      const orderedStops = orderedInputStops
         .map((stop: any, inputIndex: number) => {
           const waypoint = waypoints[inputIndex + 1];
           return {
