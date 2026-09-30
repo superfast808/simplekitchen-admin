@@ -3089,11 +3089,11 @@ export async function registerRoutes(
         }
         const summaryText = Object.entries(itemSummary).map(([n, q]) => `${q} x ${n}`).join(", ");
         const mealCount = order.items.reduce((sum, item) =>
-          sum + (/add\s+delivery|meal\s+subscription|oat|porridge|overnight|soup/i.test(item.productName) ? 0 : item.quantity), 0);
+          sum + (/add\s+delivery|meal\s+subscription|oat|porridge|overnight|gold\s*bar|soup/i.test(item.productName) ? 0 : item.quantity), 0);
         const oatCount = order.items.reduce((sum, item) =>
-          sum + (/oat|porridge|overnight/i.test(item.productName) ? item.quantity : 0), 0);
+          sum + (/oat|porridge|overnight|gold\s*bar/i.test(item.productName) ? item.quantity : 0), 0);
         const totalsText = [
-          `Meals ${mealCount} + Oats ${oatCount} = ${mealCount + oatCount}`,
+          `Meals ${mealCount} + Oats / Gold Bars ${oatCount} = ${mealCount + oatCount}`,
           ...(order.wooPaidTotal !== null ? [`Paid: £${Number(order.wooPaidTotal).toFixed(2)}`] : []),
         ].join("  |  ");
         const noteText = order.notes?.trim() || "";
