@@ -27,7 +27,7 @@ function itemSortPriority(name: string): number {
   const n = name.toLowerCase();
   if (/subscription/i.test(n)) return 30;
   if (/soup/i.test(n) || SOUP_PRODUCTS.includes(n.trim())) return 20;
-  if (/oat/i.test(n)) return 10;
+  if (/oat|porridge|overnight|gold\s*bar/i.test(n)) return 10;
   return 0;
 }
 function sortItems<T extends { productName: string }>(items: T[]): T[] {
@@ -92,7 +92,7 @@ export default function SaturdayOrdersPage() {
     return { orders: websiteOrders.length, delivery, collection, revenue, items };
   }, [websiteOrders]);
 
-  const OATS_RE = /oat|porridge|overnight/i;
+  const OATS_RE = /oat|porridge|overnight|gold\s*bar/i;
   const mealOatSummary = useMemo(() => {
     let meals = 0, oats = 0;
     const countItems = (items: { productName: string; quantity: number }[]) => {
@@ -183,7 +183,7 @@ export default function SaturdayOrdersPage() {
             )}
             {(mealOatSummary.meals > 0 || mealOatSummary.oats > 0) && (
               <Badge variant="outline" className="text-sm px-2.5 py-0.5 font-medium" data-testid="badge-meal-summary">
-                {mealOatSummary.meals} meal{mealOatSummary.meals !== 1 ? "s" : ""}{mealOatSummary.oats > 0 ? ` + ${mealOatSummary.oats} oats` : ""}
+                {mealOatSummary.meals} meal{mealOatSummary.meals !== 1 ? "s" : ""}{mealOatSummary.oats > 0 ? ` + ${mealOatSummary.oats} oats / gold bars` : ""}
               </Badge>
             )}
           </div>
@@ -431,7 +431,7 @@ export default function SaturdayOrdersPage() {
                                 const oats = order.items.filter(i => OATS_RE.test(i.productName)).reduce((s, i) => s + i.quantity, 0);
                                 return (<>
                                   {meals > 0 && <div className="font-semibold">{meals} meal{meals !== 1 ? "s" : ""}</div>}
-                                  {oats > 0 && <div className="text-xs text-muted-foreground">{oats} oats</div>}
+                                  {oats > 0 && <div className="text-xs text-muted-foreground">{oats} oats / gold bars</div>}
                                 </>);
                               })()}
                             </div>
@@ -594,7 +594,7 @@ export default function SaturdayOrdersPage() {
                           <TableCell className="text-right tabular-nums" data-testid={`text-website-qty-${order.id}`}>
                             <div className="leading-tight">
                               {orderMeals > 0 && <div className="font-semibold">{orderMeals} meal{orderMeals !== 1 ? "s" : ""}</div>}
-                              {orderOats > 0 && <div className="text-xs text-muted-foreground">{orderOats} oats</div>}
+                              {orderOats > 0 && <div className="text-xs text-muted-foreground">{orderOats} oats / gold bars</div>}
                             </div>
                           </TableCell>
                           <TableCell className="text-right font-medium" data-testid={`text-website-total-${order.id}`}>
