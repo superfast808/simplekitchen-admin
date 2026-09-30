@@ -385,6 +385,18 @@ function getWeekRange(offset = 0): { from: Date; to: Date } {
   return { from, to };
 }
 
+/**
+ * Subscription invites use a deliberately mid-day Saturday anchor rather than
+ * a midnight boundary. The database columns are timestamp-without-time-zone,
+ * and midnight London can otherwise round-trip as 23:00 Friday during BST.
+ * 14:00 is safely inside the Saturday→Thursday week window in both GMT and BST.
+ */
+function getSubscriptionWeekFrom(weekFrom: Date): Date {
+  const safe = new Date(weekFrom);
+  safe.setTime(safe.getTime() + 14 * 60 * 60 * 1000);
+  return safe;
+}
+
 // Auto-send window: Saturday through Wednesday 20:00 UK time
 function isWithinAutoSendWindow(): boolean {
   const now = new Date();
@@ -485,7 +497,7 @@ async function autoSendSubscriptionInvites(): Promise<void> {
           token,
           subscriptionQuantity: slot.qty,
           status: "pending",
-          weekFrom: week.from,
+          weekFrom: getSubscriptionWeekFrom(week.from),
           weekTo: week.to,
           deliveryAddress: inviteAddress,
           fulfillmentType: inviteFulfillment,
@@ -577,7 +589,7 @@ async function runSubscriberSync(): Promise<void> {
           token,
           subscriptionQuantity: sub.quantity,
           status: "pending",
-          weekFrom: week.from,
+          weekFrom: getSubscriptionWeekFrom(week.from),
           weekTo: week.to,
           deliveryAddress: inviteAddress,
           fulfillmentType: inviteFulfillment,
@@ -3186,7 +3198,7 @@ export async function registerRoutes(
             token,
             subscriptionQuantity: slot.qty,
             status: "pending",
-            weekFrom: week.from,
+            weekFrom: getSubscriptionWeekFrom(week.from),
             weekTo: week.to,
             deliveryAddress: inviteAddress,
             fulfillmentType: inviteFulfillment,
@@ -3562,7 +3574,7 @@ export async function registerRoutes(
             token,
             subscriptionQuantity: slot.qty,
             status: "pending",
-            weekFrom: week.from,
+            weekFrom: getSubscriptionWeekFrom(week.from),
             weekTo: week.to,
             deliveryAddress: inviteAddress,
             fulfillmentType: inviteFulfillment,
@@ -3668,16 +3680,12 @@ export async function registerRoutes(
       // recognisable add-ons but must never become the meal menu.
       const namedUpgrade = (name: string) =>
         OAT_PAT.test(name) || SOUP_PAT.test(name) || SWEET_PAT.test(name) || UPGRADE_PAT.test(name);
-      const extrasByName = new Map<string, (typeof allProducts)[number]>();
+      const extrasByName = new Map<string, (typeof weekProducts)[number]>();
       const normaliseName = (name: string) => name.toLowerCase().replace(/\s*[-–—]\s*(week\s*\d+|w\d+)\s*$/i, "").replace(/\s+/g, " ").trim();
-      for (const p of allProducts) {
-        if (!SKIP_PAT.test(p.name) && namedUpgrade(p.name) && parseFloat(p.price || "0") > 0) {
-          const key = normaliseName(p.name);
-          if (!extrasByName.has(key)) extrasByName.set(key, p);
-        }
-      }
       for (const p of weekProducts) {
-        if (!SKIP_PAT.test(p.name)) extrasByName.set(normaliseName(p.name), p);
+        if (!SKIP_PAT.test(p.name) && namedUpgrade(p.name) && parseFloat(p.price || "0") > 0) {
+          extrasByName.set(normaliseName(p.name), p);
+        }
       }
       const extrasPool = Array.from(extrasByName.values());
 
@@ -4094,16 +4102,12 @@ export async function registerRoutes(
 
       const isNamedUpgradeSD = (name: string) =>
         /oat|soup|sweet\s*treat|brownie|cookie|cake|dessert|premium.*upgrade|upgrade.*premium|protein.*upgrade|upgrade.*protein/i.test(name);
-      const extrasByName = new Map<string, (typeof allProducts)[number]>();
+      const extrasByName = new Map<string, (typeof weekProducts)[number]>();
       const normaliseName = (name: string) => name.toLowerCase().replace(/\s*[-–—]\s*(week\s*\d+|w\d+)\s*$/i, "").replace(/\s+/g, " ").trim();
-      for (const p of allProducts) {
-        if (!SKIP_PAT.test(p.name) && isNamedUpgradeSD(p.name) && parseFloat(p.price || "0") > 0) {
-          const key = normaliseName(p.name);
-          if (!extrasByName.has(key)) extrasByName.set(key, p);
-        }
-      }
       for (const p of weekProducts) {
-        if (!SKIP_PAT.test(p.name)) extrasByName.set(normaliseName(p.name), p);
+        if (!SKIP_PAT.test(p.name) && isNamedUpgradeSD(p.name) && parseFloat(p.price || "0") > 0) {
+          extrasByName.set(normaliseName(p.name), p);
+        }
       }
       const extrasPool = Array.from(extrasByName.values());
       const isTuesdayInvite = !!(invite as any).isTuesday;
