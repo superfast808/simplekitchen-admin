@@ -3360,10 +3360,83 @@ export async function registerRoutes(
     res.json({ received: true });
   });
 
+  async function reconcileSubscribersFromCurrentSubscriptionOrders(): Promise<{ created: number; checked: number }> {
+    const existingSubscribers = await storage.getSubscribers();
+    const existingKeys = new Set(
+      existingSubscribers.map(sub =>
+        `${sub.customerEmail.trim().toLowerCase()}|${sub.deliveryDay}`
+      )
+    );
+
+    // The current order window is the best source of truth for who is actively
+    // subscribing now. This avoids resurrecting old/cancelled historical customers.
+    const week = getWeekRange(0);
+    const ordersList = await storage.getOrders(week.from, week.to);
+    const ordersWithItems = await Promise.all(
+      ordersList.map(async order => ({
+        ...order,
+        items: await storage.getOrderItems(order.id),
+      }))
+    );
+
+    let created = 0;
+    let checked = 0;
+
+    for (const order of ordersWithItems) {
+      if (!order.customerEmail) continue;
+      if (!order.items.some(item => isSubscriptionProductName(item.productName))) continue;
+
+      const slots = getSubscriptionSlots(order);
+      for (const slot of slots) {
+        checked++;
+
+        const deliveryDay = slot.isDual ? "dual" : (slot.isTuesday ? "tue" : "sat");
+        const email = order.customerEmail.trim().toLowerCase();
+        const key = `${email}|${deliveryDay}`;
+        if (existingKeys.has(key)) continue;
+
+        let address = order.deliveryAddress || null;
+        if (!address) {
+          const previous = await storage.getCustomerDeliveryAddress(email, order.customerName);
+          address = previous?.deliveryAddress || null;
+        }
+
+        await storage.createSubscriber({
+          customerName: order.customerName,
+          customerEmail: email,
+          deliveryDay,
+          quantity: slot.qty,
+          paymentIntervalWeeks: slot.isDual ? 2 : 1,
+          active: true,
+          lastPaymentSentAt: null,
+          nextPaymentDueAt: null,
+          deliveryAddress: address,
+          deliveryFeePence: 0,
+          includedOats: 0,
+          includedSweetTreats: 0,
+          notes: "Auto-added from current subscription order",
+        } as any);
+
+        existingKeys.add(key);
+        created++;
+      }
+    }
+
+    return { created, checked };
+  }
+
   // ─── Subscribers CRUD ────────────────────────────────────────────────────
   app.get("/api/subscribers", async (req, res) => {
     if (!req.session?.userId) return res.status(401).json({ message: "Not authenticated" });
     try {
+      // Heal gaps left by older imports: any customer with a subscription product
+      // in the current order window should also exist in the Subscribers register.
+      // Existing records are never overwritten here.
+      const reconciliation = await reconcileSubscribersFromCurrentSubscriptionOrders();
+      if (reconciliation.created > 0) {
+        log(`Subscribers: recovered ${reconciliation.created} missing current subscriber(s)`, "sync");
+      }
+
       const activeOnly = req.query.activeOnly === "true";
       const subs = await storage.getSubscribers(activeOnly);
       res.json(subs);
@@ -3660,6 +3733,16 @@ export async function registerRoutes(
       const isNamedUpgrade = (name: string) =>
         OAT_PAT.test(name) || SOUP_PAT.test(name) || SWEET_PAT.test(name) || UPGRADE_PAT.test(name);
 
+      // Keep the customer-facing selector deliberately small. Week products are
+      // authoritative; outside that category we only admit recognisable add-ons.
+      // Collapse historical duplicates/variations by a normalised display name.
+      const normaliseOptionName = (name: string) =>
+        name
+          .toLowerCase()
+          .replace(/\s*[-–—]\s*(week\s*\d+|w\d+)\s*$/i, "")
+          .replace(/\s+/g, " ")
+          .trim();
+
       const globalUpgrades = allProducts.filter(p =>
         !SKIP_PAT.test(p.name) &&
         isNamedUpgrade(p.name) &&
@@ -3667,9 +3750,17 @@ export async function registerRoutes(
       );
 
       const byName = new Map<string, (typeof allProducts)[number]>();
-      for (const product of [...weekProducts, ...globalUpgrades]) {
-        if (!SKIP_PAT.test(product.name)) byName.set(product.name.toLowerCase(), product);
+
+      // Current-week version always wins where the same option exists historically.
+      for (const product of globalUpgrades) {
+        const key = normaliseOptionName(product.name);
+        if (!byName.has(key)) byName.set(key, product);
       }
+      for (const product of weekProducts) {
+        if (SKIP_PAT.test(product.name)) continue;
+        byName.set(normaliseOptionName(product.name), product);
+      }
+
       const extrasPool = [...byName.values()];
 
       const isDual = (invite as any).isDual === true;
@@ -3686,6 +3777,7 @@ export async function registerRoutes(
       // Add-ons are the current week's non-meal products plus a deliberately small
       // global set of named upgrades such as oats/soup/sweets/premium upgrades.
       const satAvailableExtras = extrasPool
+        .filter(p => isNamedUpgrade(p.name))
         .filter(p => !isRegularMeal(p) && !isSpecial(p))
         .filter(p => parseFloat(p.price || "0") > 0)
         .sort((a, b) => a.name.localeCompare(b.name))
