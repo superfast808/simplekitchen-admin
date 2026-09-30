@@ -164,8 +164,16 @@ export function DeliveryRoutesContent({ tuesday }: { tuesday: boolean }) {
   }, [deliveryStops.map(stop => `${stop.id}:${stop.lat}:${stop.lng}`).join("|")]);
 
   const fallbackRouteStops = optimizeRouteFallback(deliveryStops);
-  const routeStops = routePlan?.orderedStopIds?.length
-    ? routePlan.orderedStopIds
+  const plannedIds = routePlan?.orderedStopIds || [];
+  const plannedIdSet = new Set(plannedIds);
+  const routePlanIsComplete =
+    plannedIds.length === deliveryStops.length &&
+    deliveryStops.every(stop => plannedIdSet.has(stop.id));
+
+  // Never allow a partial OSRM response to hide customers. If even one stop is
+  // missing, fall back to the local optimiser for the complete set.
+  const routeStops = routePlanIsComplete
+    ? plannedIds
         .map(id => deliveryStops.find(stop => stop.id === id))
         .filter((stop): stop is DeliveryAddress => Boolean(stop))
     : fallbackRouteStops;
@@ -230,7 +238,7 @@ export function DeliveryRoutesContent({ tuesday }: { tuesday: boolean }) {
 
       if (routeStops.length > 0) {
         const routeCoords: [number, number][] =
-          routePlan?.geometry?.length
+          routePlanIsComplete && routePlan?.geometry?.length
             ? routePlan.geometry
             : [
                 [DEPOT.lat, DEPOT.lng],
@@ -462,7 +470,7 @@ export function DeliveryRoutesContent({ tuesday }: { tuesday: boolean }) {
                     <Badge variant="outline">{formatLegTime(routePlan!.durationSeconds)}</Badge>
                   )}
                   <Badge variant="outline">
-                    {routePlan?.source === "osrm" ? "Road-network route" : "Local fallback route"}
+                    {routePlan?.source === "osrm" && routePlanIsComplete ? "Road-network route" : "Complete fallback route"}
                   </Badge>
                   {unresolvedCount > 0 && (
                     <Badge variant="outline" className="border-amber-300 text-amber-700">
@@ -509,7 +517,7 @@ export function DeliveryRoutesContent({ tuesday }: { tuesday: boolean }) {
                         <div className="min-w-0 flex-1">
                           <p className="text-sm font-medium truncate" data-testid={`text-stop-name-${addr.id}`}>{addr.customerName}</p>
                           <p className="text-xs text-muted-foreground truncate" data-testid={`text-stop-address-${addr.id}`}>{addr.address}</p>
-                          {routePlan?.legs?.[idx] && (
+                          {routePlanIsComplete && routePlan?.legs?.[idx] && (
                             <p className="text-[10px] text-muted-foreground/80 mt-0.5">
                               from previous: {formatLegDistance(routePlan.legs[idx].distanceMeters)} · {formatLegTime(routePlan.legs[idx].durationSeconds)}
                             </p>
