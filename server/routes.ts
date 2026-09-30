@@ -2262,6 +2262,16 @@ export async function registerRoutes(
         }
       }
 
+      // Reporting-only rename: roll the historical Honey BBQ Mac quantity into
+      // the current Beef Mac product so the ingredient recipe uses the full total.
+      const oldHoneyBbqMacKey = "slow cooked honey bbq mac";
+      const beefHoneyBbqMacKey = "slow cooked honey bbq beef mac";
+      if (quantsByName2[oldHoneyBbqMacKey]) {
+        quantsByName2[beefHoneyBbqMacKey] =
+          (quantsByName2[beefHoneyBbqMacKey] || 0) + quantsByName2[oldHoneyBbqMacKey];
+        delete quantsByName2[oldHoneyBbqMacKey];
+      }
+
       // Deduplicate products by name — keep the first occurrence per name
       const seenProductNames = new Set<string>();
       const uniqueProducts = allProducts.filter(p => {
