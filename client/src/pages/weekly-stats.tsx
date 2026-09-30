@@ -71,7 +71,7 @@ function filterItems(
 }
 
 const SUB_RE = /meal\s+subscription/i;
-const NO_PACKAGING_RE = /oat|porridge|overnight|soup/i;
+const NO_PACKAGING_RE = /oat|porridge|overnight|gold\s*bar|soup/i;
 
 function computeGroup(
   orders: OrderWithItems[],
@@ -92,7 +92,7 @@ function computeGroup(
 
   let mealsSold = 0, packagableMeals = 0, numOats = 0, numSoups = 0, revenue = 0, deliveryStops = 0;
   const mealCounts: Record<string, number> = {};
-  const OAT_RE = /oat|porridge|overnight/i;
+  const OAT_RE = /oat|porridge|overnight|gold\s*bar/i;
   const SOUP_RE = /soup/i;
   for (const order of orders) {
     const items = filterItems(order.items, hideAddons, hideAddDelivery, hideSubscriptionBase);
@@ -128,8 +128,8 @@ function computeGroup(
     }
   }
   const orderCount = orders.length;
-  // numSnacks = small-priced extras that aren't oats/soups/main meals
-  // Since we track oats+soups separately, packagableMeals now = only main meals + snacks combined.
+  // numSnacks = small-priced extras that aren't oats/gold bars/soups/main meals
+  // Since we track oats/gold bars + soups separately, packagableMeals = only main meals + snacks combined.
   // Separate snacks: items in packagableMeals group priced ≤ £4.50
   let numMeals = 0, numSnacks = 0;
   for (const order of orders) {
@@ -339,9 +339,9 @@ export default function WeeklyStatsPage() {
                   <p className="text-[10px] text-muted-foreground">Main meal boxes</p>
                 </div>
                 <div className="flex flex-col gap-1">
-                  <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Oats</span>
+                  <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Oats / Gold Bars</span>
                   <p className="text-2xl font-bold tabular-nums" data-testid="stat-breakdown-oats">{computed.all.numOats}</p>
-                  <p className="text-[10px] text-muted-foreground">Overnight oats / porridge</p>
+                  <p className="text-[10px] text-muted-foreground">Overnight oats / porridge / Gold Bars</p>
                 </div>
                 <div className="flex flex-col gap-1">
                   <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Soups</span>
@@ -425,7 +425,7 @@ export default function WeeklyStatsPage() {
                   <p className="text-2xl font-bold tabular-nums" data-testid="text-stat-totalPackagingCost">
                     £{totalPackagingCost.toFixed(2)}
                   </p>
-                  <p className="text-[10px] text-muted-foreground mt-0.5">{computed.all.packagableMeals} meals × £{packagingCost.toFixed(2)} (excl. oats &amp; soups)</p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">{computed.all.packagableMeals} meals × £{packagingCost.toFixed(2)} (excl. oats, gold bars &amp; soups)</p>
                 </CardContent>
               </Card>
               <Card className="col-span-2 border-l-4 border-l-rose-500 bg-rose-50 dark:bg-rose-950/30" data-testid="card-stat-revenueAfterPackaging">
