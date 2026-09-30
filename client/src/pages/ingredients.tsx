@@ -215,7 +215,13 @@ export default function IngredientsPage() {
           <DateRangeLabel from={from} to={to} />
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <ImportRecipeCostsButton />
+          <ImportRecipeCostsButton
+            preferredProducts={activeProducts.map(product => ({
+              id: product.productId,
+              name: product.productName,
+            }))}
+            preferredLabel="selected week"
+          />
           <DateFilter {...dateFilter} testIdPrefix="ing" />
         </div>
       </div>
