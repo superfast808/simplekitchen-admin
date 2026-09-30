@@ -23,6 +23,16 @@ type DeliveryAddress = {
   lng: number | null;
   fulfillment: "delivery" | "collection";
   isManual: boolean;
+  coordinateStatus?: "verified-local" | "recheck" | "missing";
+};
+
+type RoutePlan = {
+  source: "osrm" | "none";
+  orderedStopIds: number[];
+  geometry: [number, number][];
+  distanceMeters: number;
+  durationSeconds: number;
+  legs: Array<{ distanceMeters: number; durationSeconds: number }>;
 };
 
 export function DeliveryRoutesContent({ tuesday }: { tuesday: boolean }) {
@@ -35,6 +45,8 @@ export function DeliveryRoutesContent({ tuesday }: { tuesday: boolean }) {
   // geocodedAddresses starts as the raw API list and is updated in-place as coords resolve
   const [geocodedAddresses, setGeocodedAddresses] = useState<DeliveryAddress[]>([]);
   const [geocodeProgress, setGeocodeProgress] = useState<{ done: number; total: number } | null>(null);
+  const [routePlan, setRoutePlan] = useState<RoutePlan | null>(null);
+  const [routeLoading, setRouteLoading] = useState(false);
 
   const { from, to } = dateFilter;
 
@@ -89,31 +101,74 @@ export function DeliveryRoutesContent({ tuesday }: { tuesday: boolean }) {
   const collectionCustomers = geocodedAddresses.filter(a => a.fulfillment === "collection");
   const deliveryStops = deliveryCustomers.filter(a => a.lat && a.lng);
 
-  function optimizeRoute(points: DeliveryAddress[]): DeliveryAddress[] {
+  function optimizeRouteFallback(points: DeliveryAddress[]): DeliveryAddress[] {
     if (points.length === 0) return [];
     const remaining = [...points];
     const route: DeliveryAddress[] = [];
     let lastLat = DEPOT.lat;
     let lastLng = DEPOT.lng;
+
     while (remaining.length > 0) {
       let closestIdx = 0;
       let closestDist = Infinity;
       for (let i = 0; i < remaining.length; i++) {
-        const dist = Math.sqrt(
-          Math.pow((remaining[i].lat! - lastLat), 2) +
-          Math.pow((remaining[i].lng! - lastLng), 2)
-        );
-        if (dist < closestDist) { closestDist = dist; closestIdx = i; }
+        const latKm = (remaining[i].lat! - lastLat) * 111;
+        const lngKm = (remaining[i].lng! - lastLng) * 111 * Math.cos(lastLat * Math.PI / 180);
+        const dist = Math.sqrt(latKm * latKm + lngKm * lngKm);
+        if (dist < closestDist) {
+          closestDist = dist;
+          closestIdx = i;
+        }
       }
       const next = remaining.splice(closestIdx, 1)[0];
       route.push(next);
       lastLat = next.lat!;
       lastLng = next.lng!;
     }
+
     return route;
   }
 
-  const routeStops = optimizeRoute(deliveryStops);
+  // Ask the backend for a road-network route once geocoding settles. The backend
+  // uses OSRM/OpenStreetMap and keeps the depot fixed as the starting point.
+  useEffect(() => {
+    if (deliveryStops.length === 0) {
+      setRoutePlan(null);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      setRouteLoading(true);
+      try {
+        const response = await apiRequest("POST", "/api/delivery-route/optimize", {
+          stops: deliveryStops.map(stop => ({
+            id: stop.id,
+            lat: stop.lat,
+            lng: stop.lng,
+          })),
+        });
+        const plan = await response.json() as RoutePlan;
+        if (!cancelled) setRoutePlan(plan);
+      } catch {
+        if (!cancelled) setRoutePlan(null);
+      } finally {
+        if (!cancelled) setRouteLoading(false);
+      }
+    }, 650);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [deliveryStops.map(stop => `${stop.id}:${stop.lat}:${stop.lng}`).join("|")]);
+
+  const fallbackRouteStops = optimizeRouteFallback(deliveryStops);
+  const routeStops = routePlan?.orderedStopIds?.length
+    ? routePlan.orderedStopIds
+        .map(id => deliveryStops.find(stop => stop.id === id))
+        .filter((stop): stop is DeliveryAddress => Boolean(stop))
+    : fallbackRouteStops;
 
   // Update map markers/polyline whenever routeStops changes (incrementally as geocoding progresses)
   useEffect(() => {
@@ -174,12 +229,24 @@ export function DeliveryRoutesContent({ tuesday }: { tuesday: boolean }) {
       });
 
       if (routeStops.length > 0) {
-        const routeCoords: [number, number][] = [
-          [DEPOT.lat, DEPOT.lng],
-          ...routeStops.map(a => [a.lat!, a.lng!] as [number, number]),
-        ];
-        polylineRef.current = L.polyline(routeCoords, { color: "#2563eb", weight: 3, opacity: 0.7 }).addTo(map);
-        map.fitBounds(bounds, { padding: [40, 40] });
+        const routeCoords: [number, number][] =
+          routePlan?.geometry?.length
+            ? routePlan.geometry
+            : [
+                [DEPOT.lat, DEPOT.lng],
+                ...routeStops.map(a => [a.lat!, a.lng!] as [number, number]),
+              ];
+
+        polylineRef.current = L.polyline(routeCoords, {
+          color: "#2563eb",
+          weight: 4,
+          opacity: 0.82,
+          lineJoin: "round",
+          lineCap: "round",
+        }).addTo(map);
+
+        for (const coord of routeCoords) bounds.push(coord);
+        map.fitBounds(bounds, { padding: [35, 35] });
       }
     };
 
@@ -193,10 +260,28 @@ export function DeliveryRoutesContent({ tuesday }: { tuesday: boolean }) {
         polylineRef.current = null;
       }
     };
-  }, [routeStops.map(s => s.id).join(",")]);
+  }, [routeStops.map(s => s.id).join(","), routePlan?.geometry?.length ?? 0]);
 
   const title = tuesday ? "Tuesday Delivery Route" : "Saturday Delivery Route";
   const testPrefix = tuesday ? "tuesday" : "saturday";
+
+  const routeMiles = routePlan?.distanceMeters
+    ? routePlan.distanceMeters / 1609.344
+    : null;
+  const routeMinutes = routePlan?.durationSeconds
+    ? Math.round(routePlan.durationSeconds / 60)
+    : null;
+  const unresolvedCount = deliveryCustomers.filter(customer => !customer.lat || !customer.lng).length;
+
+  const formatLegDistance = (meters: number) => {
+    const miles = meters / 1609.344;
+    return miles < 0.1 ? `${Math.round(meters)} m` : `${miles.toFixed(1)} mi`;
+  };
+
+  const formatLegTime = (seconds: number) => {
+    const minutes = Math.max(1, Math.round(seconds / 60));
+    return minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+  };
   const geocodingRemaining = geocodeProgress ? geocodeProgress.total - geocodeProgress.done : 0;
   const geocodingPct = geocodeProgress
     ? Math.round((geocodeProgress.done / geocodeProgress.total) * 100)
@@ -345,7 +430,7 @@ export function DeliveryRoutesContent({ tuesday }: { tuesday: boolean }) {
                   {geocodeProgress && (
                     <div className="absolute bottom-3 left-3 bg-white/90 dark:bg-black/80 backdrop-blur-sm rounded-md px-3 py-2 shadow text-xs flex items-center gap-2 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-700">
                       <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
-                      <span>Mapping {deliveryStops.length} of {deliveryCustomers.length} stops…</span>
+                      <span>Mapping {deliveryStops.length} of {deliveryCustomers.length} stops on UK roads…</span>
                     </div>
                   )}
                 </>
@@ -357,14 +442,35 @@ export function DeliveryRoutesContent({ tuesday }: { tuesday: boolean }) {
         <div>
           <Card>
             <CardContent className="p-4">
-              <h3 className="text-sm font-medium mb-3 flex items-center gap-2">
-                <Route className="w-4 h-4" />
-                Planned Route
-                <Badge variant="secondary">{routeStops.length} stops</Badge>
-                {geocodeProgress && (
-                  <span className="text-[10px] text-muted-foreground ml-auto">updating…</span>
-                )}
-              </h3>
+              <div className="mb-3 space-y-2">
+                <h3 className="text-sm font-medium flex items-center gap-2">
+                  <Route className="w-4 h-4" />
+                  Planned Route
+                  <Badge variant="secondary">{routeStops.length} stops</Badge>
+                  {(geocodeProgress || routeLoading) && (
+                    <span className="text-[10px] text-muted-foreground ml-auto">
+                      {routeLoading ? "optimising roads…" : "updating…"}
+                    </span>
+                  )}
+                </h3>
+
+                <div className="flex flex-wrap gap-2 text-[11px]">
+                  {routeMiles !== null && (
+                    <Badge variant="outline">{routeMiles.toFixed(1)} miles</Badge>
+                  )}
+                  {routeMinutes !== null && (
+                    <Badge variant="outline">{formatLegTime(routePlan!.durationSeconds)}</Badge>
+                  )}
+                  <Badge variant="outline">
+                    {routePlan?.source === "osrm" ? "Road-network route" : "Local fallback route"}
+                  </Badge>
+                  {unresolvedCount > 0 && (
+                    <Badge variant="outline" className="border-amber-300 text-amber-700">
+                      {unresolvedCount} address{unresolvedCount !== 1 ? "es" : ""} unresolved
+                    </Badge>
+                  )}
+                </div>
+              </div>
               {isLoading ? (
                 <div className="space-y-2">
                   {[1, 2, 3].map(i => <Skeleton key={i} className="h-14 w-full" />)}
@@ -403,6 +509,11 @@ export function DeliveryRoutesContent({ tuesday }: { tuesday: boolean }) {
                         <div className="min-w-0 flex-1">
                           <p className="text-sm font-medium truncate" data-testid={`text-stop-name-${addr.id}`}>{addr.customerName}</p>
                           <p className="text-xs text-muted-foreground truncate" data-testid={`text-stop-address-${addr.id}`}>{addr.address}</p>
+                          {routePlan?.legs?.[idx] && (
+                            <p className="text-[10px] text-muted-foreground/80 mt-0.5">
+                              from previous: {formatLegDistance(routePlan.legs[idx].distanceMeters)} · {formatLegTime(routePlan.legs[idx].durationSeconds)}
+                            </p>
+                          )}
                         </div>
                       </div>
                     ))
