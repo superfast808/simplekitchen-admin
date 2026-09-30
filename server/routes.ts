@@ -3671,7 +3671,7 @@ export async function registerRoutes(
       const SKIP_PAT = /subscription|add\s+delivery|gift\s*card|voucher/i;
       const OAT_PAT = /oat/i;
       const SOUP_PAT = /soup/i;
-      const SWEET_PAT = /sweet\s*treat|brownie|cookie|cake|dessert/i;
+      const SWEET_PAT = /sweet\s*treat|brownie|cookie|cake|dessert|chocolate.*bar|bar.*chocolate/i;
       const UPGRADE_PAT = /premium.*upgrade|upgrade.*premium|protein.*upgrade|upgrade.*protein/i;
       const MEAL_PRICE = 7.75;
       const SPECIAL_PRICE = 9.75;
@@ -3798,7 +3798,7 @@ export async function registerRoutes(
       const currentWeekProducts = allProductsList.filter(p =>
         (p.category || "").trim().toLowerCase() === selectionCategory.toLowerCase());
       const isUpgradeName = (name: string) =>
-        /oat|soup|sweet\s*treat|brownie|cookie|cake|dessert|premium.*upgrade|upgrade.*premium|protein.*upgrade|upgrade.*protein/i.test(name);
+        /oat|soup|sweet\s*treat|brownie|cookie|cake|dessert|chocolate.*bar|bar.*chocolate|premium.*upgrade|upgrade.*premium|protein.*upgrade|upgrade.*protein/i.test(name);
       const validExtras = new Set(allProductsList
         .filter(p => isUpgradeName(p.name) && !/subscription|add\s+delivery|gift\s*card|voucher/i.test(p.name)
           && parseFloat(p.price || "0") > 0 && parseFloat(p.price || "0") !== 7.75
