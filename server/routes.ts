@@ -936,6 +936,28 @@ type RecipeCostRecord = {
   ingredients?: unknown;
 };
 
+type RecipeCostMatchSelection = {
+  recipeIndex: number;
+  productId: number;
+};
+
+type RecipeCostMatchCandidate = {
+  productId: number;
+  productName: string;
+  confidence: number;
+};
+
+type RecipeCostPreviewRow = {
+  recipeIndex: number;
+  recipeName: string;
+  ingredientCount: number;
+  valid: boolean;
+  suggestedProductId: number | null;
+  suggestedProductName: string | null;
+  suggestedConfidence: number;
+  candidates: RecipeCostMatchCandidate[];
+};
+
 function normalizeRecipeName(name: string): string {
   return name
     .normalize("NFD")
@@ -978,46 +1000,184 @@ async function fetchRecipeCosts(): Promise<RecipeCostRecord[]> {
   return payload as RecipeCostRecord[];
 }
 
-async function importRecipeCosts(): Promise<{
+function scoreRecipeProducts(recipeName: string, localProducts: Awaited<ReturnType<typeof storage.getProducts>>) {
+  return localProducts
+    .map(product => ({
+      product,
+      score: nameSimilarity(recipeName, product.name),
+    }))
+    .sort((a, b) => b.score - a.score);
+}
+
+async function getRecipeCostPreview(): Promise<{
+  threshold: number;
+  products: Array<{ id: number; name: string }>;
+  recipes: RecipeCostPreviewRow[];
+}> {
+  const recipes = await fetchRecipeCosts();
+  const localProducts = await storage.getProducts();
+
+  const rows: RecipeCostPreviewRow[] = recipes.map((recipe, recipeIndex) => {
+    const recipeName = typeof recipe.dishName === "string" ? recipe.dishName.trim() : "";
+    const sourceIngredients = Array.isArray(recipe.ingredients)
+      ? recipe.ingredients as RecipeCostIngredient[]
+      : [];
+
+    const scored = recipeName ? scoreRecipeProducts(recipeName, localProducts) : [];
+    const best = scored[0];
+    const valid = Boolean(recipeName && sourceIngredients.length > 0);
+    const autoMatch = valid && best && best.score >= RECIPE_COST_MATCH_THRESHOLD ? best : null;
+
+    return {
+      recipeIndex,
+      recipeName: recipeName || `Recipe #${recipeIndex + 1}`,
+      ingredientCount: sourceIngredients.length,
+      valid,
+      suggestedProductId: autoMatch?.product.id ?? null,
+      suggestedProductName: autoMatch?.product.name ?? null,
+      suggestedConfidence: best?.score ?? 0,
+      candidates: scored.slice(0, 8).map(({ product, score }) => ({
+        productId: product.id,
+        productName: product.name,
+        confidence: score,
+      })),
+    };
+  });
+
+  return {
+    threshold: RECIPE_COST_MATCH_THRESHOLD,
+    products: localProducts
+      .map(product => ({ id: product.id, name: product.name }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    recipes: rows,
+  };
+}
+
+async function importRecipeCosts(
+  manualMatches?: RecipeCostMatchSelection[],
+): Promise<{
   matchedRecipes: number;
   matchedProducts: number;
   importedIngredients: number;
   unmatchedRecipes: string[];
+  results: Array<{
+    recipeName: string;
+    productId: number | null;
+    productName: string | null;
+    confidence: number;
+    ingredientLines: number;
+    status: "imported" | "skipped";
+    reason?: string;
+  }>;
 }> {
   const recipes = await fetchRecipeCosts();
   const localProducts = await storage.getProducts();
   const unmatchedRecipes: string[] = [];
+  const results: Array<{
+    recipeName: string;
+    productId: number | null;
+    productName: string | null;
+    confidence: number;
+    ingredientLines: number;
+    status: "imported" | "skipped";
+    reason?: string;
+  }> = [];
+
+  const manualMode = Array.isArray(manualMatches);
+  const manualMap = new Map<number, number>(
+    (manualMatches ?? [])
+      .filter(match => Number.isInteger(match.recipeIndex) && Number.isInteger(match.productId))
+      .map(match => [match.recipeIndex, match.productId]),
+  );
+
   let matchedRecipes = 0;
   let matchedProducts = 0;
   let importedIngredients = 0;
 
-  for (const recipe of recipes) {
+  for (let recipeIndex = 0; recipeIndex < recipes.length; recipeIndex++) {
+    const recipe = recipes[recipeIndex];
     const recipeName = typeof recipe.dishName === "string" ? recipe.dishName.trim() : "";
-    const sourceIngredients = Array.isArray(recipe.ingredients) ? recipe.ingredients as RecipeCostIngredient[] : [];
+    const sourceIngredients = Array.isArray(recipe.ingredients)
+      ? recipe.ingredients as RecipeCostIngredient[]
+      : [];
+
     if (!recipeName || sourceIngredients.length === 0) {
       if (recipeName) unmatchedRecipes.push(recipeName);
+      results.push({
+        recipeName: recipeName || `Recipe #${recipeIndex + 1}`,
+        productId: null,
+        productName: null,
+        confidence: 0,
+        ingredientLines: 0,
+        status: "skipped",
+        reason: !recipeName ? "Missing recipe name" : "No ingredient lines supplied",
+      });
       continue;
     }
 
-    const scored = localProducts
-      .map(product => ({ product, score: nameSimilarity(recipeName, product.name) }))
-      .sort((a, b) => b.score - a.score);
+    const scored = scoreRecipeProducts(recipeName, localProducts);
     const best = scored[0];
-    if (!best || best.score < RECIPE_COST_MATCH_THRESHOLD) {
-      unmatchedRecipes.push(recipeName);
-      continue;
-    }
 
-    // If multiple local products share the same normalized name, update all of
-    // them; they represent the same recipe in the local product catalogue.
-    const matchingProducts = scored.filter(({ score, product }) =>
-      score >= RECIPE_COST_MATCH_THRESHOLD &&
-      normalizeRecipeName(product.name) === normalizeRecipeName(best.product.name)
-    );
+    let matchingProducts: typeof scored = [];
+
+    if (manualMode) {
+      const selectedProductId = manualMap.get(recipeIndex);
+      if (selectedProductId == null) {
+        unmatchedRecipes.push(recipeName);
+        results.push({
+          recipeName,
+          productId: null,
+          productName: null,
+          confidence: best?.score ?? 0,
+          ingredientLines: 0,
+          status: "skipped",
+          reason: "No product selected",
+        });
+        continue;
+      }
+
+      const selected = scored.find(({ product }) => product.id === selectedProductId);
+      if (!selected) {
+        unmatchedRecipes.push(recipeName);
+        results.push({
+          recipeName,
+          productId: selectedProductId,
+          productName: null,
+          confidence: 0,
+          ingredientLines: 0,
+          status: "skipped",
+          reason: "Selected product no longer exists",
+        });
+        continue;
+      }
+
+      matchingProducts = [selected];
+    } else {
+      if (!best || best.score < RECIPE_COST_MATCH_THRESHOLD) {
+        unmatchedRecipes.push(recipeName);
+        results.push({
+          recipeName,
+          productId: best?.product.id ?? null,
+          productName: best?.product.name ?? null,
+          confidence: best?.score ?? 0,
+          ingredientLines: 0,
+          status: "skipped",
+          reason: `Best match below ${Math.round(RECIPE_COST_MATCH_THRESHOLD * 100)}% confidence`,
+        });
+        continue;
+      }
+
+      matchingProducts = scored.filter(({ score, product }) =>
+        score >= RECIPE_COST_MATCH_THRESHOLD &&
+        normalizeRecipeName(product.name) === normalizeRecipeName(best.product.name)
+      );
+    }
 
     matchedRecipes++;
-    for (const { product } of matchingProducts) {
+
+    for (const { product, score } of matchingProducts) {
       await storage.deleteIngredientsByProductId(product.id);
+
       let productIngredientCount = 0;
       for (const sourceIngredient of sourceIngredients) {
         const ingredientName = typeof sourceIngredient.ingredient === "string"
@@ -1026,7 +1186,10 @@ async function importRecipeCosts(): Promise<{
         const quantity = Number(sourceIngredient.quantity);
         const unit = typeof sourceIngredient.unit === "string" ? sourceIngredient.unit.trim() : "";
         const costPerUnit = Number(sourceIngredient.costPerUnit);
-        if (!ingredientName || !Number.isFinite(quantity) || !unit) continue;
+
+        if (!ingredientName || !Number.isFinite(quantity) || !unit) {
+          continue;
+        }
 
         const costPerG = Number.isFinite(costPerUnit) ? String(costPerUnit) : null;
         await storage.createIngredient({
@@ -1036,17 +1199,28 @@ async function importRecipeCosts(): Promise<{
           unit,
           costPerG,
         });
+
         if (costPerG !== null) {
           await storage.upsertStandardIngredient(ingredientName, costPerG, unit);
         }
+
         productIngredientCount++;
       }
+
       matchedProducts++;
       importedIngredients += productIngredientCount;
+      results.push({
+        recipeName,
+        productId: product.id,
+        productName: product.name,
+        confidence: score,
+        ingredientLines: productIngredientCount,
+        status: "imported",
+      });
     }
   }
 
-  return { matchedRecipes, matchedProducts, importedIngredients, unmatchedRecipes };
+  return { matchedRecipes, matchedProducts, importedIngredients, unmatchedRecipes, results };
 }
 
 function startProductSyncScheduler() {
@@ -1438,9 +1612,20 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/recipe-costs/import", async (_req, res) => {
+  app.get("/api/recipe-costs/preview", async (_req, res) => {
     try {
-      res.json(await importRecipeCosts());
+      res.json(await getRecipeCostPreview());
+    } catch (error: any) {
+      res.status(502).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/recipe-costs/import", async (req, res) => {
+    try {
+      const matches = Array.isArray(req.body?.matches)
+        ? req.body.matches as RecipeCostMatchSelection[]
+        : undefined;
+      res.json(await importRecipeCosts(matches));
     } catch (error: any) {
       res.status(502).json({ message: error.message });
     }
