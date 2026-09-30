@@ -106,31 +106,15 @@ function getChargeableExtraQuantities(
 }
 
 function BrandLogo({ size = "lg" }: { size?: "lg" | "sm" }) {
-  const { data: logoData } = useQuery<{ logo: string }>({
-    queryKey: ["/api/auth/logo"],
-    queryFn: async () => {
-      const res = await fetch("/api/auth/logo");
-      if (!res.ok) return { logo: "" };
-      return res.json();
-    },
-    retry: false,
-    staleTime: Infinity,
-  });
-
-  const dims = size === "lg" ? "w-16 h-16" : "w-14 h-14";
-  const iconDims = size === "lg" ? "w-8 h-8" : "w-7 h-7";
-
-  if (logoData?.logo) {
-    return (
-      <div className={`${dims} mx-auto rounded-3xl overflow-hidden bg-white shadow-xl ring-1 ring-black/5 p-1.5`}>
-        <img src={logoData.logo} alt="Simple Kitchen Prep" className="w-full h-full object-contain rounded-2xl" />
-      </div>
-    );
-  }
+  const dims = size === "lg" ? "w-24 h-24" : "w-20 h-20";
 
   return (
-    <div className={`${dims} mx-auto rounded-3xl bg-gradient-to-br from-emerald-600 to-emerald-700 flex items-center justify-center shadow-xl ring-4 ring-white`}>
-      <ChefHat className={`${iconDims} text-white`} />
+    <div className={`${dims} mx-auto rounded-3xl overflow-hidden bg-white shadow-xl ring-1 ring-black/5 p-2`}>
+      <img
+        src="https://simplekitchenprep.com/wp-content/uploads/2026/04/logonormal.png"
+        alt="Simple Kitchen Prep"
+        className="w-full h-full object-contain rounded-2xl"
+      />
     </div>
   );
 }
