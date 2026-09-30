@@ -19,7 +19,7 @@ import { useMemo } from "react";
 import type { RecurringOrder, RecurringOrderItem, Order, OrderItem } from "@shared/schema";
 
 type RecurringOrderWithItems = RecurringOrder & { items: RecurringOrderItem[] };
-type OrderWithItems = Order & { items: OrderItem[] };
+type OrderWithItems = Order & { items: OrderItem[]; isSubscriptionStamped?: boolean };
 type PreviousOrderMap = Record<number, { items: { productName: string; quantity: number }[]; orderDate: string }>;
 
 const SOUP_PRODUCTS = ["curried sweet potato & carrot"];
@@ -62,15 +62,27 @@ export default function TuesdayOrdersPage() {
 
   const { data: manualOrders } = useQuery<OrderWithItems[]>({
     queryKey: ["/api/orders", `?from=${from.toISOString()}&to=${to.toISOString()}`],
-    select: (data) => data.filter(o => o.isManual && o.isTuesday && o.status !== 'refunded' && o.status !== 'cancelled' && o.status !== 'on-hold'),
+    // Keep genuinely manual Tuesday orders here. Subscription selections are
+    // stamped manual orders internally, but are customer website/subscription
+    // orders and are shown in the Website Orders section below instead.
+    select: (data) => data.filter(o =>
+      o.isManual &&
+      o.isTuesday &&
+      !o.isSubscriptionStamped &&
+      o.status !== 'refunded' &&
+      o.status !== 'cancelled' &&
+      o.status !== 'on-hold'
+    ),
   });
 
   const { data: tuesdayWebOrders } = useQuery<OrderWithItems[]>({
     queryKey: ["/api/orders", `?from=${from.toISOString()}&to=${to.toISOString()}`],
     select: (data) => data.filter(o => {
-      if (o.isManual) return false;
       if (!o.isTuesday) return false;
-      if (o.status === 'refunded' || o.status === 'cancelled') return false;
+      // A completed Sat+Tue subscription creates a stamped manual Tuesday order.
+      // Treat that as a website/subscription order for display purposes.
+      if (o.isManual && !o.isSubscriptionStamped) return false;
+      if (o.status === 'refunded' || o.status === 'cancelled' || o.status === 'on-hold') return false;
       if (o.items.length > 0 && o.items.every(i => /add\s+delivery/i.test(i.productName))) return false;
       return true;
     }),
