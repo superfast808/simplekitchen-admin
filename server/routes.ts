@@ -33,6 +33,21 @@ function matchesSource(item: { isManual: boolean; isTuesday: boolean }, filter: 
   return filter.website;
 }
 
+
+/**
+ * Reporting-only product alias.
+ * Keep historical order rows untouched, but count the former Honey BBQ Mac
+ * name as the current Beef Mac in product totals and ingredient requirements.
+ */
+function canonicalizeReportingProductName(name: string): string {
+  const trimmed = (name || "").trim();
+  if (trimmed.toLowerCase() === "slow cooked honey bbq mac") {
+    return "Slow Cooked Honey BBQ Beef Mac";
+  }
+  return trimmed;
+}
+
+
 let syncInterval: ReturnType<typeof setInterval> | null = null;
 let syncInProgress = false;
 let startupTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -2112,9 +2127,14 @@ export async function registerRoutes(
       };
       const totals: Record<string, ProductTotalEntry> = {};
       for (const item of items) {
-        const key = item.productName;
+        const rawName = (item.productName || "").trim();
+        const key = canonicalizeReportingProductName(rawName);
         if (!totals[key]) {
           totals[key] = { productName: key, productId: item.productId, totalOrdered: 0, manualQuantity: 0, customerBreakdown: {} };
+        }
+        // Prefer the canonical/current product ID when both the old and new names are present.
+        if (rawName === key && item.productId != null) {
+          totals[key].productId = item.productId;
         }
         totals[key].totalOrdered += item.quantity;
         const cName = (item.customerName || "Unknown").trim();
@@ -2123,9 +2143,13 @@ export async function registerRoutes(
       for (const mq of manualQtys) {
         const product = await storage.getProduct(mq.productId);
         if (product) {
-          const key = product.name;
+          const rawName = product.name.trim();
+          const key = canonicalizeReportingProductName(rawName);
           if (!totals[key]) {
             totals[key] = { productName: key, productId: product.id, totalOrdered: 0, manualQuantity: 0, customerBreakdown: {} };
+          }
+          if (rawName === key) {
+            totals[key].productId = product.id;
           }
           totals[key].manualQuantity += mq.quantity;
         }
@@ -2156,29 +2180,38 @@ export async function registerRoutes(
       const allIngredients = await storage.getAllIngredients();
       const allProducts = await storage.getProducts();
 
-      // Group quantities by product name so duplicate product IDs for the same name are merged
+      // Group quantities by canonical reporting name so the one historical Honey BBQ
+      // Mac label is merged into the current Beef Mac recipe without mutating orders.
       const quantsByName: Record<string, number> = {};
       for (const item of items) {
-        const name = (item.productName || "").toLowerCase().trim();
+        const name = canonicalizeReportingProductName(item.productName || "").toLowerCase();
         if (name) quantsByName[name] = (quantsByName[name] || 0) + item.quantity;
       }
       for (const mq of manualQtys) {
         const product = allProducts.find(p => p.id === mq.productId);
         if (product) {
-          const name = product.name.toLowerCase().trim();
+          const name = canonicalizeReportingProductName(product.name).toLowerCase();
           quantsByName[name] = (quantsByName[name] || 0) + mq.quantity;
         }
       }
-      // Build name lookup per product ID for ingredient resolution
+      // Build raw + canonical name lookup per product ID for ingredient resolution.
+      const rawNameByProductId: Record<number, string> = {};
       const nameByProductId: Record<number, string> = {};
-      for (const p of allProducts) nameByProductId[p.id] = p.name.toLowerCase().trim();
+      for (const p of allProducts) {
+        rawNameByProductId[p.id] = p.name.toLowerCase().trim();
+        nameByProductId[p.id] = canonicalizeReportingProductName(p.name).toLowerCase();
+      }
 
       const summary: Record<string, { name: string; totalQuantity: number; unit: string }> = {};
       // Track ingredient+productName combos to avoid double-counting from duplicate products
       const seenIngredient = new Set<string>();
       for (const ingredient of allIngredients) {
+        const rawProductName = rawNameByProductId[ingredient.productId];
         const productName = nameByProductId[ingredient.productId];
         if (!productName) continue;
+        // For this one renamed meal, use only the current Beef Mac recipe definition.
+        // Historical "Slow Cooked Honey BBQ Mac" order quantities still count toward it.
+        if (rawProductName === "slow cooked honey bbq mac") continue;
         const ingNameNorm = ingredient.name.toLowerCase().trim();
         const ingUnitNorm = ingredient.unit.toLowerCase().trim();
         const dedupeKey = `${productName}|${ingNameNorm}|${ingUnitNorm}`;
