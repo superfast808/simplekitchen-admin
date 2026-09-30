@@ -19,6 +19,9 @@ type PreviewRecipe = {
   suggestedProductId: number | null;
   suggestedProductName: string | null;
   suggestedConfidence: number;
+  focusProductId: number | null;
+  focusProductName: string | null;
+  focusConfidence: number;
   candidates: Array<{
     productId: number;
     productName: string;
@@ -48,26 +51,47 @@ type ImportRecipeCostsResponse = {
   }>;
 };
 
+type ImportRecipeCostsButtonProps = {
+  preferredProducts?: PreviewProduct[];
+  preferredLabel?: string;
+};
+
 function percent(value: number): string {
   return `${Math.round(value * 100)}%`;
 }
 
-export function ImportRecipeCostsButton() {
+export function ImportRecipeCostsButton({
+  preferredProducts = [],
+  preferredLabel = "selected week",
+}: ImportRecipeCostsButtonProps) {
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [preview, setPreview] = useState<RecipeCostPreviewResponse | null>(null);
   const [selections, setSelections] = useState<Record<number, string>>({});
   const [lastResult, setLastResult] = useState<ImportRecipeCostsResponse | null>(null);
+  const [showAllRecipes, setShowAllRecipes] = useState(preferredProducts.length === 0);
+
+  const preferredIdSet = useMemo(
+    () => new Set(preferredProducts.map(product => product.id)),
+    [preferredProducts],
+  );
 
   const previewMutation = useMutation({
     mutationFn: async () => {
-      const response = await apiRequest("GET", "/api/recipe-costs/preview");
+      const productIds = preferredProducts.map(product => product.id);
+      const query = productIds.length > 0
+        ? `?productIds=${encodeURIComponent(productIds.join(","))}`
+        : "";
+      const response = await apiRequest("GET", `/api/recipe-costs/preview${query}`);
       return response.json() as Promise<RecipeCostPreviewResponse>;
     },
     onSuccess: (data) => {
       setPreview(data);
       setLastResult(null);
 
+      // Only auto-select high-confidence matches returned by the preview API.
+      // When a selected-week focus is supplied, the API deliberately limits
+      // these automatic selections to products from that week.
       const defaults: Record<number, string> = {};
       for (const recipe of data.recipes) {
         if (recipe.suggestedProductId != null) {
@@ -124,11 +148,49 @@ export function ImportRecipeCostsButton() {
     [selections],
   );
 
+  const focusedRecipes = useMemo(() => {
+    if (!preview || preferredProducts.length === 0) {
+      return preview?.recipes ?? [];
+    }
+
+    const ranked = preview.recipes
+      .filter(recipe => recipe.valid && recipe.focusProductId != null)
+      .sort((a, b) => b.focusConfidence - a.focusConfidence);
+
+    const focusLimit = Math.min(
+      20,
+      Math.max(preferredProducts.length + 4, 8),
+    );
+
+    const reasonablyClose = ranked.filter(recipe => recipe.focusConfidence >= 0.45);
+    if (reasonablyClose.length >= preferredProducts.length) {
+      return reasonablyClose.slice(0, focusLimit);
+    }
+
+    return ranked.slice(0, Math.max(preferredProducts.length, focusLimit));
+  }, [preview, preferredProducts]);
+
+  const visibleRecipes = useMemo(() => {
+    if (!preview) return [];
+    if (preferredProducts.length > 0 && !showAllRecipes) return focusedRecipes;
+    return preview.recipes;
+  }, [preview, preferredProducts.length, showAllRecipes, focusedRecipes]);
+
+  const preferredOptions = useMemo(
+    () => preview?.products.filter(product => preferredIdSet.has(product.id)) ?? [],
+    [preview, preferredIdSet],
+  );
+
+  const otherOptions = useMemo(
+    () => preview?.products.filter(product => !preferredIdSet.has(product.id)) ?? [],
+    [preview, preferredIdSet],
+  );
+
   const needsReviewCount = useMemo(
-    () => preview?.recipes.filter(recipe =>
+    () => visibleRecipes.filter(recipe =>
       recipe.valid && recipe.suggestedProductId == null
-    ).length ?? 0,
-    [preview],
+    ).length,
+    [visibleRecipes],
   );
 
   const handleReview = () => {
@@ -136,6 +198,7 @@ export function ImportRecipeCostsButton() {
     setPreview(null);
     setLastResult(null);
     setSelections({});
+    setShowAllRecipes(preferredProducts.length === 0);
     previewMutation.mutate();
   };
 
@@ -168,26 +231,54 @@ export function ImportRecipeCostsButton() {
 
           {preview && (
             <>
-              <div className="rounded-lg border bg-muted/30 p-3 text-sm space-y-1">
+              <div className="rounded-lg border bg-muted/30 p-3 text-sm space-y-2">
                 <div className="font-medium">
-                  {preview.recipes.length} source recipes checked · {selectedCount} selected for import
+                  {preferredProducts.length > 0 && !showAllRecipes
+                    ? `Focused on ${preferredProducts.length} products showing in the ${preferredLabel} · ${visibleRecipes.length} likely source recipes`
+                    : `${preview.recipes.length} source recipes checked`}
+                  {" · "}{selectedCount} selected for import
                 </div>
+
                 <div className="text-muted-foreground">
                   Exact/high-confidence matches at {percent(preview.threshold)} or above are selected automatically.
                   {needsReviewCount > 0
-                    ? ` ${needsReviewCount} recipe${needsReviewCount !== 1 ? "s" : ""} need manual review.`
-                    : " All valid recipes have a high-confidence match."}
+                    ? ` ${needsReviewCount} visible recipe${needsReviewCount !== 1 ? "s" : ""} need manual review.`
+                    : " All visible valid recipes have a high-confidence match."}
                 </div>
+
+                {preferredProducts.length > 0 && (
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <div className="text-muted-foreground">
+                      Current-week products are prioritised in matching and in each product selector.
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setShowAllRecipes(value => !value)}
+                    >
+                      {showAllRecipes
+                        ? `Focus on ${preferredLabel}`
+                        : `Show all ${preview.recipes.length} recipes`}
+                    </Button>
+                  </div>
+                )}
+
                 <div className="text-muted-foreground">
                   You can override any suggestion below. Choosing a product manually bypasses the confidence threshold for that recipe.
                 </div>
               </div>
 
               <div className="overflow-y-auto flex-1 pr-1 space-y-2 min-h-0">
-                {preview.recipes.map(recipe => {
+                {visibleRecipes.map(recipe => {
                   const selected = selections[recipe.recipeIndex] ?? "";
                   const autoMatched = recipe.suggestedProductId != null;
-                  const bestCandidate = recipe.candidates[0];
+                  const focused = preferredProducts.length > 0 && !showAllRecipes;
+                  const bestMatchName = focused
+                    ? recipe.focusProductName
+                    : recipe.candidates[0]?.productName ?? null;
+                  const bestMatchConfidence = focused
+                    ? recipe.focusConfidence
+                    : recipe.candidates[0]?.confidence ?? 0;
 
                   return (
                     <div
@@ -217,12 +308,12 @@ export function ImportRecipeCostsButton() {
 
                         <div className="text-xs text-muted-foreground mt-1">
                           {recipe.ingredientCount} ingredient line{recipe.ingredientCount !== 1 ? "s" : ""}
-                          {bestCandidate
-                            ? ` · Best name match: “${bestCandidate.productName}” (${percent(bestCandidate.confidence)})`
+                          {bestMatchName
+                            ? ` · Best ${focused ? preferredLabel : "name"} match: “${bestMatchName}” (${percent(bestMatchConfidence)})`
                             : " · No local product candidates"}
                         </div>
 
-                        {recipe.candidates.length > 1 && (
+                        {!focused && recipe.candidates.length > 1 && (
                           <div className="text-xs text-muted-foreground mt-1 truncate">
                             Next: {recipe.candidates.slice(1, 4).map(candidate =>
                               `${candidate.productName} ${percent(candidate.confidence)}`
@@ -250,16 +341,35 @@ export function ImportRecipeCostsButton() {
                           data-testid={`select-recipe-match-${recipe.recipeIndex}`}
                         >
                           <option value="">Skip this recipe</option>
-                          {preview.products.map(product => (
-                            <option key={product.id} value={product.id}>
-                              {product.name}
-                            </option>
-                          ))}
+                          {preferredOptions.length > 0 && (
+                            <optgroup label={`Products in ${preferredLabel}`}>
+                              {preferredOptions.map(product => (
+                                <option key={product.id} value={product.id}>
+                                  {product.name}
+                                </option>
+                              ))}
+                            </optgroup>
+                          )}
+                          {otherOptions.length > 0 && (
+                            <optgroup label={preferredOptions.length > 0 ? "Other products" : "Products"}>
+                              {otherOptions.map(product => (
+                                <option key={product.id} value={product.id}>
+                                  {product.name}
+                                </option>
+                              ))}
+                            </optgroup>
+                          )}
                         </select>
                       </div>
                     </div>
                   );
                 })}
+
+                {visibleRecipes.length === 0 && (
+                  <div className="rounded-lg border p-8 text-center text-sm text-muted-foreground">
+                    No likely recipe matches were found for the products in this week. Use “Show all recipes” to match them manually.
+                  </div>
+                )}
               </div>
 
               {lastResult && (
