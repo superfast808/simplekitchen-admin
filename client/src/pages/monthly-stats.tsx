@@ -26,7 +26,7 @@ type OrderWithItems = {
 };
 
 const SUB_RE = /meal\s+subscription/i;
-const OAT_RE = /oat|porridge|overnight/i;
+const OAT_RE = /oat|porridge|overnight|gold\s*bar/i;
 const SOUP_RE = /soup/i;
 
 function filterItems(items: OrderItem[], hideAddons: boolean, hideAddDelivery: boolean, hideSubscriptionBase: boolean): OrderItem[] {
@@ -275,9 +275,9 @@ export default function MonthlyStatsPage() {
                   <p className="text-[10px] text-muted-foreground">Main meal boxes</p>
                 </div>
                 <div className="flex flex-col gap-1">
-                  <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Oats</span>
+                  <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Oats / Gold Bars</span>
                   <p className="text-2xl font-bold tabular-nums">{computed.all.numOats}</p>
-                  <p className="text-[10px] text-muted-foreground">Overnight oats / porridge</p>
+                  <p className="text-[10px] text-muted-foreground">Overnight oats / porridge / Gold Bars</p>
                 </div>
                 <div className="flex flex-col gap-1">
                   <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Soups</span>
