@@ -955,6 +955,9 @@ type RecipeCostPreviewRow = {
   suggestedProductId: number | null;
   suggestedProductName: string | null;
   suggestedConfidence: number;
+  focusProductId: number | null;
+  focusProductName: string | null;
+  focusConfidence: number;
   candidates: RecipeCostMatchCandidate[];
 };
 
@@ -1009,13 +1012,17 @@ function scoreRecipeProducts(recipeName: string, localProducts: Awaited<ReturnTy
     .sort((a, b) => b.score - a.score);
 }
 
-async function getRecipeCostPreview(): Promise<{
+async function getRecipeCostPreview(preferredProductIds: number[] = []): Promise<{
   threshold: number;
   products: Array<{ id: number; name: string }>;
   recipes: RecipeCostPreviewRow[];
 }> {
   const recipes = await fetchRecipeCosts();
   const localProducts = await storage.getProducts();
+  const preferredIdSet = new Set(preferredProductIds);
+  const focusProducts = preferredProductIds.length > 0
+    ? localProducts.filter(product => preferredIdSet.has(product.id))
+    : localProducts;
 
   const rows: RecipeCostPreviewRow[] = recipes.map((recipe, recipeIndex) => {
     const recipeName = typeof recipe.dishName === "string" ? recipe.dishName.trim() : "";
@@ -1024,9 +1031,18 @@ async function getRecipeCostPreview(): Promise<{
       : [];
 
     const scored = recipeName ? scoreRecipeProducts(recipeName, localProducts) : [];
+    const focusScored = recipeName ? scoreRecipeProducts(recipeName, focusProducts) : [];
     const best = scored[0];
+    const focusBest = focusScored[0];
     const valid = Boolean(recipeName && sourceIngredients.length > 0);
-    const autoMatch = valid && best && best.score >= RECIPE_COST_MATCH_THRESHOLD ? best : null;
+
+    // When the caller supplies a current-week product set, only auto-select a
+    // high-confidence match from that set. This prevents hidden historical
+    // products from being imported when the user is reviewing one week's menu.
+    const autoBest = preferredProductIds.length > 0 ? focusBest : best;
+    const autoMatch = valid && autoBest && autoBest.score >= RECIPE_COST_MATCH_THRESHOLD
+      ? autoBest
+      : null;
 
     return {
       recipeIndex,
@@ -1035,7 +1051,10 @@ async function getRecipeCostPreview(): Promise<{
       valid,
       suggestedProductId: autoMatch?.product.id ?? null,
       suggestedProductName: autoMatch?.product.name ?? null,
-      suggestedConfidence: best?.score ?? 0,
+      suggestedConfidence: autoBest?.score ?? 0,
+      focusProductId: focusBest?.product.id ?? null,
+      focusProductName: focusBest?.product.name ?? null,
+      focusConfidence: focusBest?.score ?? 0,
       candidates: scored.slice(0, 8).map(({ product, score }) => ({
         productId: product.id,
         productName: product.name,
@@ -1048,7 +1067,12 @@ async function getRecipeCostPreview(): Promise<{
     threshold: RECIPE_COST_MATCH_THRESHOLD,
     products: localProducts
       .map(product => ({ id: product.id, name: product.name }))
-      .sort((a, b) => a.name.localeCompare(b.name)),
+      .sort((a, b) => {
+        const aPreferred = preferredIdSet.has(a.id);
+        const bPreferred = preferredIdSet.has(b.id);
+        if (aPreferred !== bPreferred) return aPreferred ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      }),
     recipes: rows,
   };
 }
@@ -1612,9 +1636,16 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/recipe-costs/preview", async (_req, res) => {
+  app.get("/api/recipe-costs/preview", async (req, res) => {
     try {
-      res.json(await getRecipeCostPreview());
+      const preferredProductIds = typeof req.query.productIds === "string"
+        ? req.query.productIds
+            .split(",")
+            .map(value => Number.parseInt(value, 10))
+            .filter(value => Number.isInteger(value) && value > 0)
+        : [];
+
+      res.json(await getRecipeCostPreview(preferredProductIds));
     } catch (error: any) {
       res.status(502).json({ message: error.message });
     }
