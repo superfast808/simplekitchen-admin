@@ -823,6 +823,129 @@ function getWooPaidTotal(wooOrder: any): string | null {
   return Math.max(0, total - refunded).toFixed(2);
 }
 
+
+const NEAR_IDENTICAL_WOO_ORDER_WINDOW_MS = 5 * 60 * 1000;
+
+function normalizeDuplicateOrderText(value: string | null | undefined): string {
+  return (value || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function duplicateOrderItemSignature(
+  items: Array<{ productName: string; quantity: number; price?: string | null }>
+): string {
+  return items
+    .map(item => ({
+      name: normalizeDuplicateOrderText(item.productName),
+      quantity: Number(item.quantity || 0),
+      price: Number.parseFloat(item.price || "0").toFixed(2),
+    }))
+    .sort((a, b) =>
+      a.name.localeCompare(b.name) ||
+      a.quantity - b.quantity ||
+      a.price.localeCompare(b.price)
+    )
+    .map(item => `${item.quantity}x${item.name}@${item.price}`)
+    .join("|");
+}
+
+/**
+ * Conservative operational duplicate guard for genuinely separate Woo order IDs.
+ *
+ * WooCommerce remains the source of truth: this only removes the later LOCAL copy
+ * when two active web orders are otherwise identical and were created within five
+ * minutes. We require the same customer/email, address, fulfilment, paid/shipping
+ * totals and exact item basket. Orders referenced by subscriptions/add-ons, manually
+ * corrected orders and ready-to-pack orders are never touched.
+ */
+async function removeNearIdenticalWooOrders(from: Date): Promise<number> {
+  const ordersList = (await storage.getOrders(from, new Date()))
+    .filter(order =>
+      !order.isManual &&
+      order.wooId !== null &&
+      (order.status === "processing" || order.status === "completed") &&
+      !(order as any).portalOverridden &&
+      !(order as any).readyToPack
+    )
+    .sort((a, b) =>
+      new Date(a.orderDate).getTime() - new Date(b.orderDate).getTime() ||
+      a.id - b.id
+    );
+
+  if (ordersList.length < 2) return 0;
+
+  const itemsMap = await storage.getOrderItemsBatch(ordersList.map(order => order.id));
+  const protectedResult = await pool.query<{ order_id: number }>(`
+    SELECT DISTINCT order_id
+    FROM (
+      SELECT order_id FROM subscription_invites WHERE order_id IS NOT NULL
+      UNION ALL
+      SELECT selections_order_id AS order_id FROM subscription_invites WHERE selections_order_id IS NOT NULL
+      UNION ALL
+      SELECT tuesday_selections_order_id AS order_id FROM subscription_invites WHERE tuesday_selections_order_id IS NOT NULL
+      UNION ALL
+      SELECT order_id FROM addon_links
+    ) refs
+  `);
+  const protectedIds = new Set(protectedResult.rows.map(row => Number(row.order_id)));
+
+  type SeenEntry = { canonicalId: number; lastSeenAt: number; canonicalWooId: number | null };
+  const seen = new Map<string, SeenEntry>();
+  let removed = 0;
+
+  for (const order of ordersList) {
+    const items = itemsMap.get(order.id) ?? [];
+    if (items.length === 0) continue;
+    if (items.some(item => (item as any).portalAdded)) continue;
+
+    const identity = normalizeDuplicateOrderText(order.customerEmail) ||
+      normalizeDuplicateOrderText(order.customerName);
+    if (!identity) continue;
+
+    const key = [
+      identity,
+      normalizeDuplicateOrderText(order.customerName),
+      normalizeDuplicateOrderText(order.deliveryAddress),
+      normalizeDuplicateOrderText(order.fulfillmentType),
+      order.isTuesday ? "tue" : "sat",
+      Number.parseFloat((order as any).shippingTotal || "0").toFixed(2),
+      Number.parseFloat((order as any).wooPaidTotal || "0").toFixed(2),
+      duplicateOrderItemSignature(items),
+    ].join("||");
+
+    const createdAt = new Date(order.orderDate).getTime();
+    const previous = seen.get(key);
+
+    if (
+      previous &&
+      createdAt - previous.lastSeenAt >= 0 &&
+      createdAt - previous.lastSeenAt <= NEAR_IDENTICAL_WOO_ORDER_WINDOW_MS
+    ) {
+      // Never delete either side of a record that is already linked into another
+      // workflow. In that case leave both visible for manual review.
+      if (!protectedIds.has(previous.canonicalId) && !protectedIds.has(order.id)) {
+        await storage.deleteOrder(order.id);
+        removed++;
+        log(
+          `Near-identical Woo duplicate suppressed locally: order ${order.id} (Woo #${order.wooId}) matched order ${previous.canonicalId} (Woo #${previous.canonicalWooId}) within 5 minutes`,
+          "sync"
+        );
+        // Keep the original canonical order but advance the last-seen timestamp so
+        // a burst of repeated submissions is treated as one cluster.
+        previous.lastSeenAt = createdAt;
+        continue;
+      }
+    }
+
+    seen.set(key, {
+      canonicalId: order.id,
+      lastSeenAt: createdAt,
+      canonicalWooId: order.wooId,
+    });
+  }
+
+  return removed;
+}
+
 function isValidWooWebhookSignature(rawBody: Buffer | undefined, signature: string | undefined): boolean {
   const secret = process.env.WC_WEBHOOK_SECRET;
   if (!secret || !rawBody || !signature) return false;
@@ -961,9 +1084,13 @@ async function performSync() {
       }
     }
 
+    const dedupeFrom = new Date();
+    dedupeFrom.setDate(dedupeFrom.getDate() - 28);
+    const deduplicated = await removeNearIdenticalWooOrders(dedupeFrom);
+
     lastOrderSyncSummary = { imported, updated, total: wooOrders.length };
     lastOrderSyncCompletedAt = new Date().toISOString();
-    log(`Auto-sync complete: imported=${imported}, updated=${updated}, total=${wooOrders.length}`, "sync");
+    log(`Auto-sync complete: imported=${imported}, updated=${updated}, deduplicated=${deduplicated}, total=${wooOrders.length}`, "sync");
     const upgraded = await persistDeliveryUpgrades();
     if (upgraded > 0) log(`Auto-sync: persisted delivery upgrade for ${upgraded} order(s)`, "sync");
     // After sync, auto-send any subscription invite emails that are still pending
@@ -2576,8 +2703,13 @@ export async function registerRoutes(
         }
       }
 
+      const dedupeFrom = req.query.after
+        ? new Date(req.query.after as string)
+        : (() => { const d = new Date(); d.setDate(d.getDate() - 28); return d; })();
+      const deduplicated = await removeNearIdenticalWooOrders(dedupeFrom);
+
       const upgraded = await persistDeliveryUpgrades();
-      res.json({ imported, updated, upgraded, total: wooOrders.length });
+      res.json({ imported, updated, deduplicated, upgraded, total: wooOrders.length });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
