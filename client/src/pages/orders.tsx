@@ -77,7 +77,7 @@ export default function OrdersPage() {
   const { from, to } = dateFilter;
 
   const { data: allOrders, isLoading, isFetching } = useQuery<OrderWithItems[]>({
-    queryKey: ["/api/orders", `?from=${from.toISOString()}&to=${to.toISOString()}`],
+    queryKey: ["/api/orders", `?from=${from.toISOString()}&to=${to.toISOString()}&xmas=exclude`],
   });
 
   const { data: allRecurringOrders } = useQuery<RecurringOrderWithItems[]>({
