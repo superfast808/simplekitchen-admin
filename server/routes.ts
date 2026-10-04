@@ -41,8 +41,14 @@ function matchesSource(item: { isManual: boolean; isTuesday: boolean }, filter: 
  */
 function canonicalizeReportingProductName(name: string): string {
   const trimmed = (name || "").trim();
-  if (trimmed.toLowerCase() === "slow cooked honey bbq mac") {
+  const lower = trimmed.toLowerCase();
+  if (lower === "slow cooked honey bbq mac") {
     return "Slow Cooked Honey BBQ Beef Mac";
+  }
+  if (lower.includes("creemed leeks") || lower.includes("creemed leaks")) {
+    return trimmed
+      .replace(/creemed\s+leeks/ig, "Creamed Leeks")
+      .replace(/creemed\s+leaks/ig, "Creamed Leeks");
   }
   return trimmed;
 }
@@ -57,6 +63,9 @@ const CHRISTMAS_SIDE_NAMES = [
   "sage & onion stuffing",
   "maple & bacon brussels sprouts",
   "braised red cabbage & apple",
+  "chef special: creamed leeks",
+  "chef special: creemed leeks",
+  "chef special: creemed leaks",
 ];
 
 function isChristmasProductName(name: string | null | undefined): boolean {
@@ -2489,6 +2498,17 @@ export async function registerRoutes(
         quantsByName2[beefHoneyBbqMacKey] =
           (quantsByName2[beefHoneyBbqMacKey] || 0) + quantsByName2[oldHoneyBbqMacKey];
         delete quantsByName2[oldHoneyBbqMacKey];
+      }
+
+      // Same reporting-only treatment for the corrected Christmas product typo.
+      // Historical order rows remain untouched; operational totals use the current name.
+      for (const oldKey of ["chef special: creemed leeks", "chef special: creemed leaks"]) {
+        const correctedKey = "chef special: creamed leeks";
+        if (quantsByName2[oldKey]) {
+          quantsByName2[correctedKey] =
+            (quantsByName2[correctedKey] || 0) + quantsByName2[oldKey];
+          delete quantsByName2[oldKey];
+        }
       }
 
       // Deduplicate products by name — keep the first occurrence per name
