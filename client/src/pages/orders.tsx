@@ -39,9 +39,16 @@ function sortItems<T extends { productName: string }>(items: T[]): T[] {
 
 function canonicalizeOrderProductName(name: string): string {
   const trimmed = (name || "").trim();
-  return trimmed.toLowerCase() === "slow cooked honey bbq mac"
-    ? "Slow Cooked Honey BBQ Beef Mac"
-    : trimmed;
+  const lower = trimmed.toLowerCase();
+  if (lower === "slow cooked honey bbq mac") {
+    return "Slow Cooked Honey BBQ Beef Mac";
+  }
+  if (lower.includes("creemed leeks") || lower.includes("creemed leaks")) {
+    return trimmed
+      .replace(/creemed\s+leeks/ig, "Creamed Leeks")
+      .replace(/creemed\s+leaks/ig, "Creamed Leeks");
+  }
+  return trimmed;
 }
 
 const SUB_RE_ORDERS = /meal\s+subscription/i;
