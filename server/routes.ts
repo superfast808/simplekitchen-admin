@@ -330,15 +330,50 @@ async function persistDeliveryUpgrades(): Promise<number> {
 }
 
 function detectFulfillmentType(wooOrder: any): string {
-  const shippingLines = wooOrder.shipping_lines || [];
-  if (shippingLines.length === 0) return "collection";
+  const shippingLines = Array.isArray(wooOrder.shipping_lines) ? wooOrder.shipping_lines : [];
+
   for (const line of shippingLines) {
-    const methodTitle = (line.method_title || "").toLowerCase();
-    const methodId = (line.method_id || "").toLowerCase();
-    if (methodTitle.startsWith("delivery") || methodId === "flat_rate") {
+    const methodTitle = String(line?.method_title || "").toLowerCase();
+    const methodId = String(line?.method_id || "").toLowerCase();
+    const rateMeta = Array.isArray(line?.meta_data) ? line.meta_data : [];
+
+    // Christmas checkout uses its own shipping method ID and labels such as
+    // "Christmas Eve Delivery", so checking only titles beginning with
+    // "delivery" incorrectly classified every Christmas order as collection.
+    if (
+      methodId === "skxmas_delivery" ||
+      methodId === "flat_rate" ||
+      /\bdelivery\b/i.test(methodTitle) ||
+      rateMeta.some((meta: any) =>
+        /delivery/i.test(String(meta?.value || "")) ||
+        (String(meta?.key || "").toLowerCase().includes("christmas") &&
+          /delivery/i.test(String(meta?.value || "")))
+      )
+    ) {
       return "delivery";
     }
+
+    if (
+      methodId === "local_pickup" ||
+      methodId === "skxmas_collection" ||
+      /\bcollection\b|\bpick\s*up\b|\bpickup\b/i.test(methodTitle) ||
+      rateMeta.some((meta: any) => /collection|pick\s*up|pickup/i.test(String(meta?.value || "")))
+    ) {
+      return "collection";
+    }
   }
+
+  // The Christmas fulfilment plugin also persists the selected label directly
+  // on the WooCommerce order. Use it as a second source in case a shipping
+  // extension or REST serialization strips the custom rate ID.
+  const orderMeta = Array.isArray(wooOrder.meta_data) ? wooOrder.meta_data : [];
+  const fulfilmentMeta = orderMeta.find((meta: any) =>
+    String(meta?.key || "").toLowerCase() === "_skx_fulfilment"
+  );
+  const fulfilmentLabel = String(fulfilmentMeta?.value || "").toLowerCase();
+  if (/\bdelivery\b/i.test(fulfilmentLabel)) return "delivery";
+  if (/\bcollection\b|\bpick\s*up\b|\bpickup\b/i.test(fulfilmentLabel)) return "collection";
+
   return "collection";
 }
 
