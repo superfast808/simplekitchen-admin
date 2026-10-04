@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { LogOut } from "lucide-react";
 import NotFound from "@/pages/not-found";
 import OrdersPage from "@/pages/orders";
+import ChristmasOrdersPage from "@/pages/christmas-orders";
 import ProductsPage from "@/pages/products";
 import ProductTotalsPage from "@/pages/product-totals";
 import IngredientsPage from "@/pages/ingredients";
@@ -61,6 +62,7 @@ function PageRouter() {
   return (
     <Switch>
       <Route path="/" component={OrdersPage} />
+      <Route path="/christmas-orders" component={ChristmasOrdersPage} />
       <Route path="/products" component={ProductsPage} />
       <Route path="/product-totals" component={ProductTotalsPage} />
       <Route path="/ingredients" component={IngredientsPage} />
