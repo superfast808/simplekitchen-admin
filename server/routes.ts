@@ -48,6 +48,30 @@ function canonicalizeReportingProductName(name: string): string {
 }
 
 
+const CHRISTMAS_SIDE_NAMES = [
+  "garlic & herb roast potatoes",
+  "potato dauphinoise",
+  "honey roasted carrots & parsnips",
+  "cauliflower cheese",
+  "pigs in blankets",
+  "sage & onion stuffing",
+  "maple & bacon brussels sprouts",
+  "braised red cabbage & apple",
+];
+
+function isChristmasProductName(name: string | null | undefined): boolean {
+  const normalized = (name || "").trim().toLowerCase();
+  return CHRISTMAS_SIDE_NAMES.some(side =>
+    normalized === side || normalized.startsWith(`${side} -`)
+  );
+}
+
+function isChristmasCategory(category: string | null | undefined): boolean {
+  const normalized = (category || "").trim().toLowerCase();
+  return normalized === "xmas" || normalized === "christmas";
+}
+
+
 let syncInterval: ReturnType<typeof setInterval> | null = null;
 let syncInProgress = false;
 let startupTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -1985,10 +2009,43 @@ export async function registerRoutes(
 
       // Batch-fetch all items in a single query instead of one per order (N+1 → 1)
       const itemsMap = await storage.getOrderItemsBatch(ordersList.map(o => o.id));
-      const ordersWithItems = ordersList.map(order => ({
-        ...order,
-        items: itemsMap.get(order.id) ?? [],
-      }));
+
+      // Christmas products originate from the dedicated WordPress Christmas page.
+      // Primary detection uses the synced Woo product category ("xmas"), with the
+      // eight campaign side names as a safe fallback for products whose category
+      // metadata was not retained during an older sync.
+      const xmasMode = typeof req.query.xmas === "string" ? req.query.xmas : "all";
+      const allProductsForXmas = xmasMode === "all" ? [] : await storage.getProducts();
+      const christmasProductIds = new Set(
+        allProductsForXmas
+          .filter(product => isChristmasCategory(product.category) || isChristmasProductName(product.name))
+          .map(product => product.id)
+      );
+      const itemIsChristmas = (item: any) =>
+        (item.productId != null && christmasProductIds.has(item.productId)) ||
+        isChristmasProductName(item.productName);
+
+      let ordersWithItems = ordersList.map(order => {
+        const items = itemsMap.get(order.id) ?? [];
+        const annotatedItems = xmasMode === "all"
+          ? items
+          : items.map(item => ({ ...item, isChristmasItem: itemIsChristmas(item) }));
+        const isChristmasOrder = xmasMode === "all"
+          ? false
+          : annotatedItems.some((item: any) => item.isChristmasItem);
+        return {
+          ...order,
+          items: annotatedItems,
+          ...(xmasMode !== "all" ? { isChristmasOrder } : {}),
+        };
+      });
+
+      if (xmasMode === "only") {
+        ordersWithItems = ordersWithItems.filter((order: any) => order.isChristmasOrder);
+      } else if (xmasMode === "exclude") {
+        ordersWithItems = ordersWithItems.filter((order: any) => !order.isChristmasOrder);
+      }
+
       applyAddDeliveryUpgrades(ordersWithItems);
 
       // Annotate orders with pending (paid but unprocessed) addon links
