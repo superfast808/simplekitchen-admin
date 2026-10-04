@@ -33,6 +33,13 @@ type ChristmasOrder = Order & {
   isChristmasOrder?: boolean;
 };
 
+function canonicalizeChristmasProductName(name: string): string {
+  const trimmed = (name || "").trim();
+  return trimmed
+    .replace(/creemed\s+leeks/ig, "Creamed Leeks")
+    .replace(/creemed\s+leaks/ig, "Creamed Leeks");
+}
+
 function getOrderTotal(order: ChristmasOrder): number {
   const paidTotal = Number.parseFloat(order.wooPaidTotal || "");
   if (Number.isFinite(paidTotal)) return paidTotal;
@@ -104,7 +111,8 @@ export default function ChristmasOrdersPage() {
     for (const order of activeOrders) {
       for (const item of order.items) {
         if (!item.isChristmasItem) continue;
-        totals.set(item.productName, (totals.get(item.productName) || 0) + item.quantity);
+        const productName = canonicalizeChristmasProductName(item.productName);
+        totals.set(productName, (totals.get(productName) || 0) + item.quantity);
       }
     }
 
@@ -311,7 +319,7 @@ export default function ChristmasOrdersPage() {
                             <div className="space-y-0.5">
                               {christmasItems.map(item => (
                                 <div key={item.id} className="text-sm">
-                                  <span className="font-semibold">{item.quantity}×</span> {item.productName}
+                                  <span className="font-semibold">{item.quantity}×</span> {canonicalizeChristmasProductName(item.productName)}
                                 </div>
                               ))}
                             </div>
