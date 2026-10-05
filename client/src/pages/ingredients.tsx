@@ -266,11 +266,12 @@ export default function IngredientsPage() {
   try {
     const parsed = JSON.parse(settings?.product_packaging_costs || "{}");
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      productPackagingCosts = Object.fromEntries(
-        Object.entries(parsed)
-          .map(([key, value]) => [key, Number(value)])
-          .filter(([, value]) => Number.isFinite(value) && value >= 0)
-      );
+      for (const [key, rawValue] of Object.entries(parsed)) {
+        const value = Number(rawValue);
+        if (Number.isFinite(value) && value >= 0) {
+          productPackagingCosts[key] = value;
+        }
+      }
     }
   } catch {
     productPackagingCosts = {};
@@ -299,6 +300,10 @@ export default function IngredientsPage() {
   const hasData = activeProducts.length > 0 || (data?.grandTotals.length ?? 0) > 0;
 
   const totalMealsOrdered = activeProducts.reduce((sum, p) => sum + p.orderedQuantity, 0);
+  const totalPackagingCost = activeProducts.reduce((sum, product) => {
+    const effectivePackagingCost = productPackagingCosts[String(product.productId)] ?? packagingCost;
+    return sum + effectivePackagingCost * product.orderedQuantity;
+  }, 0);
 
   return (
     <div className="p-6 space-y-6">
@@ -404,13 +409,13 @@ export default function IngredientsPage() {
                           </TableCell>
                         </TableRow>
                       ))}
-                    {showPackaging && packagingCost > 0 && totalMealsOrdered > 0 && (
+                    {totalPackagingCost > 0 && totalMealsOrdered > 0 && (
                       <TableRow className="text-muted-foreground italic" data-testid="row-grand-packaging">
                         <TableCell className="font-medium" data-testid="text-grand-packaging">Packaging</TableCell>
                         <TableCell className="text-right font-semibold tabular-nums">{totalMealsOrdered}</TableCell>
                         <TableCell className="text-muted-foreground">meals</TableCell>
                         <TableCell className="text-right tabular-nums font-medium" data-testid="text-grand-packaging-cost">
-                          £{(packagingCost * totalMealsOrdered).toFixed(2)}
+                          £{totalPackagingCost.toFixed(2)}
                         </TableCell>
                       </TableRow>
                     )}
@@ -418,15 +423,14 @@ export default function IngredientsPage() {
                   {(() => {
                     const visibleItems = data.grandTotals.filter(item => showZeroIngredients || item.totalQuantity > 0);
                     const ingredientTotal = visibleItems.reduce((sum, item) => item.totalCost != null ? sum + item.totalCost : sum, 0);
-                    const packagingTotal = showPackaging && packagingCost > 0 ? packagingCost * totalMealsOrdered : 0;
-                    const grandTotal = ingredientTotal + packagingTotal;
-                    const anyCosted = visibleItems.some(item => item.totalCost != null) || (showPackaging && packagingCost > 0);
+                    const grandTotal = ingredientTotal + totalPackagingCost;
+                    const anyCosted = visibleItems.some(item => item.totalCost != null) || totalPackagingCost > 0;
                     if (!anyCosted) return null;
                     return (
                       <TableFooter>
                         <TableRow className="font-bold" data-testid="row-grand-cost-total">
                           <TableCell colSpan={3}>
-                            Total {showPackaging && packagingCost > 0 ? "Ingredient + Packaging" : "Ingredient"} Cost
+                            Total {totalPackagingCost > 0 ? "Ingredient + Packaging" : "Ingredient"} Cost
                           </TableCell>
                           <TableCell className="text-right tabular-nums" data-testid="text-grand-cost-total">
                             £{grandTotal.toFixed(2)}
