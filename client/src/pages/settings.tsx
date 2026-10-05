@@ -519,7 +519,7 @@ export default function SettingsPage() {
               data-testid="input-packaging-cost"
             />
             <p className="text-xs text-muted-foreground">
-              Used as the default on the Ingredients page. Individual meals can override this in their Kitchen Cost section; Weekly Stats uses the effective packaging cost.
+              Used as the default on the Ingredients page. Individual meals can override this in their Kitchen Cost section.
             </p>
           </div>
         </CardContent>
