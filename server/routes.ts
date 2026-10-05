@@ -3332,14 +3332,51 @@ export async function registerRoutes(
           itemSummary[item.productName] = (itemSummary[item.productName] || 0) + item.quantity;
         }
         const summaryText = Object.entries(itemSummary).map(([n, q]) => `${q} x ${n}`).join(", ");
-        const mealCount = order.items.reduce((sum, item) =>
-          sum + (/add\s+delivery|meal\s+subscription|oat|porridge|overnight|gold\s*bar|soup/i.test(item.productName) ? 0 : item.quantity), 0);
-        const oatCount = order.items.reduce((sum, item) =>
-          sum + (/oat|porridge|overnight|gold\s*bar/i.test(item.productName) ? item.quantity : 0), 0);
+        let mealCount = 0;
+        let oatCount = 0;
+        let snackCount = 0;
+        let soupCount = 0;
+
+        for (const item of order.items) {
+          const name = item.productName || "";
+          if (/add\s+delivery|meal\s+subscription/i.test(name)) continue;
+
+          if (/oat|porridge|overnight|gold\s*bar/i.test(name)) {
+            oatCount += item.quantity;
+            continue;
+          }
+
+          if (/soup/i.test(name)) {
+            soupCount += item.quantity;
+            continue;
+          }
+
+          const linePrice = Number.parseFloat(item.price || "0");
+          const unitPrice = item.quantity > 0 && Number.isFinite(linePrice)
+            ? linePrice / item.quantity
+            : 0;
+
+          // Match the portal's existing snack convention: small paid extras
+          // (up to £4.50) that aren't oats/gold bars or soup.
+          if (unitPrice > 0 && unitPrice <= 4.50) {
+            snackCount += item.quantity;
+            continue;
+          }
+
+          mealCount += item.quantity;
+        }
+
+        const operationalTotals = [
+          mealCount > 0 ? `Meals ${mealCount}` : null,
+          oatCount > 0 ? `Oats ${oatCount}` : null,
+          snackCount > 0 ? `Snacks ${snackCount}` : null,
+          soupCount > 0 ? `Soup ${soupCount}` : null,
+        ].filter(Boolean);
+
         const totalsText = [
-          `Meals ${mealCount} + Oats / Gold Bars ${oatCount} = ${mealCount + oatCount}`,
+          operationalTotals.join("  |  "),
           ...(order.wooPaidTotal !== null ? [`Paid: £${Number(order.wooPaidTotal).toFixed(2)}`] : []),
-        ].join("  |  ");
+        ].filter(Boolean).join("  |  ");
         const noteText = order.notes?.trim() || "";
 
         // Pre-measure each section
