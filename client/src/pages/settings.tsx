@@ -506,7 +506,7 @@ export default function SettingsPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="packaging-cost">Packaging cost per meal (£)</Label>
+            <Label htmlFor="packaging-cost">Default packaging cost per meal (£)</Label>
             <Input
               id="packaging-cost"
               type="number"
@@ -519,7 +519,7 @@ export default function SettingsPage() {
               data-testid="input-packaging-cost"
             />
             <p className="text-xs text-muted-foreground">
-              Added to ingredient cost-per-meal on the Ingredients page and used in Weekly Stats to show total packaging spend.
+              Used as the default on the Ingredients page. Individual meals can override this in their Kitchen Cost section; Weekly Stats uses the effective packaging cost.
             </p>
           </div>
         </CardContent>
