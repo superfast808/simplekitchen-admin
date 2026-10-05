@@ -420,6 +420,7 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   stripe_live_secret_key: "",
   stripe_live_publishable_key: "",
   packaging_cost: "0",
+  product_packaging_costs: "{}",
 };
 
 const ALLOWED_SETTINGS_KEYS = new Set(Object.keys(DEFAULT_SETTINGS));
