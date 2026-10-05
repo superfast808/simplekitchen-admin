@@ -1,12 +1,15 @@
-import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ChefHat, ChevronDown, ChevronRight } from "lucide-react";
+import { ChefHat, ChevronDown, ChevronRight, Save, RotateCcw } from "lucide-react";
 import { DateFilter, DateRangeLabel, useDateFilter } from "@/components/date-filter";
 import { OrderSourceFilter, useOrderSourceFilter } from "@/components/order-source-filter";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { queryClient, apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 import { ImportRecipeCostsButton } from "@/components/import-recipe-costs-button";
 
 type ProductBreakdown = {
@@ -55,14 +58,25 @@ function formatPrecise(n: number): string {
 function ProductAccordion({
   product,
   packagingCost,
-  showPackaging,
+  defaultPackagingCost,
+  hasPackagingOverride,
+  onSavePackaging,
+  savingPackaging,
 }: {
   product: ProductBreakdown;
   packagingCost: number;
-  showPackaging: boolean;
+  defaultPackagingCost: number;
+  hasPackagingOverride: boolean;
+  onSavePackaging: (productId: number, value: number | null) => void;
+  savingPackaging: boolean;
 }) {
   const [open, setOpen] = useState(product.orderedQuantity > 0);
+  const [packagingInput, setPackagingInput] = useState(packagingCost.toFixed(2));
   const hasOrders = product.orderedQuantity > 0;
+
+  useEffect(() => {
+    setPackagingInput(packagingCost.toFixed(2));
+  }, [packagingCost]);
 
   const hasIngredientCosts = product.ingredients.some(i => i.costPerMeal != null);
   const ingredientCostPerMeal = hasIngredientCosts
@@ -71,8 +85,8 @@ function ProductAccordion({
 
   const displayCostPerMeal =
     ingredientCostPerMeal != null
-      ? ingredientCostPerMeal + (showPackaging ? packagingCost : 0)
-      : packagingCost > 0 && showPackaging
+      ? ingredientCostPerMeal + packagingCost
+      : packagingCost > 0
       ? packagingCost
       : null;
 
@@ -82,8 +96,8 @@ function ProductAccordion({
 
   const totalWithPackaging =
     totalIngredientCost != null
-      ? totalIngredientCost + (showPackaging ? packagingCost * product.orderedQuantity : 0)
-      : showPackaging && packagingCost > 0
+      ? totalIngredientCost + packagingCost * product.orderedQuantity
+      : packagingCost > 0
       ? packagingCost * product.orderedQuantity
       : null;
 
@@ -102,7 +116,7 @@ function ProductAccordion({
         <div className="flex items-center gap-3 flex-shrink-0 ml-2">
           {displayCostPerMeal != null && (
             <span className="text-xs text-muted-foreground" data-testid={`text-cost-per-meal-${product.productId}`}>
-              £{displayCostPerMeal.toFixed(2)}/meal{showPackaging && packagingCost > 0 ? " (incl. pkg)" : ""}
+              £{displayCostPerMeal.toFixed(2)}/meal{packagingCost > 0 ? " (incl. packaging)" : ""}
             </span>
           )}
           {totalWithPackaging != null && hasOrders && (
@@ -117,6 +131,53 @@ function ProductAccordion({
       </button>
       {open && (
         <div className="border-t">
+          <div className="p-3 border-b bg-muted/30">
+            <div className="flex items-end gap-3 flex-wrap">
+              <div className="space-y-1">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Kitchen cost per meal</p>
+                <label className="text-xs text-muted-foreground">Packaging (£)</label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={packagingInput}
+                  onChange={e => setPackagingInput(e.target.value)}
+                  className="w-[130px] h-8"
+                  data-testid={`input-product-packaging-${product.productId}`}
+                />
+              </div>
+              <Button
+                size="sm"
+                onClick={() => {
+                  const value = Number.parseFloat(packagingInput);
+                  if (!Number.isFinite(value) || value < 0) return;
+                  onSavePackaging(product.productId, value);
+                }}
+                disabled={savingPackaging}
+                data-testid={`button-save-product-packaging-${product.productId}`}
+              >
+                <Save className="w-3.5 h-3.5 mr-1" />
+                Save
+              </Button>
+              {hasPackagingOverride && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => onSavePackaging(product.productId, null)}
+                  disabled={savingPackaging}
+                  data-testid={`button-reset-product-packaging-${product.productId}`}
+                >
+                  <RotateCcw className="w-3.5 h-3.5 mr-1" />
+                  Use default
+                </Button>
+              )}
+              <div className="text-xs text-muted-foreground pb-1">
+                {hasPackagingOverride
+                  ? `Custom packaging cost for this meal. Default is £${defaultPackagingCost.toFixed(2)}.`
+                  : `Using the default packaging cost of £${defaultPackagingCost.toFixed(2)}.`}
+              </div>
+            </div>
+          </div>
           <Table>
             <TableHeader>
               <TableRow>
@@ -149,7 +210,7 @@ function ProductAccordion({
                   </TableCell>
                 </TableRow>
               ))}
-              {showPackaging && packagingCost > 0 && (
+              {packagingCost > 0 && (
                 <TableRow className="text-muted-foreground italic">
                   <TableCell className="text-sm">Packaging</TableCell>
                   <TableCell />
@@ -164,11 +225,11 @@ function ProductAccordion({
                 </TableRow>
               )}
             </TableBody>
-            {(ingredientCostPerMeal != null || (showPackaging && packagingCost > 0)) && (
+            {(ingredientCostPerMeal != null || packagingCost > 0) && (
               <TableFooter>
                 <TableRow>
                   <TableCell colSpan={6} className="text-right text-sm font-semibold">
-                    Total cost per meal{showPackaging && packagingCost > 0 ? " (incl. packaging)" : ""}
+                    Total cost per meal{packagingCost > 0 ? " (incl. packaging)" : ""}
                   </TableCell>
                   <TableCell className="text-right tabular-nums text-sm font-bold">
                     £{(displayCostPerMeal ?? 0).toFixed(4)}
@@ -185,11 +246,11 @@ function ProductAccordion({
 }
 
 export default function IngredientsPage() {
+  const { toast } = useToast();
   const dateFilter = useDateFilter();
   const sourceFilter = useOrderSourceFilter();
   const { from, to } = dateFilter;
   const [showZeroIngredients, setShowZeroIngredients] = useState(false);
-  const [showPackaging, setShowPackaging] = useState(false);
 
   const { data, isLoading } = useQuery<BreakdownResponse>({
     queryKey: ["/api/ingredient-breakdown", `?from=${from.toISOString()}&to=${to.toISOString()}&source=${sourceFilter.toQueryParam()}`],
@@ -200,6 +261,38 @@ export default function IngredientsPage() {
   });
 
   const packagingCost = parseFloat(settings?.packaging_cost || "0") || 0;
+
+  let productPackagingCosts: Record<string, number> = {};
+  try {
+    const parsed = JSON.parse(settings?.product_packaging_costs || "{}");
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      productPackagingCosts = Object.fromEntries(
+        Object.entries(parsed)
+          .map(([key, value]) => [key, Number(value)])
+          .filter(([, value]) => Number.isFinite(value) && value >= 0)
+      );
+    }
+  } catch {
+    productPackagingCosts = {};
+  }
+
+  const packagingMutation = useMutation({
+    mutationFn: async ({ productId, value }: { productId: number; value: number | null }) => {
+      const next = { ...productPackagingCosts };
+      if (value == null) delete next[String(productId)];
+      else next[String(productId)] = value;
+      return apiRequest("POST", "/api/settings", {
+        product_packaging_costs: JSON.stringify(next),
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/settings"] });
+      toast({ title: "Kitchen cost saved" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to save kitchen cost", description: error.message, variant: "destructive" });
+    },
+  });
 
   const activeProducts = data?.products.filter(p => p.orderedQuantity > 0) ?? [];
   const hiddenCount = (data?.products.length ?? 0) - activeProducts.length;
@@ -248,18 +341,6 @@ export default function IngredientsPage() {
             <div className="flex items-center justify-between flex-wrap gap-3">
               <h2 className="text-lg font-semibold">By Product</h2>
               <div className="flex items-center gap-4">
-                {packagingCost > 0 && (
-                  <label className="flex items-center gap-2 cursor-pointer select-none text-sm text-muted-foreground shrink-0" data-testid="toggle-show-packaging">
-                    <input
-                      type="checkbox"
-                      className="rounded"
-                      checked={showPackaging}
-                      onChange={e => setShowPackaging(e.target.checked)}
-                      data-testid="checkbox-show-packaging"
-                    />
-                    Include packaging (£{packagingCost.toFixed(2)}/meal)
-                  </label>
-                )}
                 {hiddenCount > 0 && (
                   <span className="text-xs text-muted-foreground" data-testid="text-hidden-products">
                     {hiddenCount} product{hiddenCount > 1 ? "s" : ""} with no orders this week hidden
@@ -271,8 +352,11 @@ export default function IngredientsPage() {
               <ProductAccordion
                 key={product.productId}
                 product={product}
-                packagingCost={packagingCost}
-                showPackaging={showPackaging}
+                packagingCost={productPackagingCosts[String(product.productId)] ?? packagingCost}
+                defaultPackagingCost={packagingCost}
+                hasPackagingOverride={Object.prototype.hasOwnProperty.call(productPackagingCosts, String(product.productId))}
+                onSavePackaging={(productId, value) => packagingMutation.mutate({ productId, value })}
+                savingPackaging={packagingMutation.isPending}
               />
             ))}
           </div>
