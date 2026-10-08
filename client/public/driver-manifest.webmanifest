@@ -1,0 +1,18 @@
+{
+  "name": "Simple Kitchen Driver",
+  "short_name": "SK Driver",
+  "description": "Simple Kitchen delivery driver portal",
+  "start_url": "/driver",
+  "scope": "/driver",
+  "display": "standalone",
+  "background_color": "#f4f1e9",
+  "theme_color": "#314d40",
+  "icons": [
+    {
+      "src": "/driver-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
