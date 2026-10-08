@@ -425,7 +425,7 @@ export default function OrdersPage() {
           <DeliveryDatePills weekStart={from} />
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <DateFilter {...dateFilter} testIdPrefix="orders" showMonth /><DebugExportButton page="orders" from={from} to={to} day={dayFilter}/>
+          <DateFilter {...dateFilter} testIdPrefix="orders" showMonth /><DebugExportButton page="orders" from={from} to={to} day={dayFilter}/><DebugExportButton page="full-reconciliation" from={from} to={to} day={dayFilter}/>
           <Button size="sm" onClick={() => syncMutation.mutate()} disabled={syncMutation.isPending} data-testid="button-sync-orders">
             <RefreshCw className={`w-4 h-4 mr-1 ${syncMutation.isPending ? "animate-spin" : ""}`} />
             Sync from Woo
