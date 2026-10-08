@@ -75,7 +75,7 @@ export function registerDispatch(app:Express){
  app.get("/api/driver/me",driverOnly,async(req:any,res)=>{
   const d=await pool.query('SELECT id::text,name,registration FROM dispatch_drivers WHERE id=$1',[req.driverId]);
   const stops=await pool.query(`SELECT a.order_id AS id,a.route_date AS "routeDate",a.delivery_day AS "day",a.sequence,a.state,
-    o.customer_name AS "customerName",o.delivery_address AS address,
+    o.customer_name AS "customerName",o.delivery_address AS address,\n    o.customer_delivery_instructions AS "deliveryNotes",
     (SELECT json_agg(json_build_object('name',i.product_name,'quantity',i.quantity)) FROM order_items i WHERE i.order_id=o.id) AS items
     FROM dispatch_assignments a JOIN orders o ON o.id=a.order_id
     WHERE a.driver_id=$1 AND a.route_date BETWEEN current_date-1 AND current_date+7
