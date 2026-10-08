@@ -114,9 +114,19 @@ export function registerCustomerPortal(app:Express){
  app.post("/api/customer/access",async(req,res)=>{
   const email=normalize(String(req.body?.email||""));
   if(!/^\S+@\S+\.\S+$/.test(email)||email.length>254)return res.status(400).json({message:"Enter a valid email address"});
-  const recent=await pool.query("SELECT count(*)::int AS n FROM customer_magic_links WHERE email=$1 AND created_at>now()-interval '1 hour'",[email]);
+  const testMode=(await setting("customer_portal_live","false"))!=="true";
+  const adminTesting=testMode && !!req.session?.userId;
+  // Legitimate testing can require repeated login requests. Keep a higher
+  // per-address allowance for authenticated administrators only.
+  const hourlyLimit=adminTesting?60:5;
+  const recent=await pool.query("SELECT count(*)::int AS n, min(created_at) AS oldest FROM customer_magic_links WHERE email=$1 AND created_at>now()-interval '1 hour'",[email]);
   const volume=await pool.query("SELECT count(*)::int AS n FROM customer_magic_links WHERE created_at>now()-interval '1 minute'");
-  if(Number(recent.rows[0].n)>=5||Number(volume.rows[0].n)>100)return res.status(429).json({message:"Please try later"});
+  if(Number(recent.rows[0].n)>=hourlyLimit||Number(volume.rows[0].n)>100){
+    const oldest=recent.rows[0].oldest?new Date(recent.rows[0].oldest).getTime():Date.now();
+    const retrySeconds=Number(recent.rows[0].n)>=hourlyLimit?Math.max(1,Math.ceil((oldest+3600000-Date.now())/1000)):60;
+    res.setHeader("Retry-After",String(retrySeconds));
+    return res.status(429).json({message:adminTesting?"Testing request limit reached. Try again in "+Math.ceil(retrySeconds/60)+" minute(s).":"Too many sign-in requests. Please try again later.",retryAfterSeconds:retrySeconds});
+  }
   // In test mode, only authenticated portal administrators can generate
   // impersonation links redirected to the test alias. Never expose this publicly.
   if((await setting("customer_portal_live","false"))!=="true" && !req.session?.userId){
