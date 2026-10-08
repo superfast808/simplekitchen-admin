@@ -14,6 +14,7 @@ import { log } from "./index";
 import { getUncachableStripeClient } from "./stripeClient";
 import { pool } from "./db";
 import { registerKitchenAuditRoutes } from "./kitchen-audit";
+import { registerOrderActions } from "./order-actions";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
@@ -1855,6 +1856,7 @@ export async function registerRoutes(
   });
 
   registerKitchenAuditRoutes(app);
+  registerOrderActions(app);
 
   app.get("/api/orders", async (req, res) => {
     try {
@@ -2092,13 +2094,9 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/orders/:id", async (req, res) => {
-    try {
-      await storage.deleteOrder(parseInt(req.params.id));
-      res.json({ success: true });
-    } catch (error: any) {
-      res.status(500).json({ message: error.message });
-    }
+  // Hard-delete is intentionally disabled; financial and fulfilment records must be retained.
+  app.delete("/api/orders/:id", (req, res) => {
+    res.status(403).json({ message: "Permanent deletion is disabled. Use Cancel or Refund & Cancel instead." });
   });
 
   app.get("/api/order-items", async (req, res) => {
