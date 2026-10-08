@@ -51,6 +51,11 @@ export function registerCustomerPortal(app:Express){
   const recent=await pool.query("SELECT count(*)::int AS n FROM customer_magic_links WHERE email=$1 AND created_at>now()-interval '1 hour'",[email]);
   const volume=await pool.query("SELECT count(*)::int AS n FROM customer_magic_links WHERE created_at>now()-interval '1 minute'");
   if(Number(recent.rows[0].n)>=5||Number(volume.rows[0].n)>100)return res.status(429).json({message:"Please try later"});
+  // In test mode, only authenticated portal administrators can generate
+  // impersonation links redirected to the test alias. Never expose this publicly.
+  if((await setting("customer_portal_live","false"))!=="true" && !req.session?.userId){
+    return res.json({message:"If an eligible account exists, a sign-in link has been sent."});
+  }
   if(await eligible(email)){
    const raw=token();
    await pool.query("INSERT INTO customer_magic_links(token_hash,email,expires_at) VALUES($1,$2,now()+interval '15 minutes')",[hash(raw),email]);
