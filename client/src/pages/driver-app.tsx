@@ -7,10 +7,12 @@ type Stop={id:number;customerName:string;address:string;day:string;routeDate:str
 type DriverData={driver:{id:string;name:string;registration:string|null};stops:Stop[]};
 const request=async(path:string,method="GET",body?:unknown)=>{const response=await fetch(path,{method,headers:{"Content-Type":"application/json"},credentials:"include",body:body?JSON.stringify(body):undefined,cache:"no-store"});const data=await response.json();if(!response.ok)throw Error(data.message||"Request failed");return data};
 export default function DriverApp(){
+ const [testMode,setTestMode]=useState(false);
  const [email,setEmail]=useState(""),[data,setData]=useState<DriverData|null>(null),[message,setMessage]=useState(""),[busy,setBusy]=useState(false),[locationOn,setLocationOn]=useState(false),[install,setInstall]=useState<any>(null);
  const refresh=()=>request("/api/driver/me").then(setData).catch(()=>setData(null));
  useEffect(()=>{
   const params=new URLSearchParams(window.location.search),token=params.get("token");
+  fetch("/api/driver/test-status",{credentials:"include"}).then(r=>r.ok?r.json():{enabled:false}).then(v=>setTestMode(!!v.enabled)).catch(()=>{});
   if(token){request("/api/driver/verify","POST",{token}).then(()=>{window.history.replaceState({},"","/driver");refresh()}).catch(e=>setMessage(e.message))}else refresh();
   if("serviceWorker" in navigator)navigator.serviceWorker.register("/driver-sw.js",{scope:"/driver"}).catch(()=>{});
   const link=document.createElement("link");link.rel="manifest";link.href="/driver-manifest.webmanifest";document.head.appendChild(link);
@@ -61,7 +63,7 @@ export default function DriverApp(){
      <p className="text-xs">{(stop.items||[]).map(item=>item.quantity+"× "+item.name).join(" · ")}</p>
      <div className="flex flex-wrap gap-2">
       <Button variant="outline" onClick={()=>window.open("https://www.google.com/maps/search/?api=1&query="+encodeURIComponent(stop.address||""),"_blank")}><Navigation className="w-4 h-4 mr-1"/>Navigate</Button>
-      <Button disabled={busy||stop.state!=="assigned"} onClick={()=>setState(stop.id,"on_way")}>On my way</Button>
+      <Button disabled={busy||(!testMode&&stop.state!=="assigned")} onClick={()=>setState(stop.id,"on_way")}>{testMode&&stop.state!=="assigned"?"Replay On my way (TEST)":"On my way"}</Button>
       <Button disabled={busy||stop.state==="delivered"} onClick={()=>setState(stop.id,"delivered")}><CheckCircle className="w-4 h-4 mr-1"/>Mark delivered</Button>
      </div>
     </CardContent></Card>)}
