@@ -3291,6 +3291,21 @@ export async function registerRoutes(
   // WooCommerce signs the raw JSON payload with HMAC-SHA256 and sends the
   // base64 digest in X-WC-Webhook-Signature. Configure order.created and
   // order.updated webhooks to POST here using the same WC_WEBHOOK_SECRET.
+  // Debounce webhook bursts; the existing importer performs full order/item reconciliation.
+  let webhookSyncTimer: ReturnType<typeof setTimeout> | null = null;
+  function queueWebhookSync() {
+    if (webhookSyncTimer) clearTimeout(webhookSyncTimer);
+    webhookSyncTimer = setTimeout(async () => {
+      webhookSyncTimer = null;
+      if (syncInProgress) {
+        webhookSyncTimer = setTimeout(queueWebhookSync, 2000);
+        return;
+      }
+      try { await performSync(); }
+      catch (error: any) { log("Webhook-triggered sync failed: " + error.message, "sync"); }
+    }, 1200);
+  }
+
   app.post("/api/webhooks/woocommerce", async (req, res) => {
     const webhookSecret = process.env.WC_WEBHOOK_SECRET;
     const isProduction = process.env.NODE_ENV === "production";
@@ -3309,7 +3324,7 @@ export async function registerRoutes(
 
     const topicHeader = req.headers["x-wc-webhook-topic"];
     const topic = (Array.isArray(topicHeader) ? topicHeader[0] : topicHeader || "").toLowerCase();
-    if (topic && topic !== "order.created" && topic !== "order.updated") {
+    if (topic && !["order.created", "order.updated", "order.deleted"].includes(topic)) {
       return res.json({ received: true, ignored: true, topic });
     }
 
@@ -3322,19 +3337,22 @@ export async function registerRoutes(
 
     try {
       const existing = await storage.getOrderByWooId(wooId);
-      if (!existing) {
-        // The regular Woo sync imports complete new orders. Returning success here
-        // prevents webhook retries while the next sync safely creates the order.
-        log(`Woo webhook received delivery notes for order ${wooId}; awaiting order sync`, "sync");
-        return res.json({ received: true, updated: false, awaitingSync: true });
+      // A signed webhook updates local status immediately, even if the full
+      // product/order import is still waiting to run.
+      if (existing) {
+        const updates: Record<string, any> = {};
+        const status = String(wooOrder?.status || "").toLowerCase();
+        if (["processing","completed","on-hold","refunded","cancelled","pending","failed","trash"].includes(status)) {
+          updates.status = status;
+        }
+        const note = getWooOrderNote(wooOrder);
+        if (note) updates.notes = note;
+        if (Object.keys(updates).length) await storage.updateOrder(existing.id, updates);
       }
-
-      const note = getWooOrderNote(wooOrder);
-      if (note) {
-        await storage.updateOrder(existing.id, { notes: note });
-      }
-      log(`Woo webhook updated delivery notes for order ${wooId}`, "sync");
-      return res.json({ received: true, updated: !!note });
+      // Queue an immediate import for new orders and edited items; retain periodic
+      // polling as a fallback if WooCommerce cannot deliver the webhook.
+      queueWebhookSync();
+      return res.json({ received: true, updated: !!existing, queuedSync: true });
     } catch (error: any) {
       log(`Woo webhook update failed for order ${wooId}: ${error.message}`, "sync");
       return res.status(500).json({ message: "Webhook update failed" });
