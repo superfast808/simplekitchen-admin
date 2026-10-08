@@ -64,7 +64,7 @@ export default function CustomerPortal(){
       if(sub){await api("/api/customer/push/unsubscribe","POST",{endpoint:sub.endpoint});await sub.unsubscribe()}
       setNotificationsOn(false);setMessage("Push notifications disabled on this device.")
     }}>Turn off</Button>}
-    {message&&<p className="text-sm w-full" role="status">{message}</p>
+    {message&&<p className="text-sm w-full" role="status">{message}</p>}
    </div>
    <Card><CardContent className="p-5 space-y-3"><h3 className="font-semibold text-lg">Your updates {alerts.filter(a=>!a.read).length>0?`(${alerts.filter(a=>!a.read).length} new)`:""}</h3>
    {alerts.length===0?<p className="text-sm opacity-70">No updates yet.</p>:alerts.slice(0,8).map(a=><div key={a.id} className="border-b pb-2 flex justify-between gap-2"><div><p className="font-semibold text-sm">{a.title}</p><p className="text-sm">{a.body}</p><p className="text-xs opacity-60">{new Date(a.createdAt).toLocaleString("en-GB")}</p></div>{!a.read&&<Button variant="outline" size="sm" onClick={async()=>{await api("/api/customer/alerts/"+a.id+"/read","POST");setAlerts(x=>x.map(y=>y.id===a.id?{...y,read:true}:y))}}>Read</Button>}</div>)}</CardContent></Card>
