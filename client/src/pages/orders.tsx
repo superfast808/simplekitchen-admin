@@ -386,12 +386,13 @@ export default function OrdersPage() {
     window.open(`/api/orders/export?${params.toString()}`, "_blank");
   };
 
-  const handleLabels = (tuesday?: boolean) => {
+  const handleLabels = (tuesday?: boolean, mode?: "xmas") => {
     const params = new URLSearchParams({
       from: from.toISOString(),
       to: to.toISOString(),
     });
     if (tuesday !== undefined) params.set("tuesday", String(tuesday));
+    if (mode === "xmas") params.set("mode", "xmas");
     window.open(`/api/orders/labels?${params.toString()}`, "_blank");
   };
 
@@ -422,6 +423,10 @@ export default function OrdersPage() {
               <Button size="sm" variant="outline" onClick={() => handleLabels(true)} data-testid="button-print-labels-tuesday">
                 <Tag className="w-4 h-4 mr-1" />
                 Tue Labels
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => handleLabels(undefined, "xmas")} data-testid="button-print-labels-christmas">
+                <Tag className="w-4 h-4 mr-1" />
+                🎄 Xmas Labels
               </Button>
             </>
           )}
