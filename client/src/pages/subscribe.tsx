@@ -322,13 +322,24 @@ export default function SubscribePage({ params }: { params: { token: string } })
   const { data, isLoading, error } = useQuery<InviteData>({
     queryKey: ["/api/subscribe", token],
     queryFn: async () => {
-      const res = await fetch(`/api/subscribe/${token}`);
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 12000);
+      let res: Response;
+      try {
+        res = await fetch(`/api/subscribe/${encodeURIComponent(token)}`, { signal: controller.signal, credentials: "include" });
+      } catch (e) {
+        throw new Error(controller.signal.aborted ? "The menu is taking too long to respond. Please try again." : "Unable to connect to the kitchen. Please try again.");
+      } finally {
+        window.clearTimeout(timeout);
+      }
       if (!res.ok) {
         const err = await res.json();
         throw new Error(err.message || "Not found");
       }
       return res.json();
     },
+    retry: false,
+    staleTime: 60_000,
   });
 
   // A customer who arrived from My Simple Kitchen has already verified their email
