@@ -2,12 +2,28 @@ import type { Express, Request } from "express";
 import crypto from "crypto";
 import nodemailer from "nodemailer";
 import { pool } from "./db";
+import { fulfilmentDate, fulfilmentGroup, customerJourney, ukDateString } from "./customer-fulfilment";
 
 const hash=(s:string)=>crypto.createHash("sha256").update(s).digest("hex");
 const normalize=(s:string)=>s.trim().toLowerCase();
 const token=()=>crypto.randomBytes(32).toString("base64url");
 const cookieName="sk_customer";
 async function setting(k:string,fallback=""){const r=await pool.query("SELECT value FROM settings WHERE key=$1",[k]);return r.rows[0]?.value??fallback}
+const escapeHtml=(v:string)=>v.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+export function customerEmailContent(kind:"login"|"welcome"|"order",details:{link:string;orderNumber?:string}){
+ const link=escapeHtml(details.link);
+ const titles={login:"Your kitchen account awaits",welcome:"Welcome to My Simple Kitchen",order:"We've received your order"};
+ const bodies={login:"Your secure link is ready. See your upcoming deliveries, past favourites and meal selections.",
+ welcome:"You now have a handy place to follow orders, see your meal history and manage upcoming selections.",
+ order:"Thank you for choosing Simple Kitchen! Order #"+escapeHtml(details.orderNumber||"")+" is safely with us. Follow your upcoming delivery anytime."};
+ const action=kind==="login"?"Sign in to my account":"See my order journey";
+ const foot=kind==="login"?"Your sign-in link expires in 15 minutes and works once. If you didn't request it, ignore this email.":"No password required — sign in using your order email address.";
+ return '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;background:#f4f1e9;padding:24px 12px;font-family:Arial,Helvetica,sans-serif;color:#314d40">'+
+ '<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="max-width:600px;margin:auto;background:#fff;border-radius:16px;overflow:hidden"><tr><td style="padding:30px;background:#314d40;text-align:center;color:white"><strong style="font-size:27px;letter-spacing:.5px">Simple Kitchen</strong><div style="font-size:11px;letter-spacing:2px;margin-top:8px;color:#dfe9df">MADE WITH CARE</div></td></tr>'+
+ '<tr><td style="padding:32px 28px"><h1 style="font-size:24px;line-height:1.3;margin:0 0 18px">'+titles[kind]+'</h1><p style="font-size:15px;line-height:1.8;color:#546a59">'+bodies[kind]+'</p>'+
+ '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:28px 0"><tr><td style="background:#314d40;border-radius:8px;padding:15px 24px"><a href="'+link+'" style="color:white;text-decoration:none;font-size:15px;font-weight:bold">'+action+'</a></td></tr></table>'+
+ '<p style="font-size:13px;line-height:1.6;color:#718276">'+foot+'</p></td></tr><tr><td style="text-align:center;padding:20px;background:#f4f1e9;font-size:12px;color:#718276">Fresh meals, thoughtfully prepared 🤎<br>Simple Kitchen</td></tr></table></body></html>';
+}
 export async function sendCustomerPortalNotification(email:string,subject:string,html:string,eventKey:string){
  const enabled=await setting("customer_portal_live","false");
  const alias=await setting("customer_portal_test_email");
@@ -61,7 +77,7 @@ export function registerCustomerPortal(app:Express){
    await pool.query("INSERT INTO customer_magic_links(token_hash,email,expires_at) VALUES($1,$2,now()+interval '15 minutes')",[hash(raw),email]);
    const url=(await setting("customer_portal_url","https://admin.simplekitchenprep.com/my")).replace(/\/$/,"");
    const link=url+"?token="+encodeURIComponent(raw);
-   await sendCustomerPortalNotification(email,"Sign in to My Simple Kitchen",`<div style="font-family:Arial,sans-serif;max-width:540px;margin:auto;padding:24px"><h1 style="color:#314D40">My Simple Kitchen</h1><p>Your secure sign-in link is ready. It expires in 15 minutes.</p><p><a href="${link}" style="background:#314D40;color:white;padding:14px 20px;border-radius:8px;text-decoration:none">View my orders</a></p><p>If you didn't request this, you can ignore this email.</p></div>`,"login:"+hash(raw));
+   await sendCustomerPortalNotification(email,"Your Simple Kitchen sign-in link",customerEmailContent("login",{link}),"login:"+hash(raw));
   }
   res.json({message:"If an eligible account exists, a sign-in link has been sent."});
  });
@@ -91,7 +107,11 @@ export function registerCustomerPortal(app:Express){
   GROUP BY o.id ORDER BY o.order_date DESC LIMIT 100`,[email]);
   const invites=await pool.query(`SELECT si.token,si.week_from AS "weekFrom",si.week_to AS "weekTo",si.status FROM subscription_invites si WHERE lower(si.customer_email)=$1 AND si.status NOT IN ('cancelled','expired') ORDER BY si.week_from DESC LIMIT 10`,[email]);
   res.setHeader("Cache-Control","no-store");
-  res.json({email,orders:data.rows,selectionInvites:invites.rows});
+  const orders=data.rows.map((o:any)=>{
+    const deliveryDate=fulfilmentDate(o.orderDate,o.isTuesday);
+    return {...o,deliveryDate,group:fulfilmentGroup(deliveryDate),journey:customerJourney(deliveryDate),canEditInstructions:deliveryDate>ukDateString(new Date()) && !["cancelled","refunded","failed"].includes(o.status)};
+  });
+  res.json({email,orders,selectionInvites:invites.rows});
  });
  app.patch("/api/customer/orders/:id/instructions",async(req,res)=>{
   const email=await sessionEmail(req);if(!email)return res.status(401).json({message:"Not signed in"});
