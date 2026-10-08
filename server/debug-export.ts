@@ -43,13 +43,22 @@ export function registerDebugExport(app:Express){
     if(first.wooId!=null){const found=groups.get(fingerprint)||[];found.push(id);groups.set(fingerprint,found)}
    }
    for(const ids of groups.values())if(ids.length>1)duplicateCandidates.push({orderIds:ids,reason:"Shared WooCommerce order number and matching items"});
+   // Page-specific reconciliation context, alongside the common order-level snapshot.
+   // These figures intentionally expose each calculation's inclusion criteria.
+   const pageComparison={
+     orders:bucket(rows.filter(x=>!x.christmas&&!x.inactive)),
+     kitchenProduction:bucket(rows.filter(x=>!x.christmas&&!x.inactive&&(day==="all"||x.day===day))),
+     ingredientSource:bucket(rows.filter(x=>!x.christmas&&!x.inactive)),
+     excluded:rows.filter(x=>x.excludedReason!==null).map(x=>({orderId:x.orderId,wooId:x.wooId,product:x.product,quantity:x.quantity,reason:x.excludedReason})),
+     duplicateExample:duplicateCandidates,
+   };
    const payload={
     schemaVersion:1,exportedAt:new Date().toISOString(),page,filter:{from:from.toISOString(),to:to.toISOString(),day},
     privacy:"Customer names, email addresses, postal addresses, phone numbers and delivery notes omitted. Order identifiers and product quantities retained for tracing.",
     totals:{recorded:bucket(rows.filter(x=>!x.christmas)),active:bucket(active),selected:bucket(selected),
       christmas:bucket(rows.filter(x=>x.christmas))},
     statuses:Object.fromEntries([...new Set(rows.map(r=>r.status))].map(status=>[status,rows.filter(r=>r.status===status).length])),
-    duplicates:duplicateCandidates,lines:rows,
+    duplicates:duplicateCandidates,pageComparison,lines:rows,
    };
    res.setHeader("Cache-Control","no-store");
    res.setHeader("Content-Type","application/json; charset=utf-8");
