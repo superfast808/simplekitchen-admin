@@ -1,3 +1,4 @@
+import { DebugExportButton } from "@/components/debug-export-button";
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
@@ -267,7 +268,7 @@ export default function WeeklyStatsPage() {
           <p className="text-sm text-muted-foreground" data-testid="text-weekly-stats-range">
             {format(from, "EEE, MMM d")} – {format(to, "EEE d MMM, yyyy")} 07:00
           </p>
-          <DeliveryDatePills weekStart={from} />
+          <DeliveryDatePills weekStart={from} /><DebugExportButton page="weekly-stats" from={from} to={to}/>
           {weekFinalized && (
             <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1 font-medium" data-testid="text-stats-cutoff-notice">
               ✓ Meals finalised — orders locked as of Thu 7am
