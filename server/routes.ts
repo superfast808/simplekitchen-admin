@@ -15,6 +15,7 @@ import { getUncachableStripeClient } from "./stripeClient";
 import { pool } from "./db";
 import { registerKitchenAuditRoutes } from "./kitchen-audit";
 import { registerOrderActions } from "./order-actions";
+import { registerCustomerPortal } from "./customer-portal";
 import { wooCredentials, saveWooCredentials, wooFetch } from "./woo-credentials";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
@@ -1858,6 +1859,7 @@ export async function registerRoutes(
 
   registerKitchenAuditRoutes(app);
   registerOrderActions(app);
+  registerCustomerPortal(app);
 
   app.get("/api/woo-connection", async (req, res) => {
     if(!req.session?.userId)return res.status(401).json({message:"Unauthorized"});
