@@ -102,7 +102,7 @@ export function registerKitchenAuditRoutes(app: Express) {
       `, [window.from, window.to]);
       // Manual stock isn't attributable to a delivery day. Show it separately,
       // never silently mix it into Saturday or Tuesday allocations.
-      res.json({ generatedAt: new Date().toISOString(), day, ordersCount: selected.length,
+      res.json({ generatedAt: new Date().toISOString(), day, ordersCount: selected.filter(o => !["cancelled","refunded","failed","trash"].includes(o.status.toLowerCase())).length,
         products: [...products.values()].sort((a,b) => a.productName.localeCompare(b.productName)),
         manualStock: day === "xmas" ? [] : manual.rows, duplicates: duplicateGroups(selected) });
     } catch (error: any) { res.status(500).json({ message: error.message }); }
