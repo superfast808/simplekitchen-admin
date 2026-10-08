@@ -45,6 +45,12 @@ export async function runStartupMigrations() {
         created_at timestamptz NOT NULL DEFAULT now()
       )
     `);
+    await client.query("ALTER TABLE customer_magic_links ADD COLUMN IF NOT EXISTS test_recipient text");
+    await client.query("ALTER TABLE customer_portal_sessions ADD COLUMN IF NOT EXISTS test_recipient text");
+    await client.query(`CREATE TABLE IF NOT EXISTS customer_push_test_devices (
+      endpoint text PRIMARY KEY, customer_email text NOT NULL, test_recipient text NOT NULL,
+      registered_at timestamptz NOT NULL DEFAULT now()
+    )`);
     await client.query(`
       CREATE TABLE IF NOT EXISTS customer_portal_notifications (
         id bigserial PRIMARY KEY, email text NOT NULL, event_key text NOT NULL UNIQUE,
