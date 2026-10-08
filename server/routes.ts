@@ -15,6 +15,7 @@ import { getUncachableStripeClient } from "./stripeClient";
 import { pool } from "./db";
 import { registerKitchenAuditRoutes } from "./kitchen-audit";
 import { registerOrderActions } from "./order-actions";
+import { wooCredentials, saveWooCredentials, wooFetch } from "./woo-credentials";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
@@ -1857,6 +1858,26 @@ export async function registerRoutes(
 
   registerKitchenAuditRoutes(app);
   registerOrderActions(app);
+
+  app.get("/api/woo-connection", async (req, res) => {
+    if(!req.session?.userId)return res.status(401).json({message:"Unauthorized"});
+    try { const c=await wooCredentials();res.setHeader("Cache-Control","no-store");res.json({url:c.url,hasKey:!!c.key,hasSecret:!!c.secret}); }
+    catch(e:any){res.status(500).json({message:e.message})}
+  });
+  app.post("/api/woo-connection", async (req,res) => {
+    if(!req.session?.userId)return res.status(401).json({message:"Unauthorized"});
+    try {
+      const {url,key,secret}=req.body||{};
+      if(typeof url!=="string"||typeof key!=="string"||typeof secret!=="string")return res.status(400).json({message:"Invalid connection fields"});
+      await saveWooCredentials({url,key,secret});res.json({success:true});
+    } catch(e:any){res.status(400).json({message:e.message})}
+  });
+  app.post("/api/woo-connection/test", async(req,res)=>{
+    if(!req.session?.userId)return res.status(401).json({message:"Unauthorized"});
+    try {const response=await wooFetch("system_status");res.json({success:true,environment:response?.environment?.site_url||"Connected",note:"Read connection verified. Refund permissions require a separate transaction test."});}
+    catch(e:any){res.status(502).json({message:e.message})}
+  });
+
 
   app.get("/api/orders", async (req, res) => {
     try {
