@@ -2663,6 +2663,10 @@ export async function registerRoutes(
           return { ...order, items };
         })
       );
+      const christmasProducts = (await storage.getProducts()).filter(p=>/(^|\W)(xmas|christmas)(\W|$)/i.test(p.category||""));
+      const christmasIds = new Set(christmasProducts.map(p=>p.id));
+      const christmasNames = new Set(christmasProducts.map(p=>p.name.trim().toLowerCase()));
+      for(const o of ordersWithItems) o.items = o.items.filter(i=>!(i.productId && christmasIds.has(i.productId)) && !christmasNames.has(i.productName.trim().toLowerCase()));
       applyAddDeliveryUpgrades(ordersWithItems);
       // Exclude any order whose items are subscription products (they show via stamped manual orders instead)
       const isSubscriptionItem = (name: string) => isSubscriptionProductName(name);
@@ -2672,7 +2676,7 @@ export async function registerRoutes(
       const subscriptionOrderIds = await storage.getSubscriptionOriginOrderIds();
       const addresses = ordersWithItems
         .filter(o =>
-          (o.deliveryAddress || o.fulfillmentType === "collection") &&
+          o.items.length > 0 && (o.deliveryAddress || o.fulfillmentType === "collection") &&
           !o.items.some(i => isSubscriptionItem(i.productName)) &&
           !isAddDeliveryOnly(o.items)
         )
