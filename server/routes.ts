@@ -296,14 +296,28 @@ async function persistDeliveryUpgrades(): Promise<number> {
 }
 
 function detectFulfillmentType(wooOrder: any): string {
-  const shippingLines = wooOrder.shipping_lines || [];
-  if (shippingLines.length === 0) return "collection";
+  const shippingLines = Array.isArray(wooOrder.shipping_lines) ? wooOrder.shipping_lines : [];
+  // WooCommerce and Christmas delivery plugins often use names like
+  // "Christmas Eve Delivery", not the literal prefix "Delivery".
+  // Explicit collection method must win over a shipping address or delivery note.
   for (const line of shippingLines) {
-    const methodTitle = (line.method_title || "").toLowerCase();
-    const methodId = (line.method_id || "").toLowerCase();
-    if (methodTitle.startsWith("delivery") || methodId === "flat_rate") {
-      return "delivery";
-    }
+    const title = String(line.method_title || "").toLowerCase();
+    const id = String(line.method_id || "").toLowerCase();
+    if (/local[_-]?pickup|collection|collect|pick\s*up/.test(id+" "+title)) return "collection";
+  }
+  for (const line of shippingLines) {
+    const title = String(line.method_title || "").toLowerCase();
+    const id = String(line.method_id || "").toLowerCase();
+    if (/delivery|shipping|flat[_-]?rate|free[_-]?shipping|courier|postcode/.test(id+" "+title)) return "delivery";
+  }
+  // Checkout-specific method saved in Woo order metadata.
+  const metadata = Array.isArray(wooOrder.meta_data) ? wooOrder.meta_data : [];
+  const methodKeys = /delivery.?method|shipping.?method|fulfilment.?method|fulfillment.?method|delivery.?collection|collection.?delivery|order.?type/i;
+  for (const m of metadata) {
+    if (!methodKeys.test(String(m.key||""))) continue;
+    const val=String(m.value||"").toLowerCase();
+    if (/collection|collect|pickup|pick\s*up/.test(val)) return "collection";
+    if (/delivery|shipping|courier/.test(val)) return "delivery";
   }
   return "collection";
 }
@@ -3028,7 +3042,7 @@ export async function registerRoutes(
           return { ...order, items: items.filter(i => xmasMode ? christmasItem(i) : !christmasItem(i)) };
         })
       );
-      applyAddDeliveryUpgrades(ordersWithItems);
+      if (!xmasMode) applyAddDeliveryUpgrades(ordersWithItems);
 
       const subscriptionItemRe = /meal\s+subscription\s*-\s*\d+/i;
       const isAddDeliveryOnlyLabel = (items: { productName: string }[]) =>
