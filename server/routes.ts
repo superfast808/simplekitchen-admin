@@ -2503,11 +2503,11 @@ export async function registerRoutes(
     })();
     return manualSync;
   }
-  async function importManualWooOrders() {
+  async function importManualWooOrders(after?: string) {
     try {
       const params: Record<string, string> = { status: "processing,completed,on-hold" };
-      if (req.query.after) {
-        params.after = req.query.after as string;
+      if (after) {
+        params.after = after;
       } else {
         const fourWeeksAgo = new Date();
         fourWeeksAgo.setDate(fourWeeksAgo.getDate() - 28);
@@ -2627,7 +2627,7 @@ export async function registerRoutes(
     res.json({...manualSync,elapsedMs:manualSync.running?Date.now()-started:manualSync.elapsedMs});
   });
   app.post("/api/woo/sync-orders",async(req,res)=>{
-    try{res.json(await importManualWooOrders())}catch(e:any){res.status(502).json({message:"WooCommerce order import failed: "+e.message})}
+    try{res.json(await importManualWooOrders(typeof req.query.after==="string"?req.query.after:undefined))}catch(e:any){res.status(502).json({message:"WooCommerce order import failed: "+e.message})}
   });
   app.post("/api/woo/sync-products",async(_req,res)=>{
     try{res.json(await runProductSync())}catch(e:any){res.status(502).json({message:"WooCommerce product import failed: "+e.message})}
