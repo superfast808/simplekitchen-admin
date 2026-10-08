@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card,CardContent } from "@/components/ui/card";
 import { Truck,MapPin,LogOut,CheckCircle,Navigation } from "lucide-react";
-type Stop={id:number;customerName:string;address:string;deliveryNotes:string|null;day:string;routeDate:string;state:string;items:{name:string;quantity:number}[]};
+type Stop={id:number;sequence:number|null;customerName:string;address:string;deliveryNotes:string|null;day:string;routeDate:string;state:string;items:{name:string;quantity:number}[]};
 type DriverData={driver:{id:string;name:string;registration:string|null};stops:Stop[]};
 const request=async(path:string,method="GET",body?:unknown)=>{const response=await fetch(path,{method,headers:{"Content-Type":"application/json"},credentials:"include",body:body?JSON.stringify(body):undefined,cache:"no-store"});const data=await response.json();if(!response.ok)throw Error(data.message||"Request failed");return data};
 export default function DriverApp(){
@@ -31,6 +31,14 @@ export default function DriverApp(){
   return()=>{navigator.geolocation.clearWatch(id);window.clearInterval(heartbeat)};
  },[locationOn,data?.driver.id]);
  const setState=async(orderId:number,state:string)=>{setBusy(true);try{const result=await request("/api/driver/orders/"+orderId+"/state","POST",{state});await refresh();setMessage(result.testPush?.error?"Dispatch saved; test push failed: "+result.testPush.error:result.testPush?.accepted?"Dispatch saved; test push accepted by "+result.testPush.accepted+" push service(s)":state==="delivered"?"Delivery confirmed":state==="on_way"?"On your way recorded (live customer alerts may be disabled)":"Delivery issue recorded")}catch(e:any){setMessage(e.message)}finally{setBusy(false)}};
+ const orderedStops=[...(data?.stops||[])].sort((a,b)=>{
+  const rank=(state:string)=>state==="on_way"?0:state==="assigned"?1:state==="failed"?2:state==="delivered"?3:2;
+  const byStatus=rank(a.state)-rank(b.state);
+  if(byStatus)return byStatus;
+  const byDate=String(a.routeDate).localeCompare(String(b.routeDate));
+  if(byDate)return byDate;
+  return (a.sequence??Number.MAX_SAFE_INTEGER)-(b.sequence??Number.MAX_SAFE_INTEGER)||a.id-b.id;
+ });
  const stopSharing=async()=>{setLocationOn(false);try{await request("/api/driver/location","POST",{sharing:false})}catch(e:any){setMessage(e.message)}};
  return <div className="min-h-screen bg-[#f4f1e9] text-[#314d40] p-4 space-y-4">
   <header className="rounded-2xl bg-[#314d40] text-white p-5 flex items-center gap-3">
@@ -59,7 +67,7 @@ export default function DriverApp(){
      </Button>
     </CardContent></Card>
     <h2 className="font-semibold">Assigned stops ({data.stops.length})</h2>
-    {data.stops.map(stop=><Card key={stop.id}><CardContent className="p-4 space-y-3">
+    {orderedStops.map(stop=><Card key={stop.id}><CardContent className="p-4 space-y-3">
      <div className="flex justify-between gap-2"><div><strong>{stop.customerName}</strong><p className="text-xs">{new Date(stop.routeDate).toLocaleDateString("en-GB")} · {stop.day} · #{stop.id}</p></div><span className="text-xs capitalize">{stop.state.replace("_"," ")}</span></div>
      <p className="text-sm">{stop.address}</p>
      {stop.deliveryNotes?.trim()&&<div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950"><p className="font-semibold mb-1">Delivery instructions</p><p className="whitespace-pre-wrap break-words">{stop.deliveryNotes}</p></div>}
