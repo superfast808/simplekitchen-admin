@@ -52,12 +52,15 @@ export async function sendPush(email:string,title:string,body:string){
  await Promise.allSettled(r.rows.map(x=>deliver(x.endpoint,x.p256dh,x.auth,title,body)));
 }
 
-export async function sendDispatchTestPush(email:string,title:string,body:string){
+export async function sendOrderTestPush(customerEmail:string,testRecipient:string,title:string,body:string){
  if(!pushPublicKey())throw Error("VAPID key not configured");
- const subs=await pool.query("SELECT endpoint,p256dh,auth FROM customer_push_subscriptions WHERE lower(email)=$1",[email.trim().toLowerCase()]);
- if(!subs.rowCount)throw Error("No push subscription registered for test email");
+ const customer=customerEmail.trim().toLowerCase(),recipient=testRecipient.trim().toLowerCase();
+ const subs=await pool.query(`SELECT s.endpoint,s.p256dh,s.auth FROM customer_push_subscriptions s
+ JOIN customer_push_test_devices t ON t.endpoint=s.endpoint
+ WHERE lower(s.email)=$1 AND lower(t.customer_email)=$1 AND lower(t.test_recipient)=$2`,[customer,recipient]);
+ if(!subs.rowCount)throw Error("No authorised test device registered for this customer's session. Log into the customer PWA using a new forwarded magic link, then enable notifications.");
  const results=await Promise.allSettled(subs.rows.map(x=>deliver(x.endpoint,x.p256dh,x.auth,title,body)));
- const successful=results.filter(x=>x.status==="fulfilled").length;
- if(!successful){const errors=results.filter(x=>x.status==="rejected").map(x=>(x as PromiseRejectedResult).reason?.message||String((x as PromiseRejectedResult).reason));throw Error("Push delivery failed: "+errors.join("; ").slice(0,420))}
- return {registered:subs.rowCount,accepted:successful};
+ const accepted=results.filter(x=>x.status==="fulfilled").length;
+ if(!accepted)throw Error("Test push rejected: "+results.filter(x=>x.status==="rejected").map(x=>(x as PromiseRejectedResult).reason?.message).join("; ").slice(0,360));
+ return {registered:subs.rowCount,accepted};
 }
