@@ -2690,7 +2690,26 @@ export async function registerRoutes(
       const christmasProducts = (await storage.getProducts()).filter(p=>/(^|\W)(xmas|christmas)(\W|$)/i.test(p.category||""));
       const christmasIds = new Set(christmasProducts.map(p=>p.id));
       const christmasNames = new Set(christmasProducts.map(p=>p.name.trim().toLowerCase()));
-      for(const o of ordersWithItems) o.items = o.items.filter(i=>!(i.productId && christmasIds.has(i.productId)) && !christmasNames.has(i.productName.trim().toLowerCase()));
+      // Holiday checkout sells bundles of sides; product imports may lose the WC category.
+      // A multi-side festive bundle is never part of an ordinary Tue/Sat run.
+      const festiveSideNames = [
+        "garlic & herb roast potatoes", "potato dauphinoise",
+        "honey roasted carrots & parsnips", "cauliflower cheese",
+        "pigs in blankets", "sage & onion stuffing",
+        "maple & bacon brussels sprouts", "braised red cabbage & apple",
+      ];
+      const normaliseFestive = (name:string) => name.toLowerCase().replace(/&amp;/g,"&").replace(/[^a-z0-9]+/g," ").trim();
+      const festiveSideSet = new Set(festiveSideNames.map(normaliseFestive));
+      const explicitChristmas = (i:{productId:number|null;productName:string}) =>
+        Boolean((i.productId && christmasIds.has(i.productId)) ||
+          christmasNames.has(i.productName.trim().toLowerCase()) ||
+          /\b(christmas|xmas|festive bundle)\b/i.test(i.productName));
+      for (const o of ordersWithItems) {
+        const matchedSides=o.items.filter(i=>festiveSideSet.has(normaliseFestive(i.productName)));
+        const isHolidayBundle=matchedSides.length>=2;
+        o.items=o.items.filter(i=>!explicitChristmas(i) &&
+          !(isHolidayBundle && festiveSideSet.has(normaliseFestive(i.productName))));
+      }
       applyAddDeliveryUpgrades(ordersWithItems);
       // Exclude any order whose items are subscription products (they show via stamped manual orders instead)
       const isSubscriptionItem = (name: string) => isSubscriptionProductName(name);
