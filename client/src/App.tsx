@@ -45,6 +45,7 @@ function isPublicRoute(location: string) {
 function PublicRoutes() {
   return (
     <Switch>
+      <Route path="/my/subscribe/:token">{(params) => <SubscribePage params={params} />}</Route>
       <Route path="/my" component={CustomerPortal} />
       <Route path="/subscribe/:token/payment-success">
         {(params) => <PaymentSuccessPage params={params} />}
