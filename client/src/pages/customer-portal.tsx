@@ -10,15 +10,26 @@ type TrackingStatus={available:boolean;state?:string;driverName?:string;location
 function DriverTracking({orderId}:{orderId:number}){
  const [visible,setVisible]=useState(false),[data,setData]=useState<TrackingStatus|null>(null),[error,setError]=useState("");
  useEffect(()=>{
-  if(!visible)return;
   let cancelled=false;
   const refresh=()=>api("/api/customer/tracking/"+orderId).then(v=>{if(!cancelled)setData(v)}).catch((e:Error)=>{if(!cancelled)setError(e.message)});
   refresh();const timer=window.setInterval(refresh,30000);
   return()=>{cancelled=true;window.clearInterval(timer)};
- },[visible,orderId]);
+ },[orderId]);
+ const stage=data?.state==="delivered"?2:data?.state==="on_way"?1:0;
+ const stages=["Preparing","On the way","Delivered"] as const;
+ const trackingStages=<div className="py-3" role="group" aria-label="Delivery progress">
+  <div className="grid grid-cols-3 gap-1 items-start">{stages.map((label,i)=><div key={label} className="flex flex-col items-center text-center gap-2">
+   <div className="w-full flex items-center justify-center relative">
+    {i>0&&<span aria-hidden="true" className={`absolute right-1/2 w-full h-1 ${stage>=i?"bg-[#314d40]":"bg-[#e3e9e3]"}`}/>}
+    <span aria-hidden="true" className={`relative z-10 w-8 h-8 rounded-full border-2 flex items-center justify-center text-xs font-bold ${stage>=i?"bg-[#314d40] border-[#314d40] text-white":"bg-white border-[#c6d1c8] text-[#728577]"}`}>{stage>i?"✓":i+1}</span>
+   </div>
+   <span className={`text-xs sm:text-sm ${stage===i?"font-bold text-[#314d40]":stage>i?"font-medium text-[#456354]":"text-muted-foreground"}`}>{label}</span>
+  </div>)}</div>
+  {data?.available&&data.driverName&&<p className="text-xs text-center text-muted-foreground mt-2">{stage===1?"Your driver is on the way":stage===2?"Delivered":"Assigned driver: "+data.driverName}</p>}
+ </div>;
  const lat=Number(data?.location?.lat),lng=Number(data?.location?.lng);
  const mapUrl=data?.location?("https://www.openstreetmap.org/export/embed.html?bbox="+encodeURIComponent([lng-.012,lat-.008,lng+.012,lat+.008].join(","))+"&layer=mapnik&marker="+encodeURIComponent(lat+","+lng)):"";
- return <div className="space-y-2"><Button variant="outline" size="sm" onClick={()=>setVisible(v=>!v)}>{visible?"Hide driver tracking":"Track my delivery"}</Button>
+ return <div className="space-y-2">{trackingStages}{stage!==2&&<Button variant="outline" size="sm" onClick={()=>setVisible(v=>!v)}>{visible?"Hide driver tracking":"Track my delivery"}</Button>}
  {visible&&<div className="rounded-xl border p-3 space-y-2"><p className="text-sm font-semibold">{data?.available?"Driver: "+data.driverName:"No active driver assignment yet"}</p>
  {data?.available&&<p className="text-xs">Status: {String(data.state||"assigned").replace("_"," ")}</p>}
  {data?.etaMinutes!=null&&<p className="text-sm font-medium">Approx. {data.etaMinutes} min · {data.roadKm} km by road</p>}
@@ -96,7 +107,7 @@ export default function CustomerPortal(){
     <div className="flex justify-between gap-2 flex-wrap"><div><h4 className="font-semibold">Order #{o.wooId||o.id}</h4><p className="text-xs">Delivery {new Date(o.deliveryDate+"T12:00:00").toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})} · {o.fulfillmentType}</p></div><span className="rounded-full px-3 py-1 text-xs font-semibold self-start" style={{background:"#e6eee6"}}>{["cancelled","refunded"].includes(o.status)? "Cancelled":o.journey}</span></div>
     <ul className="text-sm space-y-1">{o.items.map((it,i)=><li key={i}>{it.quantity} × {it.name}</li>)}</ul>
     {o.deliveryAddress&&<p className="text-xs text-muted-foreground">Delivery: {o.deliveryAddress}</p>}
-    {o.fulfillmentType==="delivery"&&!["cancelled","refunded"].includes(o.status)&&<DriverTracking orderId={o.id}/> }
+    {o.fulfillmentType==="delivery"&&o.group==="current"&&!["cancelled","refunded","failed"].includes(o.status)&&<DriverTracking orderId={o.id}/> }
     {editing===o.id?<div className="space-y-2"><label className="text-sm">Delivery instructions (e.g. gate code, safe location)</label><Textarea value={instructions} maxLength={1000} onChange={e=>setInstructions(e.target.value)}/><div className="flex gap-2"><Button onClick={async()=>{try{await api("/api/customer/orders/"+o.id+"/instructions","PATCH",{instructions});setEditing(null);await reload()}catch(e:any){setMessage(e.message)}}}>Save</Button><Button variant="outline" onClick={()=>setEditing(null)}>Cancel</Button></div>{message&&<p className="text-sm">{message}</p>}</div>:
     <div className="flex justify-between items-center gap-2"><p className="text-sm">Instructions: {o.instructions||"Not supplied"}</p>{o.canEditInstructions&&<Button size="sm" variant="outline" onClick={()=>{setMessage("");setEditing(o.id);setInstructions(o.instructions||"")}}>Edit</Button>}</div>}
    </CardContent></Card>)}</section>)}
