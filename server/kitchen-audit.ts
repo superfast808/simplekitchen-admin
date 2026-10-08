@@ -86,6 +86,7 @@ export function registerKitchenAuditRoutes(app: Express) {
         productName: string; required: number; orders: { orderId: number; wooId: number | null; customerName: string; quantity: number; isTuesday: boolean; status: string }[];
       }>();
       for (const o of selected) for (const item of o.items) {
+        if (["cancelled","refunded","failed","trash"].includes(o.status.toLowerCase())) continue;
         if (day === "xmas" ? !item.isXmas : item.isXmas) continue;
         const key = item.productName.trim();
         if (!products.has(key)) products.set(key, { productName: key, required: 0, orders: [] });
