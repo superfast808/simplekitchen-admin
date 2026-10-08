@@ -2,7 +2,7 @@ import type { Express, Request } from "express";
 import crypto from "crypto";
 import nodemailer from "nodemailer";
 import { pool } from "./db";
-import { pushPublicKey,sendPush } from "./customer-push";
+import { pushPublicKey,sendPush,pushConfigurationStatus } from "./customer-push";
 import { fulfilmentDate, fulfilmentGroup, customerJourney, ukDateString } from "./customer-fulfilment";
 
 const hash=(s:string)=>crypto.createHash("sha256").update(s).digest("hex");
@@ -68,12 +68,12 @@ export async function createCustomerAlert(email:string,title:string,body:string,
 export function registerCustomerPortal(app:Express){
  app.get("/api/customer/push/key",async(req,res)=>{
   const email=await sessionEmail(req);if(!email)return res.status(401).json({message:"Not signed in"});
-  res.json({key:pushPublicKey(),enabled:!!pushPublicKey()});
+  res.json({key:pushPublicKey(),...pushConfigurationStatus()});
  });
  app.post("/api/customer/push/subscribe",async(req,res)=>{
   const email=await sessionEmail(req);if(!email)return res.status(401).json({message:"Not signed in"});
   const sub=req.body||{},endpoint=String(sub.endpoint||"");
-  if(!pushPublicKey())return res.status(503).json({message:"Push notifications not configured"});
+  if(!pushPublicKey())return res.status(503).json({message:pushConfigurationStatus().reason||"Push notifications not configured"});
   let parsed:URL;try{parsed=new URL(endpoint)}catch{return res.status(400).json({message:"Invalid subscription endpoint"})}
   if(parsed.protocol!=="https:"||endpoint.length>2048||!sub.keys?.p256dh||!sub.keys?.auth)return res.status(400).json({message:"Invalid push subscription"});
   const p256dh=String(sub.keys.p256dh),auth=String(sub.keys.auth);
