@@ -11,22 +11,7 @@ function decodeHtmlEntities(text: string): string {
 
 export { decodeHtmlEntities };
 
-const WC_STORE_URL = process.env.WC_STORE_URL || "";
-const WC_CONSUMER_KEY = process.env.WC_CONSUMER_KEY || "";
-const WC_CONSUMER_SECRET = process.env.WC_CONSUMER_SECRET || "";
-
-function getAuthParams(): string {
-  return `consumer_key=${encodeURIComponent(WC_CONSUMER_KEY)}&consumer_secret=${encodeURIComponent(WC_CONSUMER_SECRET)}`;
-}
-
-function buildUrl(endpoint: string, params: Record<string, string> = {}): string {
-  const base = WC_STORE_URL.replace(/\/+$/, "");
-  const queryParts = [getAuthParams()];
-  for (const [key, value] of Object.entries(params)) {
-    queryParts.push(`${encodeURIComponent(key)}=${encodeURIComponent(value)}`);
-  }
-  return `${base}/wp-json/wc/v3/${endpoint}?${queryParts.join("&")}`;
-}
+import { wooFetch } from "./woo-credentials";
 
 export async function fetchWooOrders(params: Record<string, string> = {}): Promise<any[]> {
   const allOrders: any[] = [];
@@ -34,13 +19,7 @@ export async function fetchWooOrders(params: Record<string, string> = {}): Promi
   const perPage = "100";
 
   while (true) {
-    const url = buildUrl("orders", { ...params, per_page: perPage, page: String(page) });
-    const response = await fetch(url);
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`WooCommerce API error (${response.status}): ${text}`);
-    }
-    const orders = await response.json();
+    const orders = await wooFetch(`orders?${new URLSearchParams({ ...params, per_page: perPage, page: String(page) })}`);
     if (!Array.isArray(orders) || orders.length === 0) break;
     allOrders.push(...orders);
     if (orders.length < parseInt(perPage)) break;
@@ -56,13 +35,7 @@ export async function fetchWooProducts(params: Record<string, string> = {}): Pro
   const perPage = "100";
 
   while (true) {
-    const url = buildUrl("products", { ...params, per_page: perPage, page: String(page) });
-    const response = await fetch(url);
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`WooCommerce API error (${response.status}): ${text}`);
-    }
-    const products = await response.json();
+    const products = await wooFetch(`products?${new URLSearchParams({ ...params, per_page: perPage, page: String(page) })}`);
     if (!Array.isArray(products) || products.length === 0) break;
     allProducts.push(...products);
     if (products.length < parseInt(perPage)) break;
@@ -78,10 +51,8 @@ export async function fetchWooVariations(parentId: number, parentProduct: any): 
   const perPage = "100";
 
   while (true) {
-    const url = buildUrl(`products/${parentId}/variations`, { status: "any", per_page: perPage, page: String(page) });
-    const response = await fetch(url);
-    if (!response.ok) break;
-    const variations = await response.json();
+    let variations: any[];
+    try { variations = await wooFetch(`products/${parentId}/variations?${new URLSearchParams({ status: "any", per_page: perPage, page: String(page) })}`); } catch { break; }
     if (!Array.isArray(variations) || variations.length === 0) break;
     // Attach parent info so we can build name/category
     for (const v of variations) {
