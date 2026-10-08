@@ -52,7 +52,7 @@ export async function fetchWooVariations(parentId: number, parentProduct: any): 
 
   while (true) {
     let variations: any[];
-    try { variations = await wooFetch(`products/${parentId}/variations?${new URLSearchParams({ status: "any", per_page: perPage, page: String(page) })}`); } catch { break; }
+    try { variations = await wooFetch(`products/${parentId}/variations?${new URLSearchParams({ status: "any", per_page: perPage, page: String(page) })}`); } catch (error: any) { throw new Error(`WooCommerce variation sync failed for product ${parentId}, page ${page}: ${error?.message || error}`); }
     if (!Array.isArray(variations) || variations.length === 0) break;
     // Attach parent info so we can build name/category
     for (const v of variations) {
