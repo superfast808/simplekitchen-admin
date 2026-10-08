@@ -1,4 +1,4 @@
-import { registerDispatch } from "./dispatch";
+import { registerDispatch, setupDispatchTables } from "./dispatch";
 import express from "express";
 import type { Express } from "express";
 import { createServer, type Server } from "http";
@@ -1882,6 +1882,7 @@ export async function registerRoutes(
   registerDebugExport(app);
   registerOrderActions(app);
   registerCustomerPortal(app);
+  await setupDispatchTables();
   registerDispatch(app);
 
   app.get("/api/woo-connection", async (req, res) => {
