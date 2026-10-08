@@ -23,6 +23,7 @@ type DeliveryAddress = {
   lng: number | null;
   fulfillment: "delivery" | "collection";
   isManual: boolean;
+  itemSummary: {name:string;quantity:number}[];
   coordinateStatus?: "verified-local" | "recheck" | "missing";
 };
 
@@ -223,7 +224,7 @@ export function DeliveryRoutesContent({ tuesday }: { tuesday: boolean }) {
           className: '', iconSize: [24, 24], iconAnchor: [12, 12],
         });
         const marker = L.marker([addr.lat!, addr.lng!], { icon: stopIcon }).addTo(map);
-        marker.bindPopup(`<strong>${idx + 1}. ${addr.customerName}</strong><br/>${addr.address}`);
+        marker.bindPopup(`<strong>${idx + 1}. ${addr.customerName}</strong><br/>${addr.address}<br/><small>${(addr.itemSummary||[]).map(i=>`${i.quantity}× ${i.name}`).join(" · ").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</small>`);
         markersRef.current.push(marker);
         bounds.push([addr.lat!, addr.lng!]);
       });
@@ -376,6 +377,7 @@ export function DeliveryRoutesContent({ tuesday }: { tuesday: boolean }) {
                       <div key={c.id} className="flex items-center gap-2 text-sm py-1" data-testid={`text-delivery-customer-${c.id}`}>
                         <Badge variant="default" className="text-[10px] px-1.5 py-0 bg-blue-600 shrink-0">Delivery</Badge>
                         <span className="truncate">{c.customerName}</span>
+                        <span className="text-[11px] text-muted-foreground line-clamp-2" title={(c.itemSummary||[]).map(i=>`${i.quantity}× ${i.name}`).join(" · ")}>{(c.itemSummary||[]).map(i=>`${i.quantity}× ${i.name}`).join(" · ")}</span>
                         {(!c.lat || !c.lng) && geocodeProgress && (
                           <Loader2 className="w-3 h-3 animate-spin text-muted-foreground/50 shrink-0 ml-auto" />
                         )}
@@ -394,6 +396,7 @@ export function DeliveryRoutesContent({ tuesday }: { tuesday: boolean }) {
                       <div key={c.id} className="flex items-center gap-2 text-sm py-1" data-testid={`text-collection-customer-${c.id}`}>
                         <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0">Collection</Badge>
                         <span className="truncate">{c.customerName}</span>
+                        <span className="text-[11px] text-muted-foreground line-clamp-2" title={(c.itemSummary||[]).map(i=>`${i.quantity}× ${i.name}`).join(" · ")}>{(c.itemSummary||[]).map(i=>`${i.quantity}× ${i.name}`).join(" · ")}</span>
                       </div>
                     ))}
                   </div>
