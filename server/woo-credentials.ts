@@ -22,8 +22,16 @@ export async function saveWooCredentials(data:{url?:string;key?:string;secret?:s
 }
 export async function wooFetch(path:string,method:"GET"|"PUT"|"POST"="GET",body?:unknown){
  const c=await wooCredentials();if(!c.url||!c.key||!c.secret)throw Error("WooCommerce connection is not configured");
- const res=await fetch(c.url+"/wp-json/wc/v3/"+path,{method,headers:{Authorization:"Basic "+Buffer.from(c.key+":"+c.secret).toString("base64"),"Content-Type":"application/json"},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(15000)});
+ const endpoint=c.url+"/wp-json/wc/v3/"+path;
+ const began=Date.now();
+ let res:Response;
+ try {
+  res=await fetch(endpoint,{method,headers:{Authorization:"Basic "+Buffer.from(c.key+":"+c.secret).toString("base64"),"Content-Type":"application/json"},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(20000)});
+ }catch(e:any) {
+  const elapsed=Math.round((Date.now()-began)/1000);
+  throw Error("WooCommerce "+method+" /"+path+" failed after "+elapsed+"s: "+(e?.name==="TimeoutError"?"API did not respond within 20 seconds (check hosting/WAF, WordPress performance and WooCommerce API).":e?.message||"Network failure"));
+ }
  const raw=await res.text();let json:any;try{json=JSON.parse(raw)}catch{json={message:raw.slice(0,300)}}
- if(!res.ok)throw Error("WooCommerce "+res.status+": "+(json?.message||"Request failed"));
- return json;
+ if(!res.ok)throw Error("WooCommerce "+method+" /"+path+" returned HTTP "+res.status+" after "+((Date.now()-began)/1000).toFixed(1)+"s: "+(json?.message||"Request failed"));
+ return json;;
 }
