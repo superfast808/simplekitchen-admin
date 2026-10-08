@@ -104,11 +104,21 @@ export function registerCustomerPortal(app:Express){
   if(p256dh.length>256||auth.length>128)return res.status(400).json({message:"Invalid keys"});
   await pool.query(`INSERT INTO customer_push_subscriptions(endpoint,email,p256dh,auth) VALUES($1,$2,$3,$4)
   ON CONFLICT(endpoint) DO UPDATE SET email=EXCLUDED.email,p256dh=EXCLUDED.p256dh,auth=EXCLUDED.auth`,[endpoint,email,p256dh,auth]);
+  const raw=(req.cookies as any)?.sk_customer ?? (req.headers.cookie||"").split(";").map(x=>x.trim()).find(x=>x.startsWith("sk_customer="))?.slice(12);
+  const session=raw?await pool.query("SELECT test_recipient FROM customer_portal_sessions WHERE token_hash=$1 AND expires_at>now()",[hash(raw)]):null;
+  const authorised=String(session?.rows[0]?.test_recipient||"").toLowerCase();
+  const configured=normalize(await setting("customer_portal_test_email"));
+  if(authorised&&configured&&authorised===configured&&(await setting("customer_portal_live","false"))!=="true"){
+    await pool.query("INSERT INTO customer_push_test_devices(endpoint,customer_email,test_recipient) VALUES($1,$2,$3) ON CONFLICT(endpoint) DO UPDATE SET customer_email=EXCLUDED.customer_email,test_recipient=EXCLUDED.test_recipient,registered_at=now()",[endpoint,email,configured]);
+  }else{
+    await pool.query("DELETE FROM customer_push_test_devices WHERE endpoint=$1",[endpoint]);
+  }
   res.json({ok:true});
  });
  app.post("/api/customer/push/unsubscribe",async(req,res)=>{
   const email=await sessionEmail(req);if(!email)return res.status(401).json({message:"Not signed in"});
   await pool.query("DELETE FROM customer_push_subscriptions WHERE email=$1 AND endpoint=$2",[email,String(req.body?.endpoint||"")]);
+  await pool.query("DELETE FROM customer_push_test_devices WHERE customer_email=$1 AND endpoint=$2",[email,String(req.body?.endpoint||"")]);
   res.json({ok:true});
  });
 
@@ -158,7 +168,8 @@ export function registerCustomerPortal(app:Express){
   }
   if(await eligible(email)){
    const raw=token();
-   await pool.query("INSERT INTO customer_magic_links(token_hash,email,expires_at) VALUES($1,$2,now()+interval '15 minutes')",[hash(raw),email]);
+   const testRecipient=testMode?normalize(await setting("customer_portal_test_email")):null;
+   await pool.query("INSERT INTO customer_magic_links(token_hash,email,expires_at,test_recipient) VALUES($1,$2,now()+interval '15 minutes',$3)",[hash(raw),email,testRecipient||null]);
    const url=(await setting("customer_portal_url","https://admin.simplekitchenprep.com/my")).replace(/\/$/,"");
    const link=url+"?token="+encodeURIComponent(raw);
    await sendCustomerPortalNotification(email,"Your Simple Kitchen sign-in link",customerEmailContent("login",{link}),"login:"+hash(raw));
@@ -171,10 +182,10 @@ export function registerCustomerPortal(app:Express){
   const client=await pool.connect();
   try{
    await client.query("BEGIN");
-   const r=await client.query("UPDATE customer_magic_links SET consumed_at=now() WHERE token_hash=$1 AND consumed_at IS NULL AND expires_at>now() RETURNING email",[hash(raw)]);
+   const r=await client.query("UPDATE customer_magic_links SET consumed_at=now() WHERE token_hash=$1 AND consumed_at IS NULL AND expires_at>now() RETURNING email,test_recipient",[hash(raw)]);
    if(!r.rowCount){await client.query("ROLLBACK");return res.status(401).json({message:"This link has expired or was already used"})}
    const value=token();
-   await client.query("INSERT INTO customer_portal_sessions(token_hash,email,expires_at) VALUES($1,$2,now()+interval '7 days')",[hash(value),r.rows[0].email]);
+   await client.query("INSERT INTO customer_portal_sessions(token_hash,email,expires_at,test_recipient) VALUES($1,$2,now()+interval '7 days',$3)",[hash(value),r.rows[0].email,r.rows[0].test_recipient]);
    await client.query("COMMIT");
    res.cookie(cookieName,value,{httpOnly:true,secure:process.env.NODE_ENV==="production",sameSite:"lax",path:"/",maxAge:604800000});
    res.json({ok:true});
