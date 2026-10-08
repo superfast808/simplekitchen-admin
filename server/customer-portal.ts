@@ -88,6 +88,14 @@ export function registerCustomerPortal(app:Express){
   res.json({ok:true});
  });
 
+ app.get("/api/customer/subscription-session/:token",async(req,res)=>{
+  const email=await sessionEmail(req);
+  if(!email)return res.status(401).json({authenticated:false});
+  const invitation=await pool.query("SELECT 1 FROM subscription_invites WHERE token=$1 AND lower(trim(customer_email))=$2 LIMIT 1",[req.params.token,email]);
+  if(!invitation.rowCount)return res.status(403).json({authenticated:true,matched:false});
+  res.setHeader("Cache-Control","no-store");
+  return res.json({authenticated:true,matched:true,email});
+ });
  app.get("/api/customer/alerts",async(req,res)=>{
   const email=await sessionEmail(req);if(!email)return res.status(401).json({message:"Not signed in"});
   const result=await pool.query(`SELECT a.id::text,a.title,a.body,a.created_at AS "createdAt",
