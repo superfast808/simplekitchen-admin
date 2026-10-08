@@ -21,6 +21,7 @@ type OrderWithItems = {
   fulfillmentType: string;
   isManual: boolean;
   isTuesday: boolean;
+  status: string;
   cashAmount: string | null;
   paymentMethod: string | null;
   shippingTotal: string | null;
@@ -213,6 +214,7 @@ export default function WeeklyStatsPage() {
 
   const computed = useMemo(() => {
     if (!rawOrders) return null;
+    rawOrders = rawOrders.filter(o => !["cancelled","refunded","failed","trash"].includes((o.status||"").toLowerCase()));
     const webOrders = rawOrders.filter(o => !o.isManual);
     const manualOrders = rawOrders.filter(o => o.isManual);
     const all = computeGroup(rawOrders, hideAddons, hideAddDelivery, hideSubscriptionBase, rawOrders, includeDelivery);
