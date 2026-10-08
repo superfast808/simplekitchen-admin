@@ -13,6 +13,8 @@ import NotFound from "@/pages/not-found";
 import OrdersPage from "@/pages/orders";
 import ProductsPage from "@/pages/products";
 import ProductTotalsPage from "@/pages/product-totals";
+import KitchenProductionPage from "@/pages/kitchen-production";
+import PossibleDuplicatesPage from "@/pages/possible-duplicates";
 import IngredientsPage from "@/pages/ingredients";
 import ManualStockPage from "@/pages/manual-stock";
 import TuesdayDeliveryRoutesPage from "@/pages/tuesday-delivery-routes";
@@ -63,6 +65,8 @@ function PageRouter() {
       <Route path="/" component={OrdersPage} />
       <Route path="/products" component={ProductsPage} />
       <Route path="/product-totals" component={ProductTotalsPage} />
+      <Route path="/kitchen-production" component={KitchenProductionPage} />
+      <Route path="/possible-duplicates" component={PossibleDuplicatesPage} />
       <Route path="/ingredients" component={IngredientsPage} />
       <Route path="/manual-stock" component={ManualStockPage} />
       <Route path="/routes/tuesday" component={TuesdayDeliveryRoutesPage} />
