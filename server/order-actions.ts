@@ -2,18 +2,8 @@ import type { Express } from "express";
 import { pool } from "./db";
 import { storage } from "./storage";
 
-const wcBase = (process.env.WC_STORE_URL || "").replace(/\/+$/, "");
-function wooAuth() {
- const key=process.env.WC_CONSUMER_KEY, secret=process.env.WC_CONSUMER_SECRET;
- if (!wcBase || !key || !secret) throw new Error("WooCommerce credentials not configured");
- return "Basic " + Buffer.from(key+":"+secret).toString("base64");
-}
-async function wooRequest(path:string, method:"GET"|"PUT"|"POST", body?:unknown) {
- const res=await fetch(wcBase+"/wp-json/wc/v3/"+path,{method,headers:{Authorization:wooAuth(),"Content-Type":"application/json"},body:body===undefined?undefined:JSON.stringify(body)});
- const raw=await res.text();let json:any;try{json=JSON.parse(raw)}catch{json={message:raw.slice(0,500)}}
- if(!res.ok)throw new Error("WooCommerce "+res.status+": "+(json?.message||"Request failed"));
- return json;
-}
+import { wooFetch } from "./woo-credentials";
+const wooRequest = wooFetch;
 export function registerOrderActions(app:Express) {
  app.get("/api/order-actions/:id",async(req,res)=>{
   if(!req.session?.userId)return res.status(401).json({message:"Unauthorized"});
