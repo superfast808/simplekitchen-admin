@@ -1942,7 +1942,7 @@ export async function registerRoutes(
       const byProductName = new Map(productsForCategories.map(p => [p.name.trim().toLowerCase(),p]));
       const isXmas = (item: {productId?:number|null;productName:string}) => {
         const p = (item.productId ? byProductId.get(item.productId) : undefined) || byProductName.get(item.productName.trim().toLowerCase());
-        return /(^|\\W)(xmas|christmas)(\\W|$)/i.test(p?.category || "");
+        return /(^|\W)(xmas|christmas)(\W|$)/i.test(p?.category || "");
       };
       const category = req.query.category === "xmas" ? "xmas" : "regular";
       // Split line items rather than entire orders, preserving mixed purchases.
