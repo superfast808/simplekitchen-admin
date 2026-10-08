@@ -12,6 +12,10 @@ function vapidKey(){
  return {privateKey:ecdh.getPrivateKey(),publicKey:ecdh.getPublicKey(undefined,"uncompressed")};
 }
 export function pushPublicKey(){try{return b64(vapidKey().publicKey)}catch{return null}}
+export function pushConfigurationStatus(){
+  if(!process.env.CUSTOMER_PUSH_VAPID_PRIVATE_KEY)return {enabled:false,reason:"VAPID key missing from the server environment. Add CUSTOMER_PUSH_VAPID_PRIVATE_KEY to the app .env file and recreate the container."};
+  try {vapidKey();return {enabled:true,reason:null}}catch{return {enabled:false,reason:"Invalid VAPID private key. Regenerate the key and restart the container."}}
+}
 async function deliver(endpoint:string,p256dh:string,auth:string,title:string,body:string){
  const keys=vapidKey(),receiver=decode(p256dh),secret=decode(auth);
  if(receiver.length!==65||secret.length!==16)throw Error("Invalid push subscription key");
