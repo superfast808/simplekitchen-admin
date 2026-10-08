@@ -64,6 +64,10 @@ export async function runStartupMigrations() {
       email text NOT NULL, read_at timestamptz NOT NULL DEFAULT NOW(),
       PRIMARY KEY(alert_id,email)
     )`);
+    await client.query(`CREATE TABLE IF NOT EXISTS customer_push_subscriptions (
+      endpoint text PRIMARY KEY, email text NOT NULL, p256dh text NOT NULL, auth text NOT NULL,
+      created_at timestamptz NOT NULL DEFAULT NOW(), last_success_at timestamptz
+    )`);
     // Add portal_overridden column to orders if not exists
     await client.query(`
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS portal_overridden boolean NOT NULL DEFAULT false
