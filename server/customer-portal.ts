@@ -8,7 +8,7 @@ const normalize=(s:string)=>s.trim().toLowerCase();
 const token=()=>crypto.randomBytes(32).toString("base64url");
 const cookieName="sk_customer";
 async function setting(k:string,fallback=""){const r=await pool.query("SELECT value FROM settings WHERE key=$1",[k]);return r.rows[0]?.value??fallback}
-async function notify(email:string,subject:string,html:string,eventKey:string){
+export async function sendCustomerPortalNotification(email:string,subject:string,html:string,eventKey:string){
  const enabled=await setting("customer_portal_live","false");
  const alias=await setting("customer_portal_test_email");
  const testMode=enabled!=="true";
@@ -48,7 +48,6 @@ export function registerCustomerPortal(app:Express){
  app.post("/api/customer/access",async(req,res)=>{
   const email=normalize(String(req.body?.email||""));
   if(!/^\S+@\S+\.\S+$/.test(email)||email.length>254)return res.status(400).json({message:"Enter a valid email address"});
-  const ip=String(req.ip||"");
   const recent=await pool.query("SELECT count(*)::int AS n FROM customer_magic_links WHERE email=$1 AND created_at>now()-interval '1 hour'",[email]);
   const volume=await pool.query("SELECT count(*)::int AS n FROM customer_magic_links WHERE created_at>now()-interval '1 minute'");
   if(Number(recent.rows[0].n)>=5||Number(volume.rows[0].n)>100)return res.status(429).json({message:"Please try later"});
@@ -57,7 +56,7 @@ export function registerCustomerPortal(app:Express){
    await pool.query("INSERT INTO customer_magic_links(token_hash,email,expires_at) VALUES($1,$2,now()+interval '15 minutes')",[hash(raw),email]);
    const url=(await setting("customer_portal_url","https://admin.simplekitchenprep.com/my")).replace(/\/$/,"");
    const link=url+"?token="+encodeURIComponent(raw);
-   await notify(email,"Sign in to My Simple Kitchen",`<div style="font-family:Arial,sans-serif;max-width:540px;margin:auto;padding:24px"><h1 style="color:#314D40">My Simple Kitchen</h1><p>Your secure sign-in link is ready. It expires in 15 minutes.</p><p><a href="${link}" style="background:#314D40;color:white;padding:14px 20px;border-radius:8px;text-decoration:none">View my orders</a></p><p>If you didn't request this, you can ignore this email.</p></div>`,"login:"+hash(raw));
+   await sendCustomerPortalNotification(email,"Sign in to My Simple Kitchen",`<div style="font-family:Arial,sans-serif;max-width:540px;margin:auto;padding:24px"><h1 style="color:#314D40">My Simple Kitchen</h1><p>Your secure sign-in link is ready. It expires in 15 minutes.</p><p><a href="${link}" style="background:#314D40;color:white;padding:14px 20px;border-radius:8px;text-decoration:none">View my orders</a></p><p>If you didn't request this, you can ignore this email.</p></div>`,"login:"+hash(raw));
   }
   res.json({message:"If an eligible account exists, a sign-in link has been sent."});
  });
@@ -94,7 +93,9 @@ export function registerCustomerPortal(app:Express){
   const id=Number(req.params.id),instructions=String(req.body?.instructions??"").trim();
   if(!Number.isSafeInteger(id)||id<1||instructions.length>1000)return res.status(400).json({message:"Invalid delivery instructions"});
   const r=await pool.query(`UPDATE orders SET customer_delivery_instructions=$1 WHERE id=$2 AND lower(customer_email)=$3 AND is_manual=false
-    AND status IN ('processing','on-hold','pending') AND order_date >= now()-interval '35 days'
+    AND status IN ('processing','on-hold','pending')
+    AND ((date_trunc('week', (order_date AT TIME ZONE 'Europe/London') + interval '2 days') - interval '2 days')::date +
+       CASE WHEN is_tuesday THEN 10 ELSE 7 END) > (now() AT TIME ZONE 'Europe/London')::date
     RETURNING id`,[instructions,id,email]);
   if(!r.rowCount)return res.status(403).json({message:"Instructions can't be changed for this order"});
   res.json({ok:true});
