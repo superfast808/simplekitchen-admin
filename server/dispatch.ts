@@ -23,6 +23,13 @@ export async function setupDispatchTables(){
  await pool.query(`CREATE TABLE IF NOT EXISTS dispatch_driver_logins (token_hash text PRIMARY KEY,driver_id bigint NOT NULL REFERENCES dispatch_drivers(id),expires_at timestamptz NOT NULL,used_at timestamptz)`);
  await pool.query(`CREATE TABLE IF NOT EXISTS dispatch_driver_sessions (token_hash text PRIMARY KEY,driver_id bigint NOT NULL REFERENCES dispatch_drivers(id),expires_at timestamptz NOT NULL)`);
  await pool.query(`CREATE TABLE IF NOT EXISTS dispatch_locations (driver_id bigint PRIMARY KEY REFERENCES dispatch_drivers(id),latitude double precision NOT NULL,longitude double precision NOT NULL,updated_at timestamptz NOT NULL DEFAULT now(),sharing boolean NOT NULL DEFAULT false)`);
+ await pool.query(`CREATE TABLE IF NOT EXISTS dispatch_delivery_proofs (
+  id bigserial PRIMARY KEY,order_id integer NOT NULL,driver_id bigint NOT NULL,
+  recorded_at timestamptz NOT NULL DEFAULT now(),lat double precision,lng double precision,
+  accuracy_m double precision,location_captured_at timestamptz,location_status text NOT NULL,
+  CHECK(location_status IN ('captured','unavailable','denied','timeout','inaccurate'))
+ )`);
+ await pool.query(`CREATE INDEX IF NOT EXISTS dispatch_delivery_proofs_order_idx ON dispatch_delivery_proofs(order_id,recorded_at DESC)`);
  await pool.query(`CREATE TABLE IF NOT EXISTS dispatch_events (
   id bigserial PRIMARY KEY,order_id integer NOT NULL,driver_id bigint,kind text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now())`);
@@ -85,11 +92,24 @@ export function registerDispatch(app:Express){
  app.post("/api/driver/orders/:id/state",driverOnly,async(req:any,res)=>{
   const state=String(req.body?.state||"");
   if(!["on_way","delivered","failed"].includes(state))return res.sendStatus(400);
+  const proof=req.body?.proof||{};
+  const proofAllowed=["captured","unavailable","denied","timeout","inaccurate"];
+  let proofStatus="unavailable",lat:null|number=null,lng:null|number=null,accuracy:null|number=null;
+  if(state==="delivered"){
+    proofStatus=proofAllowed.includes(proof.status)?proof.status:"unavailable";
+    if(proofStatus==="captured"&&Number.isFinite(proof.lat)&&Number.isFinite(proof.lng)&&Number.isFinite(proof.accuracy)&&proof.lat>=-90&&proof.lat<=90&&proof.lng>=-180&&proof.lng<=180&&proof.accuracy>=0&&proof.accuracy<=100){
+      lat=proof.lat;lng=proof.lng;accuracy=proof.accuracy;
+    }else if(proofStatus==="captured")proofStatus="inaccurate";
+  }
   const testReplay=process.env.DISPATCH_TEST_MODE==="enabled" && state==="on_way";
   const q=await pool.query(`UPDATE dispatch_assignments SET state=$1,updated_at=now(),delivered_at=CASE WHEN $1='delivered' THEN now() ELSE delivered_at END
    WHERE order_id=$2 AND driver_id=$3 AND route_date BETWEEN current_date-1 AND current_date+7 AND ($4::boolean OR (state<>'delivered' AND ($1<>'on_way' OR state='assigned'))) RETURNING order_id,driver_id`,[state,req.params.id,req.driverId,testReplay]);
   if(!q.rowCount)return res.sendStatus(404);
   await pool.query("INSERT INTO dispatch_events(order_id,driver_id,kind) VALUES($1,$2,$3)",[req.params.id,req.driverId,state]);
+  if(state==="delivered")await pool.query(
+    "INSERT INTO dispatch_delivery_proofs(order_id,driver_id,lat,lng,accuracy_m,location_captured_at,location_status) VALUES($1,$2,$3,$4,$5,CASE WHEN $3::float8 IS NOT NULL THEN now() ELSE NULL END,$6)",
+    [req.params.id,req.driverId,lat,lng,accuracy,proofStatus]);
+
   const sendNotice=async(id:number,kind:string)=>{
     if(process.env.DISPATCH_CUSTOMER_NOTIFICATIONS!=="enabled")return;
     const o=await pool.query("SELECT customer_email,woo_id FROM orders WHERE id=$1",[id]);
@@ -165,6 +185,24 @@ export function registerDispatch(app:Express){
   await pool.query("INSERT INTO dispatch_driver_sessions(token_hash,driver_id,expires_at) VALUES($1,$2,now()+interval '8 hours')",[digest(token),driver.rows[0].id]);
   res.cookie("sk_driver",token,{httpOnly:true,secure:true,sameSite:"lax",maxAge:8*3600000,path:"/"});
   res.json({ok:true,url:"/driver"});
+ });
+ app.get("/api/dispatch/locations",onlyAdmin,async(_req,res)=>{
+  const q=await pool.query(`SELECT d.id::text,d.name,d.registration,l.latitude AS lat,l.longitude AS lng,
+   l.updated_at AS "updatedAt",l.sharing
+   FROM dispatch_drivers d LEFT JOIN dispatch_locations l ON l.driver_id=d.id
+   WHERE d.enabled=true ORDER BY d.name`);
+  res.setHeader("Cache-Control","no-store");
+  res.json(q.rows.map(v=>({...v,online:!!v.sharing&&!!v.updatedAt&&Date.now()-new Date(v.updatedAt).getTime()<120000,
+    lat:v.sharing?v.lat:null,lng:v.sharing?v.lng:null})));
+ });
+ app.get("/api/dispatch/proofs",onlyAdmin,async(req,res)=>{
+  const orderId=Number(req.query.orderId);
+  if(!Number.isInteger(orderId)||orderId<=0)return res.status(400).json({message:"Valid order ID required"});
+  const q=await pool.query(`SELECT p.id,p.order_id AS "orderId",d.name AS "driverName",p.recorded_at AS "recordedAt",
+   p.lat,p.lng,p.accuracy_m AS "accuracyMetres",p.location_status AS "locationStatus"
+   FROM dispatch_delivery_proofs p JOIN dispatch_drivers d ON d.id=p.driver_id
+   WHERE p.order_id=$1 ORDER BY p.recorded_at DESC`,[orderId]);
+  res.setHeader("Cache-Control","no-store");res.json(q.rows);
  });
  app.get("/api/dispatch/drivers",onlyAdmin,async(_req,res)=>{try{res.json((await pool.query('SELECT id::text,name,registration,photo_url AS "photoUrl",email,enabled FROM dispatch_drivers ORDER BY name')).rows)}catch(e:any){res.status(500).json({message:e.message})}});
  app.post("/api/dispatch/drivers",onlyAdmin,async(req,res)=>{
