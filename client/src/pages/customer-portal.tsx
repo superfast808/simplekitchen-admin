@@ -40,6 +40,7 @@ function DriverTracking({orderId}:{orderId:number}){
 export default function CustomerPortal(){
  const [alerts,setAlerts]=useState<{id:string;title:string;body:string;createdAt:string;read:boolean}[]>([]);
  const [notificationsOn,setNotificationsOn]=useState(false);
+ const [notificationChecking,setNotificationChecking]=useState(true);
  const [installPrompt,setInstallPrompt]=useState<any>(null);
  const [email,setEmail]=useState(""),[me,setMe]=useState<{email:string;orders:Order[];selectionInvites:Invite[]}|null>(null);
  const [message,setMessage]=useState(""),[loading,setLoading]=useState(false),[editing,setEditing]=useState<number|null>(null),[instructions,setInstructions]=useState("");
@@ -52,6 +53,26 @@ export default function CustomerPortal(){
   window.addEventListener("beforeinstallprompt",handler);
   return()=>{window.removeEventListener("beforeinstallprompt",handler);manifest.remove();theme.remove()};
  },[]);
+ useEffect(()=>{
+  if(!me?.email){setNotificationsOn(false);setNotificationChecking(false);return}
+  let cancelled=false;
+  const restore=async()=>{
+    setNotificationChecking(true);
+    try{
+      if(!("serviceWorker" in navigator)||!("PushManager" in window)||!("Notification" in window)||Notification.permission!=="granted"){
+        if(!cancelled)setNotificationsOn(false);return;
+      }
+      const registration=await navigator.serviceWorker.ready;
+      const sub=await registration.pushManager.getSubscription();
+      if(!cancelled)setNotificationsOn(!!sub);
+      // Restore the subscription association after login, without triggering permission UI.
+      if(sub)await api("/api/customer/push/subscribe","POST",sub.toJSON());
+    }catch(e:any){if(!cancelled){setNotificationsOn(false);setMessage("Notification status could not be restored: "+e.message)}}
+    finally{if(!cancelled)setNotificationChecking(false)}
+  };
+  void restore();
+  return()=>{cancelled=true};
+ },[me?.email]);
  useEffect(()=>{if(!me)return;const timer=window.setInterval(async()=>{
   try{
    const incoming=await api("/api/customer/alerts");
@@ -72,10 +93,10 @@ export default function CustomerPortal(){
   <>
    <div className="flex flex-wrap gap-2">
     {installPrompt&&<Button onClick={async()=>{await installPrompt.prompt();setInstallPrompt(null)}}>Install My Simple Kitchen</Button>}
-    <Button variant="outline" onClick={async()=>{
+    {!notificationsOn&&<Button variant="outline" disabled={notificationChecking} onClick={async()=>{
       try {
         if(!("serviceWorker" in navigator)||!("PushManager" in window)||!("Notification" in window))throw Error("This browser does not support push notifications");
-        const permission=await Notification.requestPermission();
+        const permission=Notification.permission==="granted"?"granted":await Notification.requestPermission();
         if(permission!=="granted")throw Error("Please allow notifications in your browser settings.");
         const key=await api("/api/customer/push/key");
         if(!key.key)throw Error(key.reason || "Push is not configured on the server yet.");
@@ -89,7 +110,8 @@ export default function CustomerPortal(){
         await api("/api/customer/push/subscribe","POST",sub.toJSON());
         setNotificationsOn(true);setMessage("Background notifications enabled for this device.");
       }catch(e:any){setMessage(e.message)}
-    }}>Enable push notifications</Button>
+    }}>{notificationChecking?"Checking notifications…":"Enable push notifications"}</Button>}
+    {notificationsOn&&<span className="text-xs text-green-700 font-medium">Notifications enabled on this device</span>}
     {notificationsOn&&<Button size="sm" variant="outline" onClick={async()=>{
       const reg=await navigator.serviceWorker.ready;const sub=await reg.pushManager.getSubscription();
       if(sub){await api("/api/customer/push/unsubscribe","POST",{endpoint:sub.endpoint});await sub.unsubscribe()}
