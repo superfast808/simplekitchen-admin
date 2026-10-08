@@ -31,6 +31,8 @@ export async function runStartupMigrations() {
         )
     `);
 
+    await client.query(`CREATE TABLE IF NOT EXISTS order_action_audit (id bigserial PRIMARY KEY, order_id integer NOT NULL, actor_id text NOT NULL, action text NOT NULL, details text NOT NULL, created_at timestamptz NOT NULL DEFAULT NOW())`);
+
     // Add portal_overridden column to orders if not exists
     await client.query(`
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS portal_overridden boolean NOT NULL DEFAULT false
