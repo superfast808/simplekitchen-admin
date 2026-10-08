@@ -12,7 +12,7 @@ type Product = { productName: string; required: number; orders: Detail[] };
 type Audit = { generatedAt: string; day: string; ordersCount: number; products: Product[]; manualStock: {productName: string; quantity: number}[]; duplicates: unknown[] };
 export default function KitchenProductionPage() {
   const dates = useDateFilter();
-  const [day, setDay] = useState("saturday");
+  const [day, setDay] = useState("all");
   const [expanded, setExpanded] = useState<string | null>(null);
   const [prepared, setPrepared] = useState<Record<string, string>>({});
   const qs = `?from=${encodeURIComponent(dates.from.toISOString())}&to=${encodeURIComponent(dates.to.toISOString())}&day=${day}`;
@@ -24,7 +24,7 @@ export default function KitchenProductionPage() {
       <div><h1 className="text-2xl font-semibold">Kitchen Production Check</h1><DateRangeLabel from={dates.from} to={dates.to}/></div>
       <div className="flex flex-wrap gap-2"><DateFilter {...dates} testIdPrefix="kitchen"/><Button variant="outline" onClick={()=>refetch()} disabled={isFetching}><RefreshCcw className="w-4 h-4 mr-2"/>Refresh</Button><Button variant="outline" onClick={()=>window.print()}><Printer className="w-4 h-4 mr-2"/>Print</Button></div>
     </div>
-    <p className="text-sm text-muted-foreground">Live order-by-order production reconciliation. Christmas products are shown separately from regular meal preparation. Day selection applies to order allocations; manual/shop stock is displayed separately. Physical counts entered here are for checking only and are not saved.</p>
+    <p className="text-sm text-muted-foreground">Live order-by-order production reconciliation. Defaults to both delivery days to match the Orders page. Select Saturday or Tuesday for day-specific production. Christmas products are shown separately from regular meal preparation. Day selection applies to order allocations; manual/shop stock is displayed separately. Physical counts entered here are for checking only and are not saved.</p>
     <div className="flex gap-2 flex-wrap">{[["saturday","Saturday only"],["tuesday","Tuesday only"],["all","Both days"],["xmas","🎄 Christmas"]].map(([value,title])=><Button key={value} size="sm" variant={day===value?"default":"outline"} onClick={()=>{setDay(value);setPrepared({});}}>{title}</Button>)}</div>
     {isError && <p className="text-destructive">Couldn't load production data. Please refresh.</p>}
     {isLoading ? <p>Loading order allocations…</p> : data && <>
