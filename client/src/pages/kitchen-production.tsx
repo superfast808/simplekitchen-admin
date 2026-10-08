@@ -9,7 +9,8 @@ import { ChevronDown, ChevronRight, RefreshCcw, Printer } from "lucide-react";
 
 type Detail = { orderId: number; wooId: number | null; customerName: string; quantity: number; isTuesday: boolean; status: string };
 type Product = { productName: string; required: number; orders: Detail[] };
-type Audit = { generatedAt: string; day: string; ordersCount: number; products: Product[]; manualStock: {productName: string; quantity: number}[]; duplicates: unknown[] };
+type Reconciliation = {productName:string;allRecorded:number;activeAllDays:number;selectedActive:number;inactive:number;otherDay:number;records:{orderId:number;wooId:number|null;customerName:string;quantity:number;status:string;day:string;included:boolean;reason:string}[]};
+type Audit = {reconciliation:Reconciliation[]; generatedAt: string; day: string; ordersCount: number; products: Product[]; manualStock: {productName: string; quantity: number}[]; duplicates: unknown[] };
 export default function KitchenProductionPage() {
   const dates = useDateFilter();
   const [day, setDay] = useState("all");
@@ -17,6 +18,9 @@ export default function KitchenProductionPage() {
   const [prepared, setPrepared] = useState<Record<string, string>>({});
   const qs = `?from=${encodeURIComponent(dates.from.toISOString())}&to=${encodeURIComponent(dates.to.toISOString())}&day=${day}`;
   const { data, isLoading, isError, refetch, isFetching } = useQuery<Audit>({ queryKey: ["/api/kitchen-audit", qs], refetchInterval:10000 });
+  const [showAudit,setShowAudit] = useState(false);
+  const [auditProduct,setAuditProduct] = useState<string|null>(null);
+  const auditDifferences = (data?.reconciliation || []).filter(p=>p.allRecorded!==p.selectedActive);
   const total = data?.products.reduce((n,p)=>n+p.required,0) ?? 0;
   const mismatches = data?.products.filter(p => prepared[p.productName] !== undefined && prepared[p.productName] !== "" && Number(prepared[p.productName]) !== p.required).length ?? 0;
   return <div className="p-4 md:p-6 space-y-5">
@@ -34,6 +38,17 @@ export default function KitchenProductionPage() {
         <Card><CardContent className="p-4"><div className="text-muted-foreground text-sm">Count discrepancies</div><strong className="text-2xl">{mismatches}</strong></CardContent></Card>
         <Card><CardContent className="p-4"><div className="text-muted-foreground text-sm">Possible duplicate pairs</div><strong className="text-2xl">{data.duplicates.length}</strong></CardContent></Card>
       </div>
+      <Card><CardHeader><CardTitle className="flex flex-wrap justify-between items-center gap-2"><span>Reconcile recorded orders</span><Button variant="outline" size="sm" onClick={()=>setShowAudit(v=>!v)}>{showAudit?"Hide breakdown":"Show missing / excluded orders"}</Button></CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">The raw order total may differ from the kitchen requirement because of cancelled/refunded orders or a Saturday/Tuesday filter. These are explanations, not permission to ignore a customer order.</p>
+          {auditDifferences.length>0?<p className="font-semibold text-amber-700">{auditDifferences.length} products have quantities excluded by status or delivery day.</p>:<p className="text-sm">No excluded quantities found for this selection. If Orders still disagrees, compare the date range, other filters and product names.</p>}
+          {showAudit&&<div className="space-y-2">{(data.reconciliation||[]).map(p=><div key={p.productName} className="border rounded-lg p-3 space-y-2">
+            <button className="w-full text-left flex justify-between gap-2 text-sm" onClick={()=>setAuditProduct(auditProduct===p.productName?null:p.productName)}><strong>{p.productName}</strong><span>Raw {p.allRecorded} · Active both days {p.activeAllDays} · Selected {p.selectedActive} <ChevronDown className="w-4 h-4 inline"/></span></button>
+            {(p.inactive>0||p.otherDay>0)&&<p className="text-xs text-amber-700">Excluded: {p.inactive} cancelled/refunded/failed; {p.otherDay} on other delivery day</p>}
+            {auditProduct===p.productName&&<div className="space-y-1 border-t pt-2">{p.records.map((o,i)=><div key={o.orderId+"-"+i} className="text-xs flex justify-between gap-2"><span>#{o.orderId}{o.wooId?" (Woo #"+o.wooId+")":""} · {o.customerName} · {o.day} · {o.status}</span><span className={o.included?"":"text-destructive"}>{o.quantity} — {o.reason}</span></div>)}</div>}
+          </div>)}</div>}
+        </CardContent>
+      </Card>
       <p className="text-xs text-muted-foreground">Calculated: {new Date(data.generatedAt).toLocaleString("en-GB")}. All orders, including suspected duplicates, are included.</p>
       <Card><CardHeader><CardTitle>Required quantities and customer allocation</CardTitle></CardHeader><CardContent className="space-y-2">
         {data.products.length===0 && <p className="text-muted-foreground">No meals for this selection.</p>}
