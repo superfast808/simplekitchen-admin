@@ -1,3 +1,4 @@
+import { registerDispatch } from "./dispatch";
 import express from "express";
 import type { Express } from "express";
 import { createServer, type Server } from "http";
@@ -1881,6 +1882,7 @@ export async function registerRoutes(
   registerDebugExport(app);
   registerOrderActions(app);
   registerCustomerPortal(app);
+  registerDispatch(app);
 
   app.get("/api/woo-connection", async (req, res) => {
     if(!req.session?.userId)return res.status(401).json({message:"Unauthorized"});
