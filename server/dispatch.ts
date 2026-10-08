@@ -160,7 +160,14 @@ export function registerDispatch(app:Express){
    const orders=(await storage.getOrders(from,to)).filter(o=>!inactive.has((o.status||"").toLowerCase())&&o.isTuesday===(day==="tuesday"));
    const products=await storage.getProducts(), festiveIds=new Set(products.filter(p=>/(^|\W)(christmas|xmas)(\W|$)/i.test(p.category||"")).map(p=>p.id));
    const rows=await storage.getOrderItemsBatch(orders.map(o=>o.id));
-   const included=orders.map(o=>({...o,items:(rows.get(o.id)||[]).filter(i=>!(i.productId&&festiveIds.has(i.productId))&&!/\b(christmas|xmas)\b/i.test(i.productName))}))
+   const festiveNames=new Set(["garlic herb roast potatoes","potato dauphinoise","honey roasted carrots parsnips","cauliflower cheese","pigs in blankets","sage onion stuffing","maple bacon brussels sprouts","braised red cabbage apple","roasted dauphinoise potatoes","meat stuffing","honey pancetta roasted brussels","creamed leeks spinach"]);
+   const festiveName=(name:string)=>festiveNames.has(name.toLowerCase().replace(/&amp;/g,"&").replace(/[^a-z0-9]+/g," ").trim());
+
+   const included=orders.map(o=>{
+     const list=rows.get(o.id)||[];
+     const isFestiveBundle=list.filter(i=>festiveName(i.productName)).length>=2;
+     return {...o,items:list.filter(i=>!(i.productId&&festiveIds.has(i.productId))&&!/\b(christmas|xmas)\b/i.test(i.productName)&&!(isFestiveBundle&&festiveName(i.productName)))};
+   })
     .filter(o=>o.items.length&&!o.items.some(i=>/meal\s+subscription\s*-\s*\d+/i.test(i.productName)))
     .filter(o=>!o.items.every(i=>/add\s+delivery/i.test(i.productName)));
    const ids=included.map(o=>o.id);
