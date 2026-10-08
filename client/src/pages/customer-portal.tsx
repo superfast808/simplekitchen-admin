@@ -41,7 +41,30 @@ export default function CustomerPortal(){
   <>
    <div className="flex flex-wrap gap-2">
     {installPrompt&&<Button onClick={async()=>{await installPrompt.prompt();setInstallPrompt(null)}}>Install My Simple Kitchen</Button>}
-    <Button variant="outline" onClick={async()=>{if(!("Notification" in window)){setMessage("Notifications are not supported in this browser");return};const permission=await Notification.requestPermission();setNotificationsOn(permission==="granted");setMessage(permission==="granted"?"Alerts enabled while this portal is open.":"Notification permission not enabled.")}}>Enable notifications</Button>
+    <Button variant="outline" onClick={async()=>{
+      try {
+        if(!("serviceWorker" in navigator)||!("PushManager" in window)||!("Notification" in window))throw Error("This browser does not support push notifications");
+        const permission=await Notification.requestPermission();
+        if(permission!=="granted")throw Error("Please allow notifications in your browser settings.");
+        const key=await api("/api/customer/push/key");
+        if(!key.key)throw Error("Push isn't configured on the server yet.");
+        const registration=await navigator.serviceWorker.ready;
+        let sub=await registration.pushManager.getSubscription();
+        if(!sub){
+          const str=key.key.replace(/-/g,"+").replace(/_/g,"/");
+          const bytes=Uint8Array.from(atob(str.padEnd(Math.ceil(str.length/4)*4,"=")),c=>c.charCodeAt(0));
+          sub=await registration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:bytes});
+        }
+        await api("/api/customer/push/subscribe","POST",sub.toJSON());
+        setNotificationsOn(true);setMessage("Background notifications enabled for this device.");
+      }catch(e:any){setMessage(e.message)}
+    }}>Enable push notifications</Button>
+    {notificationsOn&&<Button size="sm" variant="outline" onClick={async()=>{
+      const reg=await navigator.serviceWorker.ready;const sub=await reg.pushManager.getSubscription();
+      if(sub){await api("/api/customer/push/unsubscribe","POST",{endpoint:sub.endpoint});await sub.unsubscribe()}
+      setNotificationsOn(false);setMessage("Push notifications disabled on this device.")
+    }}>Turn off</Button>}
+    {message&&<p className="text-sm w-full" role="status">{message}</p>
    </div>
    <Card><CardContent className="p-5 space-y-3"><h3 className="font-semibold text-lg">Your updates {alerts.filter(a=>!a.read).length>0?`(${alerts.filter(a=>!a.read).length} new)`:""}</h3>
    {alerts.length===0?<p className="text-sm opacity-70">No updates yet.</p>:alerts.slice(0,8).map(a=><div key={a.id} className="border-b pb-2 flex justify-between gap-2"><div><p className="font-semibold text-sm">{a.title}</p><p className="text-sm">{a.body}</p><p className="text-xs opacity-60">{new Date(a.createdAt).toLocaleString("en-GB")}</p></div>{!a.read&&<Button variant="outline" size="sm" onClick={async()=>{await api("/api/customer/alerts/"+a.id+"/read","POST");setAlerts(x=>x.map(y=>y.id===a.id?{...y,read:true}:y))}}>Read</Button>}</div>)}</CardContent></Card>
