@@ -84,8 +84,9 @@ export function registerDispatch(app:Express){
  app.post("/api/driver/orders/:id/state",driverOnly,async(req:any,res)=>{
   const state=String(req.body?.state||"");
   if(!["on_way","delivered","failed"].includes(state))return res.sendStatus(400);
+  const testReplay=process.env.DISPATCH_TEST_MODE==="enabled" && state==="on_way";
   const q=await pool.query(`UPDATE dispatch_assignments SET state=$1,updated_at=now(),delivered_at=CASE WHEN $1='delivered' THEN now() ELSE delivered_at END
-   WHERE order_id=$2 AND driver_id=$3 AND route_date BETWEEN current_date-1 AND current_date+7 AND state<>'delivered' AND ($1<>'on_way' OR state='assigned') RETURNING order_id,driver_id`,[state,req.params.id,req.driverId]);
+   WHERE order_id=$2 AND driver_id=$3 AND route_date BETWEEN current_date-1 AND current_date+7 AND ($4::boolean OR (state<>'delivered' AND ($1<>'on_way' OR state='assigned'))) RETURNING order_id,driver_id`,[state,req.params.id,req.driverId,testReplay]);
   if(!q.rowCount)return res.sendStatus(404);
   await pool.query("INSERT INTO dispatch_events(order_id,driver_id,kind) VALUES($1,$2,$3)",[req.params.id,req.driverId,state]);
   const sendNotice=async(id:number,kind:string)=>{
@@ -96,7 +97,8 @@ export function registerDispatch(app:Express){
       kind==="on_way"?"Your driver is now heading to you. Open My Simple Kitchen to follow your delivery and see the latest updates.":"Your driver has marked your order delivered.",
       "dispatch:"+id+":"+kind+":"+new Date().toISOString().slice(0,10));
   };
-  if(state==="on_way")await sendNotice(Number(req.params.id),"on_way");
+  if(state==="on_way" && !testReplay)await sendNotice(Number(req.params.id),"on_way");
+  // Test replays should update the journey but never send real customer alerts.
   let nextStop:number|null=null;
   if(state==="delivered"){
     await sendNotice(Number(req.params.id),"delivered");
