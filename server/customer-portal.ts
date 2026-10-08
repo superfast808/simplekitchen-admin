@@ -69,6 +69,7 @@ export function registerCustomerPortal(app:Express){
  app.get("/api/customer/tracking/:orderId",async(req,res)=>{
   const email=await sessionEmail(req);
   if(!email)return res.status(401).json({message:"Not signed in"});
+  if(process.env.DISPATCH_CUSTOMER_TRACKING!=="enabled")return res.json({available:false,development:true});
   const orderId=Number(req.params.orderId);
   if(!Number.isInteger(orderId))return res.sendStatus(400);
   const q=await pool.query(
