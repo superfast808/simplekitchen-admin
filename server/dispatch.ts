@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { pool } from "./db";
 import { storage } from "./storage";
 import crypto from "crypto";
+import nodemailer from "nodemailer";
 const inactive=new Set(["cancelled","refunded","failed","trash"]);
 const onlyAdmin=(req:any,res:any,next:any)=>req.session?.userId?next():res.status(401).json({message:"Admin authentication required"});
 export async function setupDispatchTables(){
@@ -17,11 +18,91 @@ export async function setupDispatchTables(){
    delivered_at timestamptz,updated_at timestamptz NOT NULL DEFAULT now(),
    PRIMARY KEY(order_id,delivery_day,route_date))`);
  await pool.query(`CREATE INDEX IF NOT EXISTS dispatch_assignments_driver_idx ON dispatch_assignments(driver_id,route_date)`);
+ await pool.query(`CREATE TABLE IF NOT EXISTS dispatch_driver_logins (token_hash text PRIMARY KEY,driver_id bigint NOT NULL REFERENCES dispatch_drivers(id),expires_at timestamptz NOT NULL,used_at timestamptz)`);
+ await pool.query(`CREATE TABLE IF NOT EXISTS dispatch_driver_sessions (token_hash text PRIMARY KEY,driver_id bigint NOT NULL REFERENCES dispatch_drivers(id),expires_at timestamptz NOT NULL)`);
+ await pool.query(`CREATE TABLE IF NOT EXISTS dispatch_locations (driver_id bigint PRIMARY KEY REFERENCES dispatch_drivers(id),latitude double precision NOT NULL,longitude double precision NOT NULL,updated_at timestamptz NOT NULL DEFAULT now(),sharing boolean NOT NULL DEFAULT false)`);
  await pool.query(`CREATE TABLE IF NOT EXISTS dispatch_events (
   id bigserial PRIMARY KEY,order_id integer NOT NULL,driver_id bigint,kind text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now())`);
 }
+const digest=(token:string)=>crypto.createHash("sha256").update(token).digest("hex");
+async function driverId(req:any):Promise<string|null>{
+ const raw=(req.headers.cookie||"").split(";").map((v:string)=>v.trim()).find((v:string)=>v.startsWith("sk_driver="))?.slice(10);
+ if(!raw)return null;
+ const q=await pool.query("SELECT d.id::text FROM dispatch_driver_sessions s JOIN dispatch_drivers d ON d.id=s.driver_id WHERE s.token_hash=$1 AND s.expires_at>now() AND d.enabled=true",[digest(raw)]);
+ return q.rows[0]?.id||null;
+}
+const driverOnly=async(req:any,res:any,next:any)=>{const id=await driverId(req);if(!id)return res.status(401).json({message:"Driver login required"});req.driverId=id;next()};
 export function registerDispatch(app:Express){
+ // Separate customer-independent email magic links. No driver receives admin credentials.
+ app.post("/api/driver/access",async(req,res)=>{
+  const email=String(req.body?.email||"").trim().toLowerCase();
+  const generic={message:"If this is an authorised driver, a sign-in link will arrive shortly."};
+  if(!/^\S+@\S+\.\S+$/.test(email))return res.json(generic);
+  const driver=await pool.query("SELECT id FROM dispatch_drivers WHERE lower(email)=$1 AND enabled=true",[email]);
+  if(!driver.rowCount)return res.json(generic);
+  const count=await pool.query("SELECT count(*)::int AS n FROM dispatch_driver_logins WHERE driver_id=$1 AND expires_at>now()-interval '1 hour'",[driver.rows[0].id]);
+  if(Number(count.rows[0].n)>=5)return res.json(generic);
+  const raw=crypto.randomBytes(32).toString("base64url"),hash=digest(raw);
+  const host=(await pool.query("SELECT value FROM settings WHERE key='smtp_host'")).rows[0]?.value||process.env.SMTP_HOST;
+  const user=(await pool.query("SELECT value FROM settings WHERE key='smtp_user'")).rows[0]?.value||process.env.SMTP_USER;
+  const pass=(await pool.query("SELECT value FROM settings WHERE key='smtp_pass'")).rows[0]?.value||process.env.SMTP_PASS;
+  const port=Number((await pool.query("SELECT value FROM settings WHERE key='smtp_port'")).rows[0]?.value||587);
+  const from=(await pool.query("SELECT value FROM settings WHERE key='smtp_from'")).rows[0]?.value||user;
+  if(!host||!user||!pass)return res.status(503).json({message:"Driver email sign-in is not configured"});
+  const publicBase=(process.env.DRIVER_PORTAL_URL||"").replace(/\/$/,"");
+  if(!/^https:\/\//.test(publicBase))return res.status(503).json({message:"DRIVER_PORTAL_URL HTTPS origin required"});
+  await pool.query("INSERT INTO dispatch_driver_logins(token_hash,driver_id,expires_at) VALUES($1,$2,now()+interval '15 minutes')",[hash,driver.rows[0].id]);
+  try{await nodemailer.createTransport({host,port,secure:port===465,auth:{user,pass}}).sendMail({
+    from,to:email,subject:"Simple Kitchen — secure driver login",
+    html:'<div style="font-family:Arial;background:#f4f1e9;padding:24px"><h2>Simple Kitchen Driver</h2><p>Your private sign-in link expires in 15 minutes.</p><a style="background:#314d40;color:white;padding:14px 20px;border-radius:8px" href="'+publicBase+'/driver?token='+encodeURIComponent(raw)+'">Sign in to your deliveries</a></div>'
+  });res.json(generic)}catch{res.status(503).json({message:"Could not send driver sign-in email"})}
+ });
+ app.post("/api/driver/verify",async(req,res)=>{
+  const raw=String(req.body?.token||"");if(raw.length<30)return res.sendStatus(400);
+  const db=await pool.connect();try{await db.query("BEGIN");
+    const q=await db.query("UPDATE dispatch_driver_logins SET used_at=now() WHERE token_hash=$1 AND used_at IS NULL AND expires_at>now() RETURNING driver_id",[digest(raw)]);
+    if(!q.rowCount){await db.query("ROLLBACK");return res.status(401).json({message:"Link invalid or expired"})}
+    const session=crypto.randomBytes(32).toString("base64url");
+    await db.query("INSERT INTO dispatch_driver_sessions(token_hash,driver_id,expires_at) VALUES($1,$2,now()+interval '14 days')",[digest(session),q.rows[0].driver_id]);
+    await db.query("COMMIT");
+    res.cookie("sk_driver",session,{httpOnly:true,secure:true,sameSite:"lax",maxAge:14*86400000,path:"/"});
+    res.json({ok:true});
+  }catch(e){await db.query("ROLLBACK");res.sendStatus(500)}finally{db.release()}
+ });
+ app.get("/api/driver/me",driverOnly,async(req:any,res)=>{
+  const d=await pool.query('SELECT id::text,name,registration FROM dispatch_drivers WHERE id=$1',[req.driverId]);
+  const stops=await pool.query(`SELECT a.order_id AS id,a.route_date AS "routeDate",a.delivery_day AS "day",a.sequence,a.state,
+    o.customer_name AS "customerName",o.delivery_address AS address,
+    (SELECT json_agg(json_build_object('name',i.product_name,'quantity',i.quantity)) FROM order_items i WHERE i.order_id=o.id) AS items
+    FROM dispatch_assignments a JOIN orders o ON o.id=a.order_id
+    WHERE a.driver_id=$1 AND a.route_date BETWEEN current_date-1 AND current_date+7
+    ORDER BY a.route_date,a.sequence NULLS LAST,a.order_id`,[req.driverId]);
+  res.setHeader("Cache-Control","no-store");res.json({driver:d.rows[0],stops:stops.rows});
+ });
+ app.post("/api/driver/orders/:id/state",driverOnly,async(req:any,res)=>{
+  const state=String(req.body?.state||"");
+  if(!["on_way","delivered","failed"].includes(state))return res.sendStatus(400);
+  const q=await pool.query(`UPDATE dispatch_assignments SET state=$1,updated_at=now(),delivered_at=CASE WHEN $1='delivered' THEN now() ELSE delivered_at END
+   WHERE order_id=$2 AND driver_id=$3 AND route_date BETWEEN current_date-1 AND current_date+7 RETURNING order_id,driver_id`,[state,req.params.id,req.driverId]);
+  if(!q.rowCount)return res.sendStatus(404);
+  await pool.query("INSERT INTO dispatch_events(order_id,driver_id,kind) VALUES($1,$2,$3)",[req.params.id,req.driverId,state]);
+  // Dispatch events are stored; customer-facing messages remain gated pending end-to-end QA.
+  res.json({ok:true,state});
+ });
+ app.post("/api/driver/location",driverOnly,async(req:any,res)=>{
+  const {lat,lng,sharing}=req.body||{};
+  if(typeof sharing!=="boolean"||!Number.isFinite(lat)||!Number.isFinite(lng)||lat<49||lat>61||lng< -9||lng>3)return res.status(400).json({message:"Invalid coordinates"});
+  await pool.query(`INSERT INTO dispatch_locations(driver_id,latitude,longitude,sharing,updated_at) VALUES($1,$2,$3,$4,now())
+   ON CONFLICT(driver_id) DO UPDATE SET latitude=EXCLUDED.latitude,longitude=EXCLUDED.longitude,sharing=EXCLUDED.sharing,updated_at=now()`,[req.driverId,lat,lng,sharing]);
+  res.json({ok:true});
+ });
+ app.post("/api/driver/logout",driverOnly,async(req:any,res)=>{
+  const raw=(req.headers.cookie||"").split(";").find((v:string)=>v.trim().startsWith("sk_driver="))?.trim().slice(10);
+  if(raw)await pool.query("DELETE FROM dispatch_driver_sessions WHERE token_hash=$1",[digest(raw)]);
+  res.clearCookie("sk_driver",{path:"/"});res.json({ok:true});
+ });
+
  app.get("/api/dispatch/drivers",onlyAdmin,async(_req,res)=>{try{res.json((await pool.query('SELECT id::text,name,registration,photo_url AS "photoUrl",email,enabled FROM dispatch_drivers ORDER BY name')).rows)}catch(e:any){res.status(500).json({message:e.message})}});
  app.post("/api/dispatch/drivers",onlyAdmin,async(req,res)=>{
   const {name,registration,photoUrl,email}=req.body||{};
