@@ -1,3 +1,4 @@
+import DriverLocations from "@/pages/driver-locations";
 import DriverApp from "@/pages/driver-app";
 import DispatchDevelopment from "@/pages/dispatch-development";
 import { Switch, Route, useLocation } from "wouter";
@@ -83,6 +84,7 @@ function PageRouter() {
       <Route path="/ingredients" component={IngredientsPage} />
       <Route path="/manual-stock" component={ManualStockPage} />
       <Route path="/routes/tuesday" component={TuesdayDeliveryRoutesPage} />
+      <Route path="/dispatch/locations" component={DriverLocations} />
       <Route path="/dispatch/dev/tuesday">{() => <DispatchDevelopment day="tuesday" />}</Route>
       <Route path="/dispatch/dev/saturday">{() => <DispatchDevelopment day="saturday" />}</Route>
       <Route path="/routes/saturday" component={SaturdayDeliveryRoutesPage} />
