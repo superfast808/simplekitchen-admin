@@ -3101,19 +3101,21 @@ export async function registerRoutes(
           itemSummary[item.productName] = (itemSummary[item.productName] || 0) + item.quantity;
         }
         const summaryText = Object.entries(itemSummary).map(([n, q]) => `${q}× ${n.replace(/slow cooked /gi,"").replace(/homemade /gi,"").replace(/with /gi,"w/")}`).join(" · ");
-        const typeCounts = { Meals: 0, Oats: 0, Soups: 0, Snacks: 0 };
+        const typeCounts = { Meals: 0, Oats: 0, Snacks: 0, Soup: 0 };
         for (const item of order.items) {
           const name = item.productName.toLowerCase();
+          const product = (item.productId ? byId.get(item.productId) : undefined) || byName.get(name.trim());
+          const category = (product?.category || "").toLowerCase();
           if (/add\s+delivery|meal\s+subscription|gift\s*card/i.test(name)) continue;
-          if (/oat|porridge|overnight/i.test(name)) typeCounts.Oats += item.quantity;
-          else if (/soup/i.test(name)) typeCounts.Soups += item.quantity;
-          else if (/snack|protein\s*(bar|ball)|brownie|cookie|flapjack/i.test(name)) typeCounts.Snacks += item.quantity;
+          // Product category takes priority: snack names are not reliably descriptive.
+          if (/snack|bar|treat/i.test(category) || /snack|protein\s*(bar|ball)|brownie|cookie|flapjack|chocolate.*bar|gold\s*bar/i.test(name)) typeCounts.Snacks += item.quantity;
+          else if (/oat|porridge|overnight/i.test(category+" "+name)) typeCounts.Oats += item.quantity;
+          else if (/soup/i.test(category+" "+name)) typeCounts.Soup += item.quantity;
           else typeCounts.Meals += item.quantity;
         }
         const activeTypes = Object.entries(typeCounts).filter(([,count]) => count > 0);
-        const categorySummary = activeTypes.map(([name,count]) => `${name} ${count}`).join(" | ");
-        const totalsText = categorySummary + (activeTypes.length > 1
-          ? ` | Total ${activeTypes.reduce((sum,[,count]) => sum + count,0)}` : "");
+        const categorySummary = activeTypes.map(([name,count]) => `${count} ${name.toLowerCase()}`).join(" | ");
+        const totalsText = categorySummary;
         const noteText = (order.customerDeliveryInstructions || order.notes || "").trim();
 
         // Pre-measure each section
@@ -3156,10 +3158,7 @@ export async function registerRoutes(
 
         // Vertically center the whole block; never start above top padding
         const minPadY = 2 * MM;
-        const startY = Math.max(
-          labelY + minPadY,
-          labelY + (labelH - totalContentH) / 2
-        );
+        const startY = labelY + minPadY;
 
         const cx = labelX + padX; // content x (left edge of content area)
         const opts = { width: innerW, align: "center" as const };
