@@ -51,3 +51,13 @@ export async function sendPush(email:string,title:string,body:string){
  const r=await pool.query("SELECT endpoint,p256dh,auth FROM customer_push_subscriptions WHERE email=$1",[email.toLowerCase()]);
  await Promise.allSettled(r.rows.map(x=>deliver(x.endpoint,x.p256dh,x.auth,title,body)));
 }
+
+export async function sendDispatchTestPush(email:string,title:string,body:string){
+ if(!pushPublicKey())throw Error("VAPID key not configured");
+ const subs=await pool.query("SELECT endpoint,p256dh,auth FROM customer_push_subscriptions WHERE lower(email)=$1",[email.trim().toLowerCase()]);
+ if(!subs.rowCount)throw Error("No push subscription registered for test email");
+ const results=await Promise.allSettled(subs.rows.map(x=>deliver(x.endpoint,x.p256dh,x.auth,title,body)));
+ const successful=results.filter(x=>x.status==="fulfilled").length;
+ if(!successful)throw Error("Push service rejected all deliveries");
+ return {registered:subs.rowCount,accepted:successful};
+}
