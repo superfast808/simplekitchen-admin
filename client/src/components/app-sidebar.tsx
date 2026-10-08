@@ -27,6 +27,8 @@ const menuItems = [
   { title: "Possible Duplicates", url: "/possible-duplicates", icon: CopyCheck },
   { title: "Ingredients", url: "/ingredients", icon: ChefHat },
   { title: "Manual Stock", url: "/manual-stock", icon: Plus },
+  { title: "🚧 Tue Dispatch (Dev)", url: "/dispatch/dev/tuesday", icon: MapPin },
+  { title: "🚧 Sat Dispatch (Dev)", url: "/dispatch/dev/saturday", icon: MapPin },
   { title: "Tue Routes", url: "/routes/tuesday", icon: MapPin },
   { title: "Sat Routes", url: "/routes/saturday", icon: MapPin },
   { title: "Subscriptions", url: "/subscriptions", icon: Mail },
