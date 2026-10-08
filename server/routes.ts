@@ -2156,11 +2156,15 @@ export async function registerRoutes(
       const to = req.query.to ? new Date(req.query.to as string) : undefined;
       const sourceFilter = parseSourceFilter(req.query.source as string | undefined);
       let items = await storage.getOrderItemsByDateRange(from, to);
+      const christmasProducts = (await storage.getProducts()).filter(p=>/(^|\W)(xmas|christmas)(\W|$)/i.test(p.category||""));
+      const christmasIds = new Set(christmasProducts.map(p=>p.id));
+      const christmasNames = new Set(christmasProducts.map(p=>p.name.trim().toLowerCase()));
+      items = items.filter(i=>!(i.productId && christmasIds.has(i.productId)) && !christmasNames.has(i.productName.trim().toLowerCase()));
       if (sourceFilter) {
         items = items.filter(item => matchesSource(item, sourceFilter));
       }
       const includeManualStock = !sourceFilter || sourceFilter.manual;
-      const manualQtys = includeManualStock ? await storage.getManualQuantities(from, to) : [];
+      const manualQtys = (includeManualStock ? await storage.getManualQuantities(from, to) : []).filter(m=>!christmasIds.has(m.productId));
 
       type ProductTotalEntry = {
         productName: string;
@@ -2207,11 +2211,15 @@ export async function registerRoutes(
       const to = req.query.to ? new Date(req.query.to as string) : undefined;
       const sourceFilter = parseSourceFilter(req.query.source as string | undefined);
       let items = await storage.getOrderItemsByDateRange(from, to);
+      const christmasProducts = (await storage.getProducts()).filter(p=>/(^|\W)(xmas|christmas)(\W|$)/i.test(p.category||""));
+      const christmasIds = new Set(christmasProducts.map(p=>p.id));
+      const christmasNames = new Set(christmasProducts.map(p=>p.name.trim().toLowerCase()));
+      items = items.filter(i=>!(i.productId && christmasIds.has(i.productId)) && !christmasNames.has(i.productName.trim().toLowerCase()));
       if (sourceFilter) {
         items = items.filter(item => matchesSource(item, sourceFilter));
       }
       const includeManualStock = !sourceFilter || sourceFilter.manual;
-      const manualQtys = includeManualStock ? await storage.getManualQuantities(from, to) : [];
+      const manualQtys = (includeManualStock ? await storage.getManualQuantities(from, to) : []).filter(m=>!christmasIds.has(m.productId));
       const allIngredients = await storage.getAllIngredients();
       const allProducts = await storage.getProducts();
 
