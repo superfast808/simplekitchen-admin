@@ -239,6 +239,66 @@ function MealSelectorPanel({
   );
 }
 
+
+function CookingChoicesLoader() {
+  const messages = [
+    "Your choices are cooking up…",
+    "Whisking together this week's menu…",
+    "Stirring in your meal options…",
+    "Plating up your subscription choices…",
+    "Almost ready to serve your picks…",
+  ];
+  const [messageIndex, setMessageIndex] = useState(0);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setMessageIndex(i => (i + 1) % messages.length), 1700);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-[#f4f1e9] via-white to-[#e7eee6] flex items-center justify-center p-4">
+      <Card className="w-full max-w-md border-0 shadow-xl overflow-hidden">
+        <CardContent className="p-8 text-center space-y-6">
+          <BrandLogo size="lg" />
+          <div className="space-y-2">
+            <h2 className="text-2xl font-bold text-[#314d40]">Preparing your choices</h2>
+            <p className="text-sm text-muted-foreground">We're gathering your meals, extras and saved selections.</p>
+          </div>
+          <div className="relative mx-auto w-32 h-32" role="img" aria-label="Animated mixing bowl">
+            <div className="absolute left-1/2 top-1 -translate-x-1/2 flex items-end gap-2" aria-hidden="true">
+              <span className="block w-2 h-8 rounded-full bg-emerald-200 animate-pulse" />
+              <span className="block w-2 h-10 rounded-full bg-orange-200 animate-pulse" style={{animationDelay:"0.25s"}} />
+              <span className="block w-2 h-8 rounded-full bg-emerald-200 animate-pulse" style={{animationDelay:"0.5s"}} />
+            </div>
+            <div className="sk-mixing-spoon absolute left-1/2 top-8 w-16 h-16 -translate-x-1/2" aria-hidden="true">
+              <div className="absolute left-1/2 top-0 w-6 h-6 -translate-x-1/2 rounded-full border-4 border-[#314d40] bg-white" />
+              <div className="absolute left-1/2 top-5 w-1.5 h-10 -translate-x-1/2 rounded-full bg-[#314d40]" />
+            </div>
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 w-24 h-12 rounded-b-[999px] border-[6px] border-t-0 border-[#314d40] bg-orange-100 shadow-inner" />
+            <div className="absolute bottom-10 left-1/2 -translate-x-1/2 w-20 h-4 rounded-full bg-orange-50/80" />
+          </div>
+          <div className="space-y-3" role="status" aria-live="polite">
+            <p className="text-base font-medium min-h-[24px] text-[#314d40]">{messages[messageIndex]}</p>
+            <div className="flex justify-center gap-2" aria-hidden="true">
+              {messages.map((_, i) => <span key={i} className={`h-2.5 w-2.5 rounded-full transition-all ${i===messageIndex?"bg-[#314d40] scale-110":"bg-emerald-200"}`} />)}
+            </div>
+          </div>
+          <style>{`
+            @keyframes sk-stir {
+              0%, 100% { transform: translateX(-50%) rotate(-18deg); }
+              50% { transform: translateX(-50%) rotate(18deg); }
+            }
+            .sk-mixing-spoon { animation: sk-stir 1.8s ease-in-out infinite; transform-origin: 50% 90%; }
+            @media (prefers-reduced-motion: reduce) {
+              .sk-mixing-spoon { animation: none; }
+            }
+          `}</style>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 export default function SubscribePage({ params }: { params: { token: string } }) {
   const token = params.token;
   const [email, setEmail] = useState("");
@@ -398,13 +458,7 @@ export default function SubscribePage({ params }: { params: { token: string } })
     }
   };
 
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-orange-50 dark:from-gray-900 dark:via-gray-900 dark:to-gray-900 flex items-center justify-center p-4">
-        <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
-  }
+  if (isLoading) return <CookingChoicesLoader />;
 
   if (error || !data) {
     return (
