@@ -32,9 +32,11 @@ import AddonPage, { AddonSuccessPage } from "@/pages/addon";
 import IngredientLibraryPage from "@/pages/ingredient-library";
 import LoginPage from "@/pages/login";
 import SystemStatusPage from "@/pages/system-status";
+import CustomerPortal from "@/pages/customer-portal";
 
 function isPublicRoute(location: string) {
   return (
+    (location === "/my" || location.startsWith("/my/")) ||
     location.startsWith("/subscribe/") ||
     location.startsWith("/addon/")
   );
@@ -43,6 +45,7 @@ function isPublicRoute(location: string) {
 function PublicRoutes() {
   return (
     <Switch>
+      <Route path="/my" component={CustomerPortal} />
       <Route path="/subscribe/:token/payment-success">
         {(params) => <PaymentSuccessPage params={params} />}
       </Route>
