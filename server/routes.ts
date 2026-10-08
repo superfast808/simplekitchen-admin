@@ -2780,6 +2780,8 @@ export async function registerRoutes(
       const safe = {
         ...settingsMap,
         smtp_pass: settingsMap.smtp_pass ? "••••••••" : "",
+        wc_admin_key: settingsMap.wc_admin_key ? "••••••••" : "",
+        wc_admin_secret: settingsMap.wc_admin_secret ? "••••••••" : "",
         stripe_test_secret_key: settingsMap.stripe_test_secret_key ? "••••••••" : "",
         stripe_live_secret_key: settingsMap.stripe_live_secret_key ? "••••••••" : "",
       };
