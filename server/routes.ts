@@ -2719,7 +2719,7 @@ export async function registerRoutes(
       const subscriptionOrderIds = await storage.getSubscriptionOriginOrderIds();
       const addresses = ordersWithItems
         .filter(o =>
-          o.items.length > 0 && (o.deliveryAddress || o.fulfillmentType === "collection") &&
+          o.items.length > 0 && !["cancelled","refunded","failed","trash"].includes((o.status||"").toLowerCase()) && (o.deliveryAddress || o.fulfillmentType === "collection") &&
           !o.items.some(i => isSubscriptionItem(i.productName)) &&
           !isAddDeliveryOnly(o.items)
         )
