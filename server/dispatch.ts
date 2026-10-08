@@ -1,4 +1,4 @@
-import { sendDispatchTestPush } from "./customer-push";
+import { sendOrderTestPush } from "./customer-push";
 import type { Express } from "express";
 import { pool } from "./db";
 import { storage } from "./storage";
@@ -105,7 +105,10 @@ export function registerDispatch(app:Express){
     const q=await pool.query("SELECT value FROM settings WHERE key='customer_portal_test_email'");
     const recipient=String(q.rows[0]?.value||"").trim().toLowerCase();
     if(recipient){
-      try{testPush=await sendDispatchTestPush(recipient,"[TEST] Your Simple Kitchen delivery is on its way!","Your driver is now heading to you. Open My Simple Kitchen to follow your delivery.");}
+      const order=await pool.query("SELECT customer_email FROM orders WHERE id=$1",[req.params.id]);
+      const customer=String(order.rows[0]?.customer_email||"").trim().toLowerCase();
+      if(!customer)testPush={error:"Order customer email missing"};
+      else try{testPush=await sendOrderTestPush(customer,recipient,"[TEST] Your Simple Kitchen delivery is on its way!","Your driver is now heading to you. Open My Simple Kitchen to follow your delivery.");}
       catch(e:any){testPush={error:e.message}}
     }else testPush={error:"Test email missing in customer portal settings"};
   }
@@ -148,7 +151,7 @@ export function registerDispatch(app:Express){
   if(!enabled)return res.json({enabled:false});
   const q=await pool.query("SELECT value FROM settings WHERE key='customer_portal_test_email'");
   const recipient=String(q.rows[0]?.value||"").trim().toLowerCase();
-  const subs=recipient?await pool.query("SELECT count(*)::int AS n FROM customer_push_subscriptions WHERE lower(email)=$1",[recipient]):null;
+  const subs=recipient?await pool.query("SELECT count(*)::int AS n FROM customer_push_test_devices WHERE lower(test_recipient)=$1",[recipient]):null;
   res.json({enabled:true,testRecipientConfigured:!!recipient,registeredDevices:subs?Number(subs.rows[0].n):0,vapidConfigured:!!process.env.CUSTOMER_PUSH_VAPID_PRIVATE_KEY});
  });
  app.get("/api/dispatch/test-mode",onlyAdmin,(_req,res)=>{
