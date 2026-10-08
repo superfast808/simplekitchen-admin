@@ -1,3 +1,4 @@
+import { DebugExportButton } from "@/components/debug-export-button";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { DateFilter, DateRangeLabel, useDateFilter } from "@/components/date-filter";
@@ -26,7 +27,7 @@ export default function KitchenProductionPage() {
   return <div className="p-4 md:p-6 space-y-5">
     <div className="flex flex-wrap justify-between items-center gap-3">
       <div><h1 className="text-2xl font-semibold">Kitchen Production Check</h1><DateRangeLabel from={dates.from} to={dates.to}/></div>
-      <div className="flex flex-wrap gap-2"><DateFilter {...dates} testIdPrefix="kitchen"/><Button variant="outline" onClick={()=>refetch()} disabled={isFetching}><RefreshCcw className="w-4 h-4 mr-2"/>Refresh</Button><Button variant="outline" onClick={()=>window.print()}><Printer className="w-4 h-4 mr-2"/>Print</Button></div>
+      <div className="flex flex-wrap gap-2"><DateFilter {...dates} testIdPrefix="kitchen"/><DebugExportButton page="kitchen-production" from={dates.from} to={dates.to} day={day}/><Button variant="outline" onClick={()=>refetch()} disabled={isFetching}><RefreshCcw className="w-4 h-4 mr-2"/>Refresh</Button><Button variant="outline" onClick={()=>window.print()}><Printer className="w-4 h-4 mr-2"/>Print</Button></div>
     </div>
     <p className="text-sm text-muted-foreground">Live order-by-order production reconciliation. Defaults to both delivery days to match the Orders page. Select Saturday or Tuesday for day-specific production. Christmas products are shown separately from regular meal preparation. Day selection applies to order allocations; manual/shop stock is displayed separately. Physical counts entered here are for checking only and are not saved.</p>
     <div className="flex gap-2 flex-wrap">{[["saturday","Saturday only"],["tuesday","Tuesday only"],["all","Both days"],["xmas","🎄 Christmas"]].map(([value,title])=><Button key={value} size="sm" variant={day===value?"default":"outline"} onClick={()=>{setDay(value);setPrepared({});}}>{title}</Button>)}</div>
