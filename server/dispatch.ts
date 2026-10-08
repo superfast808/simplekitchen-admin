@@ -85,7 +85,7 @@ export function registerDispatch(app:Express){
   const state=String(req.body?.state||"");
   if(!["on_way","delivered","failed"].includes(state))return res.sendStatus(400);
   const q=await pool.query(`UPDATE dispatch_assignments SET state=$1,updated_at=now(),delivered_at=CASE WHEN $1='delivered' THEN now() ELSE delivered_at END
-   WHERE order_id=$2 AND driver_id=$3 AND route_date BETWEEN current_date-1 AND current_date+7 RETURNING order_id,driver_id`,[state,req.params.id,req.driverId]);
+   WHERE order_id=$2 AND driver_id=$3 AND route_date BETWEEN current_date-1 AND current_date+7 AND state<>'delivered' AND ($1<>'on_way' OR state='assigned') RETURNING order_id,driver_id`,[state,req.params.id,req.driverId]);
   if(!q.rowCount)return res.sendStatus(404);
   await pool.query("INSERT INTO dispatch_events(order_id,driver_id,kind) VALUES($1,$2,$3)",[req.params.id,req.driverId,state]);
   const sendNotice=async(id:number,kind:string)=>{
@@ -101,7 +101,7 @@ export function registerDispatch(app:Express){
   if(state==="delivered"){
     await sendNotice(Number(req.params.id),"delivered");
     const next=await pool.query(
-      "SELECT a.order_id FROM dispatch_assignments a WHERE a.driver_id=$1 AND a.route_date=(SELECT route_date FROM dispatch_assignments WHERE order_id=$2 AND driver_id=$1 ORDER BY updated_at DESC LIMIT 1) AND a.state='assigned' ORDER BY sequence NULLS LAST,order_id LIMIT 1",
+      "SELECT a.order_id FROM dispatch_assignments a WHERE a.driver_id=$1 AND a.route_date=(SELECT route_date FROM dispatch_assignments WHERE order_id=$2 AND driver_id=$1 ORDER BY updated_at DESC LIMIT 1) AND a.delivery_day=(SELECT delivery_day FROM dispatch_assignments WHERE order_id=$2 AND driver_id=$1 ORDER BY updated_at DESC LIMIT 1) AND a.state='assigned' ORDER BY sequence NULLS LAST,order_id LIMIT 1",
       [req.driverId,req.params.id]);
     if(next.rowCount){
       nextStop=Number(next.rows[0].order_id);
