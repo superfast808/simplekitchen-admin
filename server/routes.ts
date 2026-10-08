@@ -2979,9 +2979,19 @@ export async function registerRoutes(
       const from = req.query.from ? new Date(req.query.from as string) : undefined;
       const to = req.query.to ? new Date(req.query.to as string) : undefined;
       const tuesdayParam = req.query.tuesday as string | undefined;
+      const xmasMode = req.query.mode === "xmas";
+      const allProductsForLabels = await storage.getProducts();
+      const byId = new Map(allProductsForLabels.map(p=>[p.id,p]));
+      const byName = new Map(allProductsForLabels.map(p=>[p.name.trim().toLowerCase(),p]));
+      const christmasItem = (item: { productId?: number | null; productName: string }) => {
+        const product = (item.productId ? byId.get(item.productId) : undefined) || byName.get(item.productName.trim().toLowerCase());
+        return /(^|\W)(xmas|christmas)(\W|$)/i.test(product?.category || "");
+      };
       const ordersList = await storage.getOrders(from, to);
       let filteredOrders = ordersList;
-      if (tuesdayParam === "true") {
+      if (xmasMode) {
+        filteredOrders = ordersList;
+      } else if (tuesdayParam === "true") {
         filteredOrders = ordersList.filter(o => o.isTuesday);
       } else if (tuesdayParam === "false") {
         filteredOrders = ordersList.filter(o => !o.isTuesday);
@@ -2989,7 +2999,7 @@ export async function registerRoutes(
       const ordersWithItems = await Promise.all(
         filteredOrders.map(async (order) => {
           const items = await storage.getOrderItems(order.id);
-          return { ...order, items };
+          return { ...order, items: items.filter(i => xmasMode ? christmasItem(i) : !christmasItem(i)) };
         })
       );
       applyAddDeliveryUpgrades(ordersWithItems);
@@ -3000,6 +3010,7 @@ export async function registerRoutes(
       // Print labels for all orders that are not subscription parent orders and not
       // standalone "Add Delivery" charge orders (collection orders get a label too)
       const labelOrders = ordersWithItems.filter(o =>
+        o.items.length > 0 && !["cancelled","refunded","failed","trash"].includes((o.status||"").toLowerCase()) &&
         !o.items.some(i => subscriptionItemRe.test(i.productName)) &&
         !isAddDeliveryOnlyLabel(o.items)
       );
@@ -3065,7 +3076,7 @@ export async function registerRoutes(
           if (item.productName.toLowerCase().includes("add delivery")) continue;
           itemSummary[item.productName] = (itemSummary[item.productName] || 0) + item.quantity;
         }
-        const summaryText = Object.entries(itemSummary).map(([n, q]) => `${q} x ${n}`).join(", ");
+        const summaryText = Object.entries(itemSummary).map(([n, q]) => `${q}× ${n.replace(/slow cooked /gi,"").replace(/homemade /gi,"").replace(/with /gi,"w/")}`).join(" · ");
         const mealCount = order.items.reduce((sum, item) =>
           sum + (/add\s+delivery|meal\s+subscription|oat|porridge|overnight|soup/i.test(item.productName) ? 0 : item.quantity), 0);
         const oatCount = order.items.reduce((sum, item) =>
@@ -3074,14 +3085,14 @@ export async function registerRoutes(
           `Meals ${mealCount} + Oats ${oatCount} = ${mealCount + oatCount}`,
           ...(order.wooPaidTotal !== null ? [`Paid: £${Number(order.wooPaidTotal).toFixed(2)}`] : []),
         ].join("  |  ");
-        const noteText = order.notes?.trim() || "";
+        const noteText = (order.customerDeliveryInstructions || order.notes || "").trim();
 
         // Pre-measure each section
-        const NOTE_FONT_SIZE = 5.5;
-        const GAP1 = 1.5;  // gap after name
-        const GAP2 = 1.5;  // gap after tag
-        const GAP3 = 2;    // gap after address
-        const GAP4 = 2;    // gap between items and note
+        const NOTE_FONT_SIZE = 5.1;
+        const GAP1 = 0.7;  // gap after name
+        const GAP2 = 0.7;  // gap after tag
+        const GAP3 = 0.7;    // gap after address
+        const GAP4 = 0.7;    // gap between items and note
 
         doc.font("Helvetica-Bold").fontSize(9);
         const nameH = doc.heightOfString(order.customerName, { width: innerW });
@@ -3089,11 +3100,11 @@ export async function registerRoutes(
         doc.font("Helvetica-Bold").fontSize(7);
         const tagH = doc.heightOfString(tag, { width: innerW });
 
-        doc.font("Helvetica").fontSize(7);
+        doc.font("Helvetica").fontSize(6);
         const addrText = order.deliveryAddress || "";
         const addrH = addrText ? doc.heightOfString(addrText, { width: innerW }) : 0;
 
-        doc.font("Helvetica").fontSize(6.5);
+        doc.font("Helvetica").fontSize(5.8);
         const itemsH = summaryText ? doc.heightOfString(summaryText, { width: innerW }) : 0;
 
         doc.font("Helvetica-Bold").fontSize(6.5);
@@ -3138,7 +3149,7 @@ export async function registerRoutes(
 
         // Address
         if (addrText && cy < labelY + labelH - 10) {
-          doc.font("Helvetica").fontSize(7);
+          doc.font("Helvetica").fontSize(6);
           const maxAddrH = Math.min(
             totalsY - cy - GAP3 - (itemsH > 0 ? Math.min(itemsH, 18) + GAP4 : 0),
             24
@@ -3151,7 +3162,7 @@ export async function registerRoutes(
 
         // Items
         if (summaryText && cy < totalsY - 6) {
-          doc.font("Helvetica").fontSize(6.5);
+          doc.font("Helvetica").fontSize(5.8);
           const maxItemH = totalsY - cy - GAP4;
           if (maxItemH > 6) {
             doc.text(summaryText, cx, cy, { ...opts, height: maxItemH, ellipsis: true });
@@ -3182,7 +3193,7 @@ export async function registerRoutes(
 
       const dateLabel = from ? `${from.toISOString().split("T")[0]}` : "all";
       res.setHeader("Content-Type", "application/pdf");
-      res.setHeader("Content-Disposition", `attachment; filename="labels_${dateLabel}.pdf"`);
+      res.setHeader("Content-Disposition", `attachment; filename="${xmasMode ? "xmas" : tuesdayParam === "true" ? "tuesday" : "saturday"}_labels_${dateLabel}.pdf"`);
       res.send(pdfBuf);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
