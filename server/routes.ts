@@ -3126,7 +3126,8 @@ export async function registerRoutes(
         const GAP4 = 0.7;    // gap between items and note
 
         doc.font("Helvetica-Bold").fontSize(9);
-        const nameH = doc.heightOfString(order.customerName, { width: innerW });
+        const printedName = `${order.customerName}  #${order.wooId || order.id}`;
+        const nameH = doc.heightOfString(printedName, { width: innerW });
 
         doc.font("Helvetica-Bold").fontSize(7);
         const tagH = doc.heightOfString(tag, { width: innerW });
@@ -3167,7 +3168,7 @@ export async function registerRoutes(
 
         // Name
         doc.font("Helvetica-Bold").fontSize(9);
-        doc.text(order.customerName, cx, cy, { ...opts, height: Math.min(nameH, labelH * 0.35) });
+        doc.text(printedName, cx, cy, { ...opts, height: Math.min(nameH, labelH * 0.35) });
         cy = Math.min(doc.y, labelY + labelH * 0.4) + GAP1;
 
         // Tag
