@@ -8,11 +8,12 @@ type DriverData={driver:{id:string;name:string;registration:string|null};stops:S
 const request=async(path:string,method="GET",body?:unknown)=>{const response=await fetch(path,{method,headers:{"Content-Type":"application/json"},credentials:"include",body:body?JSON.stringify(body):undefined,cache:"no-store"});const data=await response.json();if(!response.ok)throw Error(data.message||"Request failed");return data};
 export default function DriverApp(){
  const [testMode,setTestMode]=useState(false);
+ const [pushReadiness,setPushReadiness]=useState<{testRecipientConfigured?:boolean;registeredDevices?:number;vapidConfigured?:boolean}|null>(null);
  const [email,setEmail]=useState(""),[data,setData]=useState<DriverData|null>(null),[message,setMessage]=useState(""),[busy,setBusy]=useState(false),[locationOn,setLocationOn]=useState(false),[install,setInstall]=useState<any>(null);
  const refresh=()=>request("/api/driver/me").then(async v=>{setData(v);try{const loc=await request("/api/driver/location-status");setLocationOn(!!loc.sharing)}catch{}}).catch(()=>setData(null));
  useEffect(()=>{
   const params=new URLSearchParams(window.location.search),token=params.get("token");
-  fetch("/api/driver/test-status",{credentials:"include"}).then(r=>r.ok?r.json():{enabled:false}).then(v=>setTestMode(!!v.enabled)).catch(()=>{});
+  fetch("/api/driver/test-status",{credentials:"include"}).then(r=>r.ok?r.json():{enabled:false}).then(v=>{setTestMode(!!v.enabled);setPushReadiness(v)}).catch(()=>{});
   if(token){request("/api/driver/verify","POST",{token}).then(()=>{window.history.replaceState({},"","/driver");refresh()}).catch(e=>setMessage(e.message))}else refresh();
   if("serviceWorker" in navigator)navigator.serviceWorker.register("/driver-sw.js",{scope:"/driver"}).catch(()=>{});
   const link=document.createElement("link");link.rel="manifest";link.href="/driver-manifest.webmanifest";document.head.appendChild(link);
@@ -36,6 +37,7 @@ export default function DriverApp(){
    <Truck/><div><h1 className="text-xl font-bold">Simple Kitchen Driver</h1><p className="text-xs opacity-75">Your deliveries, organised</p></div>
   </header>
   {install&&<Button onClick={async()=>{await install.prompt();setInstall(null)}}>Install driver app</Button>}
+  {data&&testMode&&pushReadiness&&<div className="rounded-xl border border-amber-300 bg-white p-3 text-xs space-y-1"><strong>Test push readiness</strong><p>Test email: {pushReadiness.testRecipientConfigured?"Configured":"Missing"} · Registered devices: {pushReadiness.registeredDevices??0} · VAPID: {pushReadiness.vapidConfigured?"Configured":"Missing"}</p><p className="text-muted-foreground">Push accepted by a service does not guarantee the phone displayed it. Check phone notification permissions.</p></div>}
   {!data?
    <Card><CardContent className="p-6 space-y-4"><h2 className="font-semibold">Driver sign in</h2>
     <p className="text-sm">Use the email registered by the kitchen to receive a secure sign-in link.</p>
