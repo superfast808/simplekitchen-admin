@@ -6,7 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 type Order={id:number;wooId:number|null;orderDate:string;status:string;isTuesday:boolean;fulfillmentType:string;instructions:string|null;customerName:string;deliveryAddress:string|null;deliveryDate:string;group:"current"|"upcoming"|"past";journey:string;canEditInstructions:boolean;items:{name:string;quantity:number}[]};
 type Invite={token:string;weekFrom:string;weekTo:string;status:string};
 async function api(url:string,method="GET",data?:unknown){const r=await fetch(url,{method,credentials:"include",headers:{"Content-Type":"application/json"},body:data?JSON.stringify(data):undefined});const v=await r.json();if(!r.ok)throw Error(v.message||"Request failed");return v}
-type TrackingStatus={available:boolean;state?:string;driverName?:string;location?:{lat:number;lng:number;updatedAt:string}|null;etaMinutes?:number|null;roadKm?:number|null;etaSource?:string|null};
+type TrackingStatus={available:boolean;state?:string;driverName?:string;location?:{lat:number;lng:number;updatedAt:string}|null;etaMinutes?:number|null;roadKm?:number|null;etaSource?:string|null;trackingEnabled?:boolean};
 function DriverTracking({orderId}:{orderId:number}){
  const [visible,setVisible]=useState(false),[data,setData]=useState<TrackingStatus|null>(null),[error,setError]=useState("");
  useEffect(()=>{
@@ -23,7 +23,7 @@ function DriverTracking({orderId}:{orderId:number}){
  {data?.available&&<p className="text-xs">Status: {String(data.state||"assigned").replace("_"," ")}</p>}
  {data?.etaMinutes!=null&&<p className="text-sm font-medium">Approx. {data.etaMinutes} min · {data.roadKm} km by road</p>}
  {data?.etaSource&&<p className="text-xs text-muted-foreground">{data.etaSource}. Traffic and stops ahead may change arrival time.</p>}
- {data?.location?<><iframe title="Driver's latest reported position" loading="lazy" src={mapUrl} className="w-full h-56 rounded-lg border"/><p className="text-xs text-muted-foreground">Last updated {new Date(data.location.updatedAt).toLocaleTimeString("en-GB")}. Updates approximately every 30 seconds while the driver shares location.</p></>:<p className="text-xs text-muted-foreground">Live location will appear when your driver is on the way and has enabled sharing.</p>}
+ {data?.location?<><iframe title="Driver's latest reported position" loading="lazy" src={mapUrl} className="w-full h-56 rounded-lg border"/><p className="text-xs text-muted-foreground">Last updated {new Date(data.location.updatedAt).toLocaleTimeString("en-GB")}. Updates approximately every 30 seconds while the driver shares location.</p></>:<p className="text-xs text-muted-foreground">{data?.trackingEnabled===false?"Live GPS tracking is currently disabled for testing. Your driver assignment and delivery status are still shown.":"Live location will appear when your driver is on the way and has enabled sharing."}</p>}
  {error&&<p role="alert" className="text-xs text-red-600">{error}</p>}</div>}</div>
 }
 export default function CustomerPortal(){
