@@ -6,7 +6,7 @@ export function registerDebugExport(app:Express){
  app.get("/api/debug/export",async(req,res)=>{
   if(!req.session?.userId)return res.status(401).json({message:"Unauthorized"});
   const from=new Date(String(req.query.from||"")),to=new Date(String(req.query.to||""));
-  if(!Number.isFinite(from.getTime())||!Number.isFinite(to.getTime())||to<from||to.getTime()-from.getTime()>40*86400000)
+  if(!Number.isFinite(from.getTime())||!Number.isFinite(to.getTime())||to<from||to.getTime()-from.getTime()>180*86400000)
    return res.status(400).json({message:"Select a valid date range up to 40 days"});
   const page=String(req.query.page||"unknown"),day=String(req.query.day||"all");
   try{
