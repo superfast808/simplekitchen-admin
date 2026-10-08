@@ -1,3 +1,4 @@
+import { setupDispatchTables } from "./dispatch";
 import { Pool } from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import * as schema from "@shared/schema";
@@ -15,6 +16,7 @@ export const db = drizzle(pool, { schema });
 export async function runStartupMigrations() {
   const client = await pool.connect();
   try {
+    await setupDispatchTables();
     // Fix manual orders that fell into the "gap" between the Thursday 07:00 cutoff and
     // the next Saturday — these orders are invisible because no week window covers them.
     // Snap them back to noon on the Saturday of their own week so they appear correctly.
