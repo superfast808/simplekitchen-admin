@@ -2741,6 +2741,7 @@ export async function registerRoutes(
             lng: coordsValid ? storedLng : null,
             fulfillment: fulfillment as "delivery" | "collection",
             isManual: effectiveIsManual,
+            itemSummary: Object.entries(o.items.filter(i=>!/add\s+delivery|meal\s+subscription/i.test(i.productName)).reduce((acc:Record<string,number>,i)=>{acc[i.productName]=(acc[i.productName]||0)+i.quantity;return acc;},{})).map(([name,quantity])=>({name,quantity})),
             coordinateStatus: coordsValid ? "verified-local" : (storedLat !== null || storedLng !== null ? "recheck" : "missing"),
           };
         });
