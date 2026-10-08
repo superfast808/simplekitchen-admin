@@ -21,6 +21,8 @@ export function registerOrderActions(app:Express) {
    const id=Number(req.params.id);const order=await storage.getOrder(id);
    if(!order)return res.status(404).json({message:"Order not found"});
    const refs=await pool.query("SELECT id FROM subscription_invites WHERE order_id=$1 OR selections_order_id=$1 OR tuesday_selections_order_id=$1 LIMIT 1",[id]);
+   const sharedWoo = order.wooId ? await pool.query("SELECT count(*)::int AS n FROM orders WHERE woo_id=$1",[order.wooId]) : null;
+   const duplicateWooId = Number(sharedWoo?.rows[0]?.n||0)>1;
    const subscriptionLinked=refs.rowCount>0;
    let woo:any=null;let refundError:string|null=null;
    if(order.wooId){
@@ -28,7 +30,7 @@ export function registerOrderActions(app:Express) {
    }
    const refunds=woo?.id?await wooRequest("orders/"+woo.id+"/refunds","GET").catch(()=>[]):[];
    const refundable=woo ? Math.max(0,Math.round((Number(woo.total||0)- (Array.isArray(refunds)?refunds.reduce((n:number,r:any)=>n+Math.abs(Number(r.amount||0)),0):0))*100))/100 : 0;
-   res.json({id:order.id,customerName:order.customerName,localStatus:order.status,wooId:order.wooId,wooStatus:woo?.status??null,refundEligible:!!woo && !subscriptionLinked && refundable>0 && !["cancelled","refunded","failed","pending"].includes(woo.status),refundable,subscriptionLinked,refundError});
+   res.json({id:order.id,customerName:order.customerName,localStatus:order.status,wooId:order.wooId,wooStatus:woo?.status??null,refundEligible:!!woo && !subscriptionLinked && !duplicateWooId && refundable>0 && !["cancelled","refunded","failed","pending"].includes(woo.status),refundable,subscriptionLinked,duplicateWooId,refundError});
   }catch(e:any){res.status(502).json({message:e.message})}
  });
  app.post("/api/order-actions/:id",async(req,res)=>{
@@ -44,6 +46,10 @@ export function registerOrderActions(app:Express) {
    if(["cancelled","refunded"].includes(order.status))return res.status(409).json({message:"Order already cancelled or refunded"});
    const refs=await client.query("SELECT id FROM subscription_invites WHERE order_id=$1 OR selections_order_id=$1 OR tuesday_selections_order_id=$1 LIMIT 1",[id]);
    if(refs.rowCount)return res.status(409).json({message:"Subscription-linked orders need manual review; action blocked to protect subscription payment"});
+   if(order.wooId){
+    const duplicate=await client.query("SELECT COUNT(*)::int AS n FROM orders WHERE woo_id=$1",[order.wooId]);
+    if(Number(duplicate.rows[0]?.n)>1)return res.status(409).json({message:"Multiple local orders share this WooCommerce ID. Review the duplicate records before changing the shared payment/order."});
+   }
    if(!order.wooId && action==="refund_cancel")return res.status(400).json({message:"No WooCommerce payment associated with this order"});
    let refundId:number|null=null, refundAmount:number|null=null;
    if(order.wooId){
