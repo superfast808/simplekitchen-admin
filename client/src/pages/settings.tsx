@@ -506,6 +506,12 @@ export default function SettingsPage() {
             <RefreshCw className={`w-4 h-4 mr-1 ${syncNowMutation.isPending ? "animate-spin" : ""}`} />
             {syncNowMutation.isPending ? "Sync running…" : "Sync Now"}
           </Button>
+          {wooSyncProgress && <div className="rounded-lg border p-3 mt-3 text-sm space-y-1" role="status">
+            <p className="font-medium">WooCommerce sync: {wooSyncProgress.phase}</p>
+            <p className="text-muted-foreground">Elapsed: {Math.round(wooSyncProgress.elapsedMs / 1000)} seconds</p>
+            {wooSyncProgress.error && <p className="text-destructive break-words">{wooSyncProgress.error}</p>}
+            {wooSyncProgress.result && <p>Products processed: {wooSyncProgress.result.products?.total ?? "—"} · Orders imported: {wooSyncProgress.result.orders?.imported ?? 0} · Updated: {wooSyncProgress.result.orders?.updated ?? 0}</p>}
+          </div>}
         </CardContent>
       </Card>
 
