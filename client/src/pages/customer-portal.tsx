@@ -47,7 +47,7 @@ export default function CustomerPortal(){
         const permission=await Notification.requestPermission();
         if(permission!=="granted")throw Error("Please allow notifications in your browser settings.");
         const key=await api("/api/customer/push/key");
-        if(!key.key)throw Error("Push isn't configured on the server yet.");
+        if(!key.key)throw Error(key.reason || "Push is not configured on the server yet.");
         const registration=await navigator.serviceWorker.ready;
         let sub=await registration.pushManager.getSubscription();
         if(!sub){
