@@ -5393,7 +5393,7 @@ export async function registerRoutes(
       for(const o of ordersWithItems){
         o.items = o.items.filter(i=>!(i.productId && festiveIds.has(i.productId)) && !festiveNames.has(i.productName.trim().toLowerCase()));
       }
-      const regularOrders = regularOrders.filter(o=>o.items.length>0);
+      const regularOrders = ordersWithItems.filter(o=>o.items.length>0);
       applyAddDeliveryUpgrades(regularOrders);
 
       const priorOrders = await storage.getOrders(undefined, new Date(from.getTime() - 1));
