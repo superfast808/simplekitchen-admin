@@ -1,3 +1,4 @@
+import { DebugExportButton } from "@/components/debug-export-button";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -222,7 +223,7 @@ export default function IngredientsPage() {
             }))}
             preferredLabel="selected week"
           />
-          <DateFilter {...dateFilter} testIdPrefix="ing" />
+          <DebugExportButton page="ingredients" from={from} to={to}/><DateFilter {...dateFilter} testIdPrefix="ing" />
         </div>
       </div>
 
