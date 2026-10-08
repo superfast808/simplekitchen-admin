@@ -143,7 +143,14 @@ export function registerDispatch(app:Express){
   res.clearCookie("sk_driver",{path:"/"});res.json({ok:true});
  });
 
- app.get("/api/driver/test-status",driverOnly,(_req,res)=>res.json({enabled:process.env.DISPATCH_TEST_MODE==="enabled"}));
+ app.get("/api/driver/test-status",driverOnly,async(_req,res)=>{
+  const enabled=process.env.DISPATCH_TEST_MODE==="enabled";
+  if(!enabled)return res.json({enabled:false});
+  const q=await pool.query("SELECT value FROM settings WHERE key='customer_portal_test_email'");
+  const recipient=String(q.rows[0]?.value||"").trim().toLowerCase();
+  const subs=recipient?await pool.query("SELECT count(*)::int AS n FROM customer_push_subscriptions WHERE lower(email)=$1",[recipient]):null;
+  res.json({enabled:true,testRecipientConfigured:!!recipient,registeredDevices:subs?Number(subs.rows[0].n):0,vapidConfigured:!!process.env.CUSTOMER_PUSH_VAPID_PRIVATE_KEY});
+ });
  app.get("/api/dispatch/test-mode",onlyAdmin,(_req,res)=>{
    res.json({enabled:process.env.DISPATCH_TEST_MODE==="enabled",liveNotifications:process.env.DISPATCH_CUSTOMER_NOTIFICATIONS==="enabled"});
  });
