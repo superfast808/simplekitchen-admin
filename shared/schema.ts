@@ -41,6 +41,7 @@ export const orders = pgTable("orders", {
   isManual: boolean("is_manual").notNull().default(false),
   isTuesday: boolean("is_tuesday").notNull().default(false),
   notes: text("notes"),
+  customerDeliveryInstructions: text("customer_delivery_instructions"),
   wooPaidTotal: decimal("woo_paid_total", { precision: 10, scale: 2 }),
   cashAmount: decimal("cash_amount", { precision: 10, scale: 2 }),
   paymentMethod: varchar("payment_method"),
