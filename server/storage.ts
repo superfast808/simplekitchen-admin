@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { eq, gte, lte, and, sql, desc, isNotNull, isNull, inArray } from "drizzle-orm";
+import { eq, gte, lte, and, sql, desc, isNotNull, isNull, inArray, notInArray } from "drizzle-orm";
 import {
   products, ingredients, orders, orderItems, manualQuantities, settings, users,
   subscriptionInvites, subscriptionSelections, recurringOrders, recurringOrderItems,
