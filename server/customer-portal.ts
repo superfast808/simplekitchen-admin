@@ -2,6 +2,7 @@ import type { Express, Request } from "express";
 import crypto from "crypto";
 import nodemailer from "nodemailer";
 import { pool } from "./db";
+import { pushPublicKey,sendPush } from "./customer-push";
 import { fulfilmentDate, fulfilmentGroup, customerJourney, ukDateString } from "./customer-fulfilment";
 
 const hash=(s:string)=>crypto.createHash("sha256").update(s).digest("hex");
@@ -61,9 +62,32 @@ async function sessionEmail(req:Request) {
  return r.rows[0]?.email as string|null;
 }
 export async function createCustomerAlert(email:string,title:string,body:string,key:string) {
- await pool.query("INSERT INTO customer_portal_alerts(email,title,body,event_key) VALUES($1,$2,$3,$4) ON CONFLICT(event_key) DO NOTHING",[email.trim().toLowerCase(),title,body,key]);
+ const saved=await pool.query("INSERT INTO customer_portal_alerts(email,title,body,event_key) VALUES($1,$2,$3,$4) ON CONFLICT(event_key) DO NOTHING RETURNING id",[email.trim().toLowerCase(),title,body,key]);
+ if(saved.rowCount)sendPush(email,title,body).catch(e=>console.error("Push notification delivery failed",e));
 }
 export function registerCustomerPortal(app:Express){
+ app.get("/api/customer/push/key",async(req,res)=>{
+  const email=await sessionEmail(req);if(!email)return res.status(401).json({message:"Not signed in"});
+  res.json({key:pushPublicKey(),enabled:!!pushPublicKey()});
+ });
+ app.post("/api/customer/push/subscribe",async(req,res)=>{
+  const email=await sessionEmail(req);if(!email)return res.status(401).json({message:"Not signed in"});
+  const sub=req.body||{},endpoint=String(sub.endpoint||"");
+  if(!pushPublicKey())return res.status(503).json({message:"Push notifications not configured"});
+  let parsed:URL;try{parsed=new URL(endpoint)}catch{return res.status(400).json({message:"Invalid subscription endpoint"})}
+  if(parsed.protocol!=="https:"||endpoint.length>2048||!sub.keys?.p256dh||!sub.keys?.auth)return res.status(400).json({message:"Invalid push subscription"});
+  const p256dh=String(sub.keys.p256dh),auth=String(sub.keys.auth);
+  if(p256dh.length>256||auth.length>128)return res.status(400).json({message:"Invalid keys"});
+  await pool.query(`INSERT INTO customer_push_subscriptions(endpoint,email,p256dh,auth) VALUES($1,$2,$3,$4)
+  ON CONFLICT(endpoint) DO UPDATE SET email=EXCLUDED.email,p256dh=EXCLUDED.p256dh,auth=EXCLUDED.auth`,[endpoint,email,p256dh,auth]);
+  res.json({ok:true});
+ });
+ app.post("/api/customer/push/unsubscribe",async(req,res)=>{
+  const email=await sessionEmail(req);if(!email)return res.status(401).json({message:"Not signed in"});
+  await pool.query("DELETE FROM customer_push_subscriptions WHERE email=$1 AND endpoint=$2",[email,String(req.body?.endpoint||"")]);
+  res.json({ok:true});
+ });
+
  app.get("/api/customer/alerts",async(req,res)=>{
   const email=await sessionEmail(req);if(!email)return res.status(401).json({message:"Not signed in"});
   const result=await pool.query(`SELECT a.id::text,a.title,a.body,a.created_at AS "createdAt",
