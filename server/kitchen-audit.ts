@@ -10,6 +10,7 @@ type AuditOrder = {
   orderDate: string; status: string; isManual: boolean; isTuesday: boolean;
   items: { productName: string; quantity: number; price: string; isXmas: boolean }[];
 };
+const inactiveStatus = (status: string) => ["cancelled", "refunded", "failed", "trash"].includes(status.toLowerCase());
 const norm = (s: string | null | undefined) => (s ?? "").normalize("NFKC").trim().replace(/\s+/g, " ").toLowerCase();
 const itemSignature = (o: AuditOrder) => o.items
   .map(i => [norm(i.productName), i.quantity, Number(i.price || 0).toFixed(2)].join(":"))
@@ -52,6 +53,7 @@ function parseWindow(query: Record<string, any>) {
   return { from, to };
 }
 function duplicateGroups(orders: AuditOrder[]) {
+  orders = orders.filter(o => !inactiveStatus(o.status));
   const groups: { confidence: "high" | "possible"; reason: string; orders: AuditOrder[] }[] = [];
   const seen = new Set<string>();
   for (let i = 0; i < orders.length; i++) for (let j = i + 1; j < orders.length; j++) {
@@ -114,7 +116,7 @@ export function registerKitchenAuditRoutes(app: Express) {
     try {
       const orders = await getAuditOrders(window.from, window.to);
       res.json({ generatedAt: new Date().toISOString(), groups: duplicateGroups(orders),
-        note: "All flagged orders remain included in kitchen counts. Check payment and order history before cancelling any order." });
+        note: "Only active orders are flagged. Cancelled or refunded orders remain in order history but are excluded from active duplicate checks." });
     } catch (error: any) { res.status(500).json({ message: error.message }); }
   });
 }
