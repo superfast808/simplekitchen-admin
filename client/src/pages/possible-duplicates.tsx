@@ -12,7 +12,7 @@ type Result = {generatedAt:string; groups:Group[]; note:string};
 export default function PossibleDuplicatesPage() {
  const dates=useDateFilter();
  const qs=`?from=${encodeURIComponent(dates.from.toISOString())}&to=${encodeURIComponent(dates.to.toISOString())}`;
- const {data,isLoading,isError,refetch,isFetching}=useQuery<Result>({queryKey:["/api/possible-duplicates",qs]});
+ const {data,isLoading,isError,refetch,isFetching}=useQuery<Result>({queryKey:["/api/possible-duplicates",qs],refetchInterval:10000});
  const high=data?.groups.filter(g=>g.confidence==="high").length??0;
  return <div className="p-4 md:p-6 space-y-5">
   <div className="flex flex-wrap gap-3 justify-between items-center"><div><h1 className="text-2xl font-semibold">Possible Duplicate Orders</h1><DateRangeLabel from={dates.from} to={dates.to}/></div><div className="flex gap-2 flex-wrap"><DateFilter {...dates} testIdPrefix="dupes"/><Button variant="outline" onClick={()=>refetch()} disabled={isFetching}><RefreshCcw className="w-4 h-4 mr-2"/>Refresh</Button></div></div>
