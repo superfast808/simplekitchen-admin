@@ -3136,7 +3136,9 @@ export async function registerRoutes(
 
         doc.font("Helvetica-Oblique").fontSize(NOTE_FONT_SIZE);
         const noteH = noteText ? doc.heightOfString(noteText, { width: innerW, lineBreak: false }) : 0;
-        const totalsY = labelY + labelH - 2 - totalsH - (noteH > 0 ? GAP4 + noteH : 0);
+        const notesY = labelY + labelH - 2 - (noteH > 0 ? noteH : 0);
+        // Counts now sit directly below delivery/collection tag, rather than at the bottom.
+        // Remaining space is allocated to address and product descriptions.
 
         // Reserve the compact totals line and notes before allowing long item lists to use the remaining space.
         const totalContentH =
@@ -3171,11 +3173,18 @@ export async function registerRoutes(
           cy = doc.y + GAP2;
         }
 
+        // Meal-type counts sit near the top, just under the delivery/collection tag.
+        if (cy + totalsH + GAP2 < notesY) {
+          doc.font("Helvetica-Bold").fontSize(6.5).fillColor("black");
+          doc.text(totalsText, cx, cy, { ...opts, lineBreak: false, ellipsis: true, height: totalsH });
+          cy = doc.y + GAP2;
+        }
+
         // Address
         if (addrText && cy < labelY + labelH - 10) {
           doc.font("Helvetica").fontSize(6);
           const maxAddrH = Math.min(
-            totalsY - cy - GAP3 - (itemsH > 0 ? Math.min(itemsH, 18) + GAP4 : 0),
+            notesY - cy - GAP3 - (itemsH > 0 ? Math.min(itemsH, 18) + GAP4 : 0),
             24
           );
           if (maxAddrH > 7) {
@@ -3185,22 +3194,18 @@ export async function registerRoutes(
         }
 
         // Items
-        if (summaryText && cy < totalsY - 6) {
+        if (summaryText && cy < notesY - 6) {
           doc.font("Helvetica").fontSize(5.8);
-          const maxItemH = totalsY - cy - GAP4;
+          const maxItemH = notesY - cy - GAP4;
           if (maxItemH > 6) {
             doc.text(summaryText, cx, cy, { ...opts, height: maxItemH, ellipsis: true });
           }
         }
 
-        // Counts and confirmed WooCommerce paid amount.
-        doc.font("Helvetica-Bold").fontSize(6.5).fillColor("black");
-        doc.text(totalsText, cx, totalsY, { ...opts, lineBreak: false, ellipsis: true, height: totalsH });
-
         // Notes — small italic red text flowing directly below items
         if (noteText) {
           doc.font("Helvetica-Oblique").fontSize(NOTE_FONT_SIZE).fillColor("red");
-          const noteY = totalsY + totalsH + GAP4;
+          const noteY = notesY;
           const maxNoteH = labelY + labelH - noteY - 1;
           if (maxNoteH > 4) {
             doc.text(noteText, cx, noteY, { ...opts, lineBreak: false, ellipsis: true, height: maxNoteH });
