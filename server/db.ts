@@ -33,6 +33,28 @@ export async function runStartupMigrations() {
 
     await client.query(`CREATE TABLE IF NOT EXISTS order_action_audit (id bigserial PRIMARY KEY, order_id integer NOT NULL, actor_id text NOT NULL, action text NOT NULL, details text NOT NULL, created_at timestamptz NOT NULL DEFAULT NOW())`);
 
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS customer_magic_links (
+        token_hash text PRIMARY KEY, email text NOT NULL, expires_at timestamptz NOT NULL,
+        consumed_at timestamptz, created_at timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS customer_portal_sessions (
+        token_hash text PRIMARY KEY, email text NOT NULL, expires_at timestamptz NOT NULL,
+        created_at timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS customer_portal_notifications (
+        id bigserial PRIMARY KEY, email text NOT NULL, event_key text NOT NULL UNIQUE,
+        delivered_to text, status text NOT NULL, created_at timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+    await client.query(`
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_delivery_instructions text
+    `);
+
     // Add portal_overridden column to orders if not exists
     await client.query(`
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS portal_overridden boolean NOT NULL DEFAULT false
