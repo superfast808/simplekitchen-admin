@@ -394,7 +394,8 @@ export default function SubscribePage({ params }: { params: { token: string } })
           <CardContent className="p-8">
             <UtensilsCrossed className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
             <h2 className="text-xl font-bold mb-2">Link Not Found</h2>
-            <p className="text-muted-foreground">This meal selection link may have expired or is no longer valid. Please contact us if you need assistance.</p>
+            <p className="text-muted-foreground">We couldn’t load your meal selection. Please try again, or contact Simple Kitchen if the problem continues.</p>
+            <p className="text-xs text-muted-foreground mt-2">{error instanceof Error ? error.message : ""}</p>
           </CardContent>
         </Card>
       </div>
