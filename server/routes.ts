@@ -1914,7 +1914,7 @@ export async function registerRoutes(
         ...order,
         items: itemsMap.get(order.id) ?? [],
       }));
-      applyAddDeliveryUpgrades(ordersWithItems);
+      if (req.query.category !== "xmas") applyAddDeliveryUpgrades(ordersWithItems);
 
       // Annotate orders with pending (paid but unprocessed) addon links
       const pendingLinks = await storage.getPendingAddonLinks();
