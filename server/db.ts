@@ -55,6 +55,15 @@ export async function runStartupMigrations() {
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_delivery_instructions text
     `);
 
+    await client.query(`CREATE TABLE IF NOT EXISTS customer_portal_alerts (
+      id bigserial PRIMARY KEY, email text NOT NULL, event_key text NOT NULL UNIQUE,
+      title text NOT NULL, body text NOT NULL, created_at timestamptz NOT NULL DEFAULT NOW()
+    )`);
+    await client.query(`CREATE TABLE IF NOT EXISTS customer_portal_alert_reads (
+      alert_id bigint NOT NULL REFERENCES customer_portal_alerts(id) ON DELETE CASCADE,
+      email text NOT NULL, read_at timestamptz NOT NULL DEFAULT NOW(),
+      PRIMARY KEY(alert_id,email)
+    )`);
     // Add portal_overridden column to orders if not exists
     await client.query(`
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS portal_overridden boolean NOT NULL DEFAULT false
