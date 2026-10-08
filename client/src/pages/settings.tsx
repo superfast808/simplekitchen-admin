@@ -169,6 +169,29 @@ function WooConnectionCard() {
  </Card>;
 }
 
+
+function CustomerPortalSettingsCard(){
+ const {toast}=useToast();
+ const {data,refetch}=useQuery<{live:boolean;testEmail:string;url:string}>({queryKey:["/api/customer-admin/config"]});
+ const [live,setLive]=useState(false),[testEmail,setTestEmail]=useState(""),[url,setUrl]=useState("https://admin.simplekitchenprep.com/my"),[saving,setSaving]=useState(false);
+ useEffect(()=>{if(data){setLive(data.live);setTestEmail(data.testEmail);setUrl(data.url)}},[data]);
+ async function save(){
+  if(live&&!window.confirm("Enable LIVE customer emails? This will send new customer messages to real addresses rather than the testing alias."))return;
+  setSaving(true);
+  try {
+   const r=await fetch("/api/customer-admin/config",{method:"POST",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify({live,testEmail,url})});
+   const v=await r.json();if(!r.ok)throw Error(v.message||"Couldn't save");
+   await refetch();toast({title:"Customer portal settings saved"});
+  }catch(e:any){toast({title:"Unable to save",description:e.message,variant:"destructive"})}finally{setSaving(false)}
+ }
+ return <Card><CardHeader><CardTitle>My Simple Kitchen — Customer Portal</CardTitle><CardDescription>Magic-link customer access and safe email testing. Defaults to testing mode; no customer messages go to real customers until explicitly enabled.</CardDescription></CardHeader><CardContent className="space-y-4">
+ <div className="flex flex-wrap items-center justify-between gap-3 border rounded-lg p-3"><div><Label>Live customer emails</Label><p className="text-xs text-muted-foreground">{live?"LIVE — real recipients":"TESTING — alias receives outgoing messages"}</p></div><Switch checked={live} onCheckedChange={setLive}/></div>
+ <div className="space-y-1"><Label>Testing email alias</Label><Input type="email" value={testEmail} onChange={e=>setTestEmail(e.target.value)} placeholder="your@email.com"/><p className="text-xs text-muted-foreground">When testing is on, outgoing customer emails go here instead. Keep this filled before testing magic links.</p></div>
+ <div className="space-y-1"><Label>Customer portal address</Label><Input type="url" value={url} onChange={e=>setUrl(e.target.value)} placeholder="https://admin.simplekitchenprep.com/my"/><p className="text-xs text-muted-foreground">Set this to the public URL customers will use. The admin domain may remain separately protected.</p></div>
+ <Button disabled={saving} onClick={save}>{saving?"Saving…":"Save customer portal settings"}</Button>
+ </CardContent></Card>
+}
+
 export default function SettingsPage() {
   const { toast } = useToast();
 
@@ -851,6 +874,7 @@ export default function SettingsPage() {
       </Card>
 
       <WooConnectionCard />
+      <CustomerPortalSettingsCard />
 
       <Button onClick={handleSave} disabled={saveMutation.isPending} data-testid="button-save-settings">
         <Save className="w-4 h-4 mr-1" />
