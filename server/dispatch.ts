@@ -92,8 +92,8 @@ export function registerDispatch(app:Express){
     if(process.env.DISPATCH_CUSTOMER_NOTIFICATIONS!=="enabled")return;
     const o=await pool.query("SELECT customer_email,woo_id FROM orders WHERE id=$1",[id]);
     const email=o.rows[0]?.customer_email;
-    if(email)await createCustomerAlert(email,kind==="on_way"?"Your Simple Kitchen delivery is on its way":"Your delivery is complete",
-      kind==="on_way"?"Your driver is heading to you. Open My Simple Kitchen to follow your delivery.":"Your driver has marked your order delivered.",
+    if(email)await createCustomerAlert(email,kind==="on_way"?"Your Simple Kitchen delivery is on its way!":"Your delivery is complete",
+      kind==="on_way"?"Your driver is now heading to you. Open My Simple Kitchen to follow your delivery and see the latest updates.":"Your driver has marked your order delivered.",
       "dispatch:"+id+":"+kind+":"+new Date().toISOString().slice(0,10));
   };
   if(state==="on_way")await sendNotice(Number(req.params.id),"on_way");
