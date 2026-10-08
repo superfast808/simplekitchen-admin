@@ -186,7 +186,12 @@ export function registerCustomerPortal(app:Express){
   o.customer_delivery_instructions AS "instructions",o.customer_name AS "customerName",o.delivery_address AS "deliveryAddress",
   COALESCE(json_agg(json_build_object('name',i.product_name,'quantity',i.quantity)) FILTER(WHERE i.id IS NOT NULL),'[]') AS items
   FROM orders o LEFT JOIN order_items i ON i.order_id=o.id
-  WHERE lower(o.customer_email)=$1 AND o.is_manual=false
+  WHERE lower(o.customer_email)=$1 AND (
+    o.is_manual=false OR EXISTS (
+      SELECT 1 FROM subscription_invites si
+      WHERE si.selections_order_id=o.id OR si.tuesday_selections_order_id=o.id
+    )
+  )
   AND NOT EXISTS (SELECT 1 FROM order_items x JOIN products p ON p.id=x.product_id WHERE x.order_id=o.id AND lower(coalesce(p.category,'')) IN ('shop','wholesale','custom'))
   GROUP BY o.id ORDER BY o.order_date DESC LIMIT 100`,[email]);
   const invites=await pool.query(`SELECT si.token,si.week_from AS "weekFrom",si.week_to AS "weekTo",si.status FROM subscription_invites si WHERE lower(si.customer_email)=$1 AND si.status NOT IN ('cancelled','expired') ORDER BY si.week_from DESC LIMIT 10`,[email]);
