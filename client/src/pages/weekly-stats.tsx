@@ -25,6 +25,12 @@ type OrderWithItems = {
   shippingTotal: string | null;
   items: OrderItem[];
 };
+type VerifyResult = {
+  checkedAt:string;orderCount:number;totalUnits:number;
+  products:{productName:string;quantity:number;orders:{orderId:number;customerName:string;quantity:number}[]}[];
+  duplicates:{first:number;second:number;customerName:string;reason:string}[];
+  orders:{id:number;wooId:number|null;customerName:string;isTuesday:boolean;items:{name:string;quantity:number}[]}[];
+};
 type GroupStats = {
   orderCount: number;
   mealsSold: number;
@@ -158,6 +164,8 @@ function StatMini({ label, value }: { label: string; value: string }) {
 
 export default function WeeklyStatsPage() {
   const [offset, setOffset] = useState(0);
+  const [verifyVisible,setVerifyVisible] = useState(false);
+  const [expandedProduct,setExpandedProduct] = useState<string|null>(null);
   const [hideAddons, setHideAddons] = useState(false);
   const [hideAddDelivery, setHideAddDelivery] = useState(false);
   const [hideSubscriptionBase, setHideSubscriptionBase] = useState(false);
@@ -165,6 +173,19 @@ export default function WeeklyStatsPage() {
 
   const { from, to, isCurrent } = getWeekRange(offset);
   const weekFinalized = isCurrent && isWeekFinalized();
+  const verifyQuery = useQuery<VerifyResult>({
+    queryKey:["/api/weekly-verify",from.toISOString(),to.toISOString()],
+    enabled:verifyVisible,
+    staleTime:0,
+    queryFn:async()=>{
+      const q=new URLSearchParams({from:from.toISOString(),to:to.toISOString()});
+      const response=await fetch("/api/weekly-verify?"+q,{credentials:"include",cache:"no-store"});
+      const payload=await response.json();
+      if(!response.ok)throw Error(payload.message||"Verification failed");
+      return payload;
+    },
+  });
+
 
   const { data: rawOrders, isLoading, isFetching } = useQuery<OrderWithItems[]>({
     queryKey: ["/api/orders", `?from=${from.toISOString()}&to=${to.toISOString()}`],
@@ -265,6 +286,42 @@ export default function WeeklyStatsPage() {
           </Button>
         </div>
       </div>
+
+      <Card>
+        <CardContent className="p-4 space-y-3">
+          <div className="flex flex-wrap justify-between items-center gap-3">
+            <div><h2 className="font-semibold">Verify weekly totals against orders</h2>
+              <p className="text-xs text-muted-foreground">Independent read-only recount of individual customer order lines, excluding Christmas and cancelled orders.</p>
+            </div>
+            <Button variant="outline" disabled={verifyQuery.isFetching} onClick={() => {setVerifyVisible(true);void verifyQuery.refetch()}}>
+              <RefreshCw className={`w-4 h-4 mr-2 ${verifyQuery.isFetching?"animate-spin":""}`}/>
+              {verifyQuery.isFetching?"Verifying…":"Verify Weekly Totals"}
+            </Button>
+          </div>
+          {verifyVisible && verifyQuery.isError && <p className="text-sm text-destructive">{verifyQuery.error instanceof Error?verifyQuery.error.message:"Verification unavailable"}</p>}
+          {verifyVisible && verifyQuery.data && <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">Checked {new Date(verifyQuery.data.checkedAt).toLocaleString("en-GB")} · {verifyQuery.data.orderCount} recorded orders · {verifyQuery.data.totalUnits} production units</p>
+            <p className="text-xs text-muted-foreground">Counts include every eligible order, even suspected duplicates. Filtering options above may change the displayed statistics; this audit uses the unfiltered operational order records.</p>
+            {verifyQuery.data.duplicates.length>0 ? <div className="border rounded-lg p-3 space-y-2">
+              <strong className="text-sm text-amber-700">{verifyQuery.data.duplicates.length} possible duplicate pairs — review before packing</strong>
+              {verifyQuery.data.duplicates.map(d=><p className="text-xs" key={d.first+"-"+d.second}>{d.customerName}: orders #{d.first} / #{d.second} — {d.reason}</p>)}
+            </div> : <p className="text-sm">No high-similarity order pairs detected in this week's records.</p>}
+            <div className="space-y-2">
+              {verifyQuery.data.products.map(p=>{
+                const display=(!hideAddons&&!hideAddDelivery&&!hideSubscriptionBase) ? computed?.all.mealCounts[p.productName] : undefined;
+                const differs=display!==undefined&&display!==p.quantity;
+                return <div key={p.productName} className="rounded-lg border p-3 space-y-2">
+                  <button type="button" className="w-full flex justify-between items-center gap-3 text-sm text-left" onClick={()=>setExpandedProduct(expandedProduct===p.productName?null:p.productName)}>
+                    <span className="font-medium">{p.productName}</span>
+                    <span className={differs?"text-destructive font-semibold":"font-semibold"}>Records: {p.quantity}{display!==undefined?` · Page: ${display}`:""} {differs?"⚠":"▾"}</span>
+                  </button>
+                  {expandedProduct===p.productName && <div className="border-t pt-2 space-y-1">{p.orders.map((o,i)=><div key={o.orderId+"-"+i} className="text-xs flex justify-between gap-2"><span>#{o.orderId} · {o.customerName}</span><strong>{o.quantity}</strong></div>)}</div>}
+                </div>;
+              })}
+            </div>
+          </div>}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardContent className="py-3 px-4">
