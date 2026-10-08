@@ -16,7 +16,7 @@ export default function KitchenProductionPage() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [prepared, setPrepared] = useState<Record<string, string>>({});
   const qs = `?from=${encodeURIComponent(dates.from.toISOString())}&to=${encodeURIComponent(dates.to.toISOString())}&day=${day}`;
-  const { data, isLoading, isError, refetch, isFetching } = useQuery<Audit>({ queryKey: ["/api/kitchen-audit", qs] });
+  const { data, isLoading, isError, refetch, isFetching } = useQuery<Audit>({ queryKey: ["/api/kitchen-audit", qs], refetchInterval:10000 });
   const total = data?.products.reduce((n,p)=>n+p.required,0) ?? 0;
   const mismatches = data?.products.filter(p => prepared[p.productName] !== undefined && prepared[p.productName] !== "" && Number(prepared[p.productName]) !== p.required).length ?? 0;
   return <div className="p-4 md:p-6 space-y-5">
