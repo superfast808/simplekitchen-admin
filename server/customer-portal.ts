@@ -60,7 +60,25 @@ async function sessionEmail(req:Request) {
  const r=await pool.query("SELECT email FROM customer_portal_sessions WHERE token_hash=$1 AND expires_at>now()",[hash(raw)]);
  return r.rows[0]?.email as string|null;
 }
+export async function createCustomerAlert(email:string,title:string,body:string,key:string) {
+ await pool.query("INSERT INTO customer_portal_alerts(email,title,body,event_key) VALUES($1,$2,$3,$4) ON CONFLICT(event_key) DO NOTHING",[email.trim().toLowerCase(),title,body,key]);
+}
 export function registerCustomerPortal(app:Express){
+ app.get("/api/customer/alerts",async(req,res)=>{
+  const email=await sessionEmail(req);if(!email)return res.status(401).json({message:"Not signed in"});
+  const result=await pool.query(`SELECT a.id::text,a.title,a.body,a.created_at AS "createdAt",
+    (r.alert_id IS NOT NULL) AS "read" FROM customer_portal_alerts a
+    LEFT JOIN customer_portal_alert_reads r ON r.alert_id=a.id AND r.email=$1
+    WHERE a.email=$1 ORDER BY a.id DESC LIMIT 50`,[email]);
+  res.setHeader("Cache-Control","no-store");res.json(result.rows);
+ });
+ app.post("/api/customer/alerts/:id/read",async(req,res)=>{
+  const email=await sessionEmail(req);if(!email)return res.status(401).json({message:"Not signed in"});
+  await pool.query(`INSERT INTO customer_portal_alert_reads(alert_id,email)
+    SELECT id,$2 FROM customer_portal_alerts WHERE id=$1 AND email=$2
+    ON CONFLICT DO NOTHING`,[req.params.id,email]);res.json({ok:true});
+ });
+
  app.post("/api/customer/access",async(req,res)=>{
   const email=normalize(String(req.body?.email||""));
   if(!/^\S+@\S+\.\S+$/.test(email)||email.length>254)return res.status(400).json({message:"Enter a valid email address"});
