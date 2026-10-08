@@ -750,6 +750,7 @@ export default function OrdersPage() {
                       <TableCell className="font-medium">
                         <div className="flex items-center gap-1 flex-wrap">
                           <span data-testid={`text-customer-${order.id}`}>{order.customerName}</span>
+                          {order.customerDeliveryInstructions && <Badge variant="secondary" title={order.customerDeliveryInstructions} className="max-w-[260px] truncate">Delivery instructions: {order.customerDeliveryInstructions}</Badge>}
                           {order.isManual && (
                             <Badge variant="outline" className="text-xs">Manual</Badge>
                           )}
