@@ -19,20 +19,13 @@ export default function DriverApp(){
  },[]);
  useEffect(()=>{
   if(!locationOn||!data||!("geolocation" in navigator))return;
-  const id=navigator.geolocation.watchPosition(p=>{
+  const send=(p:GeolocationPosition)=>{
    request("/api/driver/location","POST",{lat:p.coords.latitude,lng:p.coords.longitude,sharing:true}).catch(e=>setMessage(e.message));
-  },()=>setMessage("Location permission is needed for live tracking"),{enableHighAccuracy:true,maximumAge:15000,timeout:15000});
-  return()=>{navigator.geolocation.clearWatch(id)};
+  };
+  const failure=()=>setMessage("Location permission is needed for live tracking");
+  const id=navigator.geolocation.watchPosition(send,failure,{enableHighAccuracy:true,maximumAge:15000,timeout:15000});
+  const heartbeat=window.setInterval(()=>navigator.geolocation.getCurrentPosition(send,failure,{enableHighAccuracy:true,maximumAge:15000,timeout:15000}),45000);
+  return()=>{navigator.geolocation.clearWatch(id);window.clearInterval(heartbeat)};
  },[locationOn,data?.driver.id]);
  const setState=async(orderId:number,state:string)=>{setBusy(true);try{await request("/api/driver/orders/"+orderId+"/state","POST",{state});await refresh();setMessage(state==="delivered"?"Delivery confirmed":state==="on_way"?"On your way recorded":"Delivery issue recorded")}catch(e:any){setMessage(e.message)}finally{setBusy(false)}};
- const stopSharing=async()=>{setLocationOn(false);try{const p=await new Promise<GeolocationPosition>((ok,fail)=>navigator.geolocation.getCurrentPosition(ok,fail,{timeout:8000}));await request("/api/driver/location","POST",{lat:p.coords.latitude,lng:p.coords.longitude,sharing:false})}catch{}};
- return <div className="min-h-screen bg-[#f4f1e9] text-[#314d40] p-4 space-y-4"><header className="rounded-2xl bg-[#314d40] text-white p-5"><div className="flex items-center gap-3"><Truck/><div><h1 className="text-xl font-bold">Simple Kitchen Driver</h1><p className="text-xs opacity-75">Your deliveries, organised</p></div></div></header>
- {install&&<Button onClick={async()=>{await install.prompt();setInstall(null)}}>Install driver app</Button>}
- {!data?<Card><CardContent className="p-6 space-y-4"><h2 className="font-semibold">Driver sign in</h2><p className="text-sm">Use the email registered by the kitchen to receive a secure sign-in link.</p><form className="space-y-3" onSubmit={async e=>{e.preventDefault();setBusy(true);try{const r=await request("/api/driver/access","POST",{email});setMessage(r.message)}catch(e:any){setMessage(e.message)}finally{setBusy(false)}}}><Input type="email" required placeholder="Your email address" value={email} onChange={e=>setEmail(e.target.value)}/><Button className="w-full" disabled={busy}>Send secure link</Button></form></CardContent></Card>:
- <><div className="flex justify-between items-center gap-2"><div><strong>{data.driver.name}</strong><p className="text-xs">{data.driver.registration||"Driver"}</p></div><Button size="sm" variant="outline" onClick={async()=>{await stopSharing();await request("/api/driver/logout","POST");setData(null)}}><LogOut className="w-4 h-4 mr-2"/>Sign out</Button></div>
- <Card><CardContent className="p-4 space-y-2"><p className="font-semibold">Live location sharing</p><p className="text-xs">Location is shared only while enabled and an assigned delivery is on the way. Keeping this screen open improves updates; background tracking cannot be guaranteed by a web app.</p><Button variant={locationOn?"destructive":"outline"} onClick={()=>locationOn?stopSharing():setLocationOn(true)}><MapPin className="w-4 h-4 mr-2"/>{locationOn?"Stop location sharing":"Enable location sharing"}</Button></CardContent></Card>
- <div className="space-y-3"><h2 className="font-semibold">My assigned stops ({data.stops.length})</h2>{data.stops.map(s=><Card key={s.id}><CardContent className="p-4 space-y-3"><div className="flex justify-between gap-2"><div><strong>{s.customerName}</strong><p className="text-xs">{new Date(s.routeDate).toLocaleDateString("en-GB")} · {s.day} · #{s.id}</p></div><span className="text-xs capitalize">{s.state.replace("_"," ")}</span></div><p className="text-sm">{s.address}</p><p className="text-xs">{(s.items||[]).map(i=>i.quantity+"× "+i.name).join(" · ")}</p><div className="flex gap-2 flex-wrap"><Button variant="outline" onClick={()=>window.open("https://www.google.com/maps/search/?api=1&query="+encodeURIComponent(s.address||""),"_blank")}><Navigation className="w-4 h-4 mr-1"/>Navigate</Button><Button disabled={busy||s.state==="delivered"} onClick={()=>setState(s.id,"on_way")}>On my way</Button><Button disabled={busy||s.state==="delivered"} onClick={()=>setState(s.id,"delivered")}><CheckCircle className="w-4 h-4 mr-1"/>Mark delivered</Button></div></CardContent></Card>)}</div>
- </>}
- {message&&<p className="rounded-lg bg-white border p-3 text-sm" role="status">{message}</p>}
- </div>
-}
+ const stopSharing=async()=>{setLocationOn(false);try{await request("/api/driver/location","POST",{sharing:false})}catch(e:any){setMessage(e.message)}};}
