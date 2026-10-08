@@ -1937,7 +1937,19 @@ export async function registerRoutes(
         };
       });
 
-      res.json(annotated);
+      const productsForCategories = await storage.getProducts();
+      const byProductId = new Map(productsForCategories.map(p => [p.id, p]));
+      const byProductName = new Map(productsForCategories.map(p => [p.name.trim().toLowerCase(),p]));
+      const isXmas = (item: {productId?:number|null;productName:string}) => {
+        const p = (item.productId ? byProductId.get(item.productId) : undefined) || byProductName.get(item.productName.trim().toLowerCase());
+        return /(^|\\W)(xmas|christmas)(\\W|$)/i.test(p?.category || "");
+      };
+      const category = req.query.category === "xmas" ? "xmas" : "regular";
+      // Split line items rather than entire orders, preserving mixed purchases.
+      const visibleOrders = annotated.map(o => ({
+        ...o, items: o.items.filter(i => category === "xmas" ? isXmas(i) : !isXmas(i))
+      })).filter(o => o.items.length > 0);
+      res.json(visibleOrders);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
