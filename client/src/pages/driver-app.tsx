@@ -30,7 +30,28 @@ export default function DriverApp(){
   const heartbeat=window.setInterval(()=>navigator.geolocation.getCurrentPosition(send,failure,{enableHighAccuracy:true,maximumAge:15000,timeout:15000}),45000);
   return()=>{navigator.geolocation.clearWatch(id);window.clearInterval(heartbeat)};
  },[locationOn,data?.driver.id]);
- const setState=async(orderId:number,state:string)=>{setBusy(true);try{const result=await request("/api/driver/orders/"+orderId+"/state","POST",{state});await refresh();setMessage(result.testPush?.error?"Dispatch saved; test push failed: "+result.testPush.error:result.testPush?.accepted?"Dispatch saved; test push accepted by "+result.testPush.accepted+" push service(s)":state==="delivered"?"Delivery confirmed":state==="on_way"?"On your way recorded (live customer alerts may be disabled)":"Delivery issue recorded")}catch(e:any){setMessage(e.message)}finally{setBusy(false)}};
+ const captureDeliveryLocation=async():Promise<{status:string;lat?:number;lng?:number;accuracy?:number}>=>{
+  if(!("geolocation" in navigator))return {status:"unavailable"};
+  return new Promise(resolve=>{
+    let complete=false;
+    const finish=(value:{status:string;lat?:number;lng?:number;accuracy?:number})=>{if(!complete){complete=true;resolve(value)}};
+    navigator.geolocation.getCurrentPosition(p=>{
+      const {latitude:lat,longitude:lng,accuracy}=p.coords;
+      finish(accuracy<=100?{status:"captured",lat,lng,accuracy}:{status:"inaccurate"});
+    },e=>finish({status:e.code===1?"denied":e.code===3?"timeout":"unavailable"}),
+    {enableHighAccuracy:true,maximumAge:0,timeout:12000});
+  });
+ };
+ const setState=async(orderId:number,state:string)=>{
+  setBusy(true);
+  try{
+    const proof=state==="delivered"?await captureDeliveryLocation():undefined;
+    const result=await request("/api/driver/orders/"+orderId+"/state","POST",{state,proof});
+    await refresh();
+    const note=state==="delivered"?(proof?.status==="captured"?"Delivery confirmed · GPS proof recorded":"Delivery confirmed · GPS unavailable (recorded in audit)"):"";
+    setMessage(result.testPush?.error?"Dispatch saved; test push failed: "+result.testPush.error:result.testPush?.accepted?"Dispatch saved; test push accepted":note||(state==="on_way"?"On your way recorded":"Delivery issue recorded"));
+  }catch(e:any){setMessage(e.message)}finally{setBusy(false)}
+ };
  const orderedStops=[...(data?.stops||[])].sort((a,b)=>{
   const rank=(state:string)=>state==="on_way"?0:state==="assigned"?1:state==="failed"?2:state==="delivered"?3:2;
   const byStatus=rank(a.state)-rank(b.state);
