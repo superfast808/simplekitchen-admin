@@ -214,24 +214,24 @@ export default function WeeklyStatsPage() {
 
   const computed = useMemo(() => {
     if (!rawOrders) return null;
-    rawOrders = rawOrders.filter(o => !["cancelled","refunded","failed","trash"].includes((o.status||"").toLowerCase()));
-    const webOrders = rawOrders.filter(o => !o.isManual);
-    const manualOrders = rawOrders.filter(o => o.isManual);
-    const all = computeGroup(rawOrders, hideAddons, hideAddDelivery, hideSubscriptionBase, rawOrders, includeDelivery);
-    const web = computeGroup(webOrders, hideAddons, hideAddDelivery, hideSubscriptionBase, rawOrders, includeDelivery);
-    const manual = computeGroup(manualOrders, hideAddons, hideAddDelivery, hideSubscriptionBase, rawOrders, includeDelivery);
+    const activeOrders = rawOrders.filter(o => !["cancelled","refunded","failed","trash"].includes((o.status||"").toLowerCase()));
+    const webOrders = activeOrders.filter(o => !o.isManual);
+    const manualOrders = activeOrders.filter(o => o.isManual);
+    const all = computeGroup(activeOrders, hideAddons, hideAddDelivery, hideSubscriptionBase, activeOrders, includeDelivery);
+    const web = computeGroup(webOrders, hideAddons, hideAddDelivery, hideSubscriptionBase, activeOrders, includeDelivery);
+    const manual = computeGroup(manualOrders, hideAddons, hideAddDelivery, hideSubscriptionBase, activeOrders, includeDelivery);
     const entries = Object.entries(all.mealCounts).sort((a, b) => b[1] - a[1]);
     const topSeller = entries.length > 0 ? `${entries[0][0]} (${entries[0][1]})` : "—";
     const worstSeller = entries.length > 0 ? `${entries[entries.length - 1][0]} (${entries[entries.length - 1][1]})` : "—";
 
     // Three-bucket revenue breakdown
     const subCustomers = new Set(
-      rawOrders
+      activeOrders
         .filter(o => !o.isManual && o.items.some(i => SUB_RE.test(i.productName)))
         .map(o => o.customerName)
     );
     let cashRevenue = 0, bankRevenue = 0, onlineSubsRevenue = 0, onlineOtherRevenue = 0;
-    for (const o of rawOrders) {
+    for (const o of activeOrders) {
       const cash = parseFloat(o.cashAmount || "0");
       if (o.isManual) {
         if (cash > 0) {
