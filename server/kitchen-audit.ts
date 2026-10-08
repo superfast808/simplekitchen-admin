@@ -97,6 +97,29 @@ export function registerKitchenAuditRoutes(app: Express) {
         p.orders.push({ orderId: o.id, wooId: o.wooId, customerName: o.customerName,
           quantity: item.quantity, isTuesday: o.isTuesday, status: o.status });
       }
+      // Explain disagreements with the Orders page using the very same order rows:
+      // inactive statuses, other delivery day, and regular/Xmas category.
+      const diagnostics = new Map<string,{
+        productName:string;allRecorded:number;activeAllDays:number;selectedActive:number;
+        inactive:number;otherDay:number;records:{orderId:number;wooId:number|null;customerName:string;quantity:number;status:string;day:string;included:boolean;reason:string}[];
+      }>();
+      for(const o of orders)for(const item of o.items) {
+        if (day === "xmas" ? !item.isXmas : item.isXmas) continue;
+        const key=norm(item.productName);
+        if(!diagnostics.has(key))diagnostics.set(key,{productName:item.productName,allRecorded:0,activeAllDays:0,selectedActive:0,inactive:0,otherDay:0,records:[]});
+        const entry=diagnostics.get(key)!;
+        const inactive=inactiveStatus(o.status);
+        const otherDay=day !== "all" && day !== "xmas" && o.isTuesday !== (day === "tuesday");
+        const included=!inactive&&!otherDay;
+        entry.allRecorded+=item.quantity;
+        if(inactive)entry.inactive+=item.quantity;
+        else {
+          entry.activeAllDays+=item.quantity;
+          if(otherDay)entry.otherDay+=item.quantity;
+          else entry.selectedActive+=item.quantity;
+        }
+        entry.records.push({orderId:o.id,wooId:o.wooId,customerName:o.customerName,quantity:item.quantity,status:o.status,day:o.isTuesday?"Tuesday":"Saturday",included,reason:inactive?"Cancelled/refunded/failed order":otherDay?"Other delivery day":"Included"});
+      }
       const manual = await pool.query(`
         SELECT p.name AS "productName", SUM(m.quantity)::int AS quantity
         FROM manual_quantities m JOIN products p ON p.id = m.product_id
@@ -106,7 +129,7 @@ export function registerKitchenAuditRoutes(app: Express) {
       // never silently mix it into Saturday or Tuesday allocations.
       res.json({ generatedAt: new Date().toISOString(), day, ordersCount: selected.filter(o => !["cancelled","refunded","failed","trash"].includes(o.status.toLowerCase())).length,
         products: [...products.values()].sort((a,b) => a.productName.localeCompare(b.productName)),
-        manualStock: day === "xmas" ? [] : manual.rows, duplicates: duplicateGroups(selected) });
+        manualStock: day === "xmas" ? [] : manual.rows, reconciliation:[...diagnostics.values()].sort((a,b)=>a.productName.localeCompare(b.productName)), duplicates: duplicateGroups(selected) });
     } catch (error: any) { res.status(500).json({ message: error.message }); }
   });
   app.get("/api/possible-duplicates", async (req, res) => {
