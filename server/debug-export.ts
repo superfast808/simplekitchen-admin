@@ -1,3 +1,4 @@
+import { buildIndependentDiagnostics } from "./independent-diagnostics";
 import type { Express } from "express";
 import { storage } from "./storage";
 
@@ -52,13 +53,20 @@ export function registerDebugExport(app:Express){
      excluded:rows.filter(x=>x.excludedReason!==null).map(x=>({orderId:x.orderId,wooId:x.wooId,product:x.product,quantity:x.quantity,reason:x.excludedReason})),
      duplicateExample:duplicateCandidates,
    };
+   const independent=await buildIndependentDiagnostics(from,to,day);
+   const sectionKey=page.startsWith("christmas-")?"christmas":page;
+   const pageSection=(independent.sections as Record<string,unknown>)[sectionKey];
+   if(!pageSection && page!=="full-reconciliation")return res.status(400).json({message:"Unknown debug page"});
    const payload={
-    schemaVersion:1,exportedAt:new Date().toISOString(),page,filter:{from:from.toISOString(),to:to.toISOString(),day},
+    schemaVersion:2,exportedAt:new Date().toISOString(),page,filter:{from:from.toISOString(),to:to.toISOString(),day},
     privacy:"Customer names, email addresses, postal addresses, phone numbers and delivery notes omitted. Order identifiers and product quantities retained for tracing.",
     totals:{recorded:bucket(rows.filter(x=>!x.christmas)),active:bucket(active),selected:bucket(selected),
       christmas:bucket(rows.filter(x=>x.christmas))},
     statuses:Object.fromEntries([...new Set(rows.map(r=>r.status))].map(status=>[status,rows.filter(r=>r.status===status).length])),
     duplicates:duplicateCandidates,pageComparison,lines:rows,
+    independentCalculation:page==="full-reconciliation"?independent:pageSection,
+    reconciliation:independent.comparison,
+    calculationScope:page==="full-reconciliation"?"All independent sections":sectionKey,
    };
    res.setHeader("Cache-Control","no-store");
    res.setHeader("Content-Type","application/json; charset=utf-8");
