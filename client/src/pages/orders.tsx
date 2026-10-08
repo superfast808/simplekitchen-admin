@@ -236,16 +236,31 @@ export default function OrdersPage() {
     ),
   [allOrders]);
 
+  const [orderSyncPhase,setOrderSyncPhase] = useState("");
   const syncMutation = useMutation({
-    mutationFn: () => apiRequest("POST", "/api/woo/sync-orders"),
-    onSuccess: async (res) => {
-      const data = await res.json();
-      toast({ title: "Orders synced", description: `Imported: ${data.imported}, Updated: ${data.updated}` });
-      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+    mutationFn: async () => {
+      const start=await apiRequest("POST","/api/woo/sync-start");
+      const initial=await start.json();
+      if(!start.ok)throw Error(initial.message||"Unable to start WooCommerce sync");
+      for(let attempt=0;attempt<240;attempt++){
+        await new Promise(resolve=>setTimeout(resolve,1500));
+        const res=await fetch("/api/woo/sync-progress",{credentials:"include",cache:"no-store"});
+        if(!res.ok)throw Error("Sync status unavailable (HTTP "+res.status+")");
+        const state=await res.json();
+        setOrderSyncPhase(state.phase+" · "+Math.round(state.elapsedMs/1000)+"s");
+        if(!state.running){
+          if(state.error)throw Error(state.error);
+          return state.result;
+        }
+      }
+      throw Error("Sync continues in the background; check sync progress before starting another.");
     },
-    onError: (error: Error) => {
-      toast({ title: "Sync failed", description: error.message, variant: "destructive" });
+    onMutate:()=>setOrderSyncPhase("Starting WooCommerce sync…"),
+    onSuccess: async (data) => {
+      toast({title:"Orders synced",description:`Imported: ${data.orders?.imported??0}, Updated: ${data.orders?.updated??0}`});
+      queryClient.invalidateQueries({queryKey:["/api/orders"]});
     },
+    onError: (error: Error) => toast({ title: "Sync failed", description: error.message, variant: "destructive" }),
   });
 
   const deleteMutation = useMutation({
@@ -410,6 +425,7 @@ export default function OrdersPage() {
             <RefreshCw className={`w-4 h-4 mr-1 ${syncMutation.isPending ? "animate-spin" : ""}`} />
             Sync from Woo
           </Button>
+          {syncMutation.isPending && <span role="status" className="text-xs text-muted-foreground">{orderSyncPhase}</span>}
           {orders && orders.length > 0 && (
             <>
               <Button size="sm" variant="outline" onClick={handleExport} data-testid="button-export-xlsx">
