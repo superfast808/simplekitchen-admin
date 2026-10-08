@@ -9,7 +9,7 @@ const request=async(path:string,method="GET",body?:unknown)=>{const response=awa
 export default function DriverApp(){
  const [testMode,setTestMode]=useState(false);
  const [email,setEmail]=useState(""),[data,setData]=useState<DriverData|null>(null),[message,setMessage]=useState(""),[busy,setBusy]=useState(false),[locationOn,setLocationOn]=useState(false),[install,setInstall]=useState<any>(null);
- const refresh=()=>request("/api/driver/me").then(setData).catch(()=>setData(null));
+ const refresh=()=>request("/api/driver/me").then(async v=>{setData(v);try{const loc=await request("/api/driver/location-status");setLocationOn(!!loc.sharing)}catch{}}).catch(()=>setData(null));
  useEffect(()=>{
   const params=new URLSearchParams(window.location.search),token=params.get("token");
   fetch("/api/driver/test-status",{credentials:"include"}).then(r=>r.ok?r.json():{enabled:false}).then(v=>setTestMode(!!v.enabled)).catch(()=>{});
@@ -29,7 +29,7 @@ export default function DriverApp(){
   const heartbeat=window.setInterval(()=>navigator.geolocation.getCurrentPosition(send,failure,{enableHighAccuracy:true,maximumAge:15000,timeout:15000}),45000);
   return()=>{navigator.geolocation.clearWatch(id);window.clearInterval(heartbeat)};
  },[locationOn,data?.driver.id]);
- const setState=async(orderId:number,state:string)=>{setBusy(true);try{await request("/api/driver/orders/"+orderId+"/state","POST",{state});await refresh();setMessage(state==="delivered"?"Delivery confirmed":state==="on_way"?"On your way recorded":"Delivery issue recorded")}catch(e:any){setMessage(e.message)}finally{setBusy(false)}};
+ const setState=async(orderId:number,state:string)=>{setBusy(true);try{const result=await request("/api/driver/orders/"+orderId+"/state","POST",{state});await refresh();setMessage(result.testPush?.error?"Dispatch saved; test push failed: "+result.testPush.error:result.testPush?.accepted?"Dispatch saved; test push accepted by "+result.testPush.accepted+" push service(s)":state==="delivered"?"Delivery confirmed":state==="on_way"?"On your way recorded (live customer alerts may be disabled)":"Delivery issue recorded")}catch(e:any){setMessage(e.message)}finally{setBusy(false)}};
  const stopSharing=async()=>{setLocationOn(false);try{await request("/api/driver/location","POST",{sharing:false})}catch(e:any){setMessage(e.message)}};
  return <div className="min-h-screen bg-[#f4f1e9] text-[#314d40] p-4 space-y-4">
   <header className="rounded-2xl bg-[#314d40] text-white p-5 flex items-center gap-3">
