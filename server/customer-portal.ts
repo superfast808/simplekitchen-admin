@@ -66,6 +66,20 @@ export async function createCustomerAlert(email:string,title:string,body:string,
  if(saved.rowCount)sendPush(email,title,body).catch(e=>console.error("Push notification delivery failed",e));
 }
 export function registerCustomerPortal(app:Express){
+ app.get("/api/customer/tracking/:orderId",async(req,res)=>{
+  const email=await sessionEmail(req);
+  if(!email)return res.status(401).json({message:"Not signed in"});
+  const orderId=Number(req.params.orderId);
+  if(!Number.isInteger(orderId))return res.sendStatus(400);
+  const q=await pool.query(
+    'SELECT a.state,d.name AS "driverName",l.latitude AS lat,l.longitude AS lng,l.updated_at AS "updatedAt",l.sharing FROM orders o JOIN dispatch_assignments a ON a.order_id=o.id JOIN dispatch_drivers d ON d.id=a.driver_id LEFT JOIN dispatch_locations l ON l.driver_id=d.id WHERE o.id=$1 AND lower(o.customer_email)=$2 AND a.route_date BETWEEN current_date-1 AND current_date+1 ORDER BY a.updated_at DESC LIMIT 1',
+    [orderId,email]);
+  res.setHeader("Cache-Control","no-store");
+  const item=q.rows[0];
+  if(!item)return res.json({available:false});
+  const visible=item.state==="on_way"&&item.sharing&&item.updatedAt&&Date.now()-new Date(item.updatedAt).getTime()<120000;
+  res.json({available:true,state:item.state,driverName:item.driverName,location:visible?{lat:item.lat,lng:item.lng}:null});
+ });
  app.get("/api/customer/push/key",async(req,res)=>{
   const email=await sessionEmail(req);if(!email)return res.status(401).json({message:"Not signed in"});
   res.json({key:pushPublicKey(),...pushConfigurationStatus()});
