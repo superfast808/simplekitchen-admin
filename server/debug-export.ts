@@ -58,15 +58,15 @@ export function registerDebugExport(app:Express){
    const pageSection=(independent.sections as Record<string,unknown>)[sectionKey];
    if(!pageSection && page!=="full-reconciliation")return res.status(400).json({message:"Unknown debug page"});
    const payload={
-    schemaVersion:2,exportedAt:new Date().toISOString(),page,filter:{from:from.toISOString(),to:to.toISOString(),day},
-    privacy:"Customer names, email addresses, postal addresses, phone numbers and delivery notes omitted. Order identifiers and product quantities retained for tracing.",
-    totals:{recorded:bucket(rows.filter(x=>!x.christmas)),active:bucket(active),selected:bucket(selected),
-      christmas:bucket(rows.filter(x=>x.christmas))},
-    statuses:Object.fromEntries([...new Set(rows.map(r=>r.status))].map(status=>[status,rows.filter(r=>r.status===status).length])),
-    duplicates:duplicateCandidates,pageComparison,lines:rows,
-    independentCalculation:page==="full-reconciliation"?independent:pageSection,
-    reconciliation:independent.comparison,
-    calculationScope:page==="full-reconciliation"?"All independent sections":sectionKey,
+     schemaVersion:2,
+     exportedAt:new Date().toISOString(),
+     page,
+     filter:{from:from.toISOString(),to:to.toISOString(),day},
+     privacy:"Order and line identifiers retained; no customer names, emails, addresses or delivery notes.",
+     calculationScope:sectionKey,
+     calculation:page==="full-reconciliation"?independent.sections:pageSection,
+     reconciliation:independent.comparison,
+     note:"Independent server-side diagnostic calculations. Browser-only filters and physical packing confirmations are not recorded here."
    };
    res.setHeader("Cache-Control","no-store");
    res.setHeader("Content-Type","application/json; charset=utf-8");
