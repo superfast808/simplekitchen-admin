@@ -270,7 +270,7 @@ export class DatabaseStorage implements IStorage {
       customerName: orders.customerName,
     }).from(orderItems)
       .innerJoin(orders, eq(orderItems.orderId, orders.id))
-      .where(conditions.length > 0 ? and(...conditions) : undefined);
+      .where(and(notInArray(orders.status, ["cancelled", "refunded", "failed", "trash"]), ...(conditions)));
 
     return result;
   }
