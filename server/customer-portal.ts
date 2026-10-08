@@ -72,13 +72,23 @@ export function registerCustomerPortal(app:Express){
   const orderId=Number(req.params.orderId);
   if(!Number.isInteger(orderId))return res.sendStatus(400);
   const q=await pool.query(
-    'SELECT a.state,d.name AS "driverName",l.latitude AS lat,l.longitude AS lng,l.updated_at AS "updatedAt",l.sharing FROM orders o JOIN dispatch_assignments a ON a.order_id=o.id JOIN dispatch_drivers d ON d.id=a.driver_id LEFT JOIN dispatch_locations l ON l.driver_id=d.id WHERE o.id=$1 AND lower(o.customer_email)=$2 AND a.route_date BETWEEN current_date-1 AND current_date+1 ORDER BY a.updated_at DESC LIMIT 1',
+    'SELECT a.state,d.name AS "driverName",l.latitude AS lat,l.longitude AS lng,l.updated_at AS "updatedAt",l.sharing,o.delivery_lat AS "destinationLat",o.delivery_lng AS "destinationLng" FROM orders o JOIN dispatch_assignments a ON a.order_id=o.id JOIN dispatch_drivers d ON d.id=a.driver_id LEFT JOIN dispatch_locations l ON l.driver_id=d.id WHERE o.id=$1 AND lower(o.customer_email)=$2 AND a.route_date BETWEEN current_date-1 AND current_date+1 ORDER BY a.updated_at DESC LIMIT 1',
     [orderId,email]);
   res.setHeader("Cache-Control","no-store");
   const item=q.rows[0];
   if(!item)return res.json({available:false});
   const visible=item.state==="on_way"&&item.sharing&&item.updatedAt&&Date.now()-new Date(item.updatedAt).getTime()<120000;
-  res.json({available:true,state:item.state,driverName:item.driverName,location:visible?{lat:item.lat,lng:item.lng}:null});
+  let etaMinutes:number|null=null,roadKm:number|null=null;
+  if(visible&&Number.isFinite(Number(item.destinationLat))&&Number.isFinite(Number(item.destinationLng))){
+    try {
+      const url="https://router.project-osrm.org/route/v1/driving/"+Number(item.lng)+","+Number(item.lat)+";"+Number(item.destinationLng)+","+Number(item.destinationLat)+"?overview=false";
+      const response=await fetch(url,{signal:AbortSignal.timeout(4500)});
+      if(response.ok){const body:any=await response.json();const first=body.routes?.[0];if(first){etaMinutes=Math.max(1,Math.round(first.duration/60));roadKm=Math.round(first.distance/100)/10}}
+    }catch{ /* GPS position remains available when road routing provider cannot respond. */ }
+  }
+  res.json({available:true,state:item.state,driverName:item.driverName,
+    location:visible?{lat:item.lat,lng:item.lng,updatedAt:item.updatedAt}:null,
+    etaMinutes,roadKm,etaSource:etaMinutes!==null?"OpenStreetMap road routing — excludes live traffic":null});
  });
  app.get("/api/customer/push/key",async(req,res)=>{
   const email=await sessionEmail(req);if(!email)return res.status(401).json({message:"Not signed in"});
