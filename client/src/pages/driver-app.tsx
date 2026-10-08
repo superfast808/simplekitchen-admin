@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card,CardContent } from "@/components/ui/card";
 import { Truck,MapPin,LogOut,CheckCircle,Navigation } from "lucide-react";
-type Stop={id:number;customerName:string;address:string;day:string;routeDate:string;state:string;items:{name:string;quantity:number}[]};
+type Stop={id:number;customerName:string;address:string;deliveryNotes:string|null;day:string;routeDate:string;state:string;items:{name:string;quantity:number}[]};
 type DriverData={driver:{id:string;name:string;registration:string|null};stops:Stop[]};
 const request=async(path:string,method="GET",body?:unknown)=>{const response=await fetch(path,{method,headers:{"Content-Type":"application/json"},credentials:"include",body:body?JSON.stringify(body):undefined,cache:"no-store"});const data=await response.json();if(!response.ok)throw Error(data.message||"Request failed");return data};
 export default function DriverApp(){
@@ -62,6 +62,7 @@ export default function DriverApp(){
     {data.stops.map(stop=><Card key={stop.id}><CardContent className="p-4 space-y-3">
      <div className="flex justify-between gap-2"><div><strong>{stop.customerName}</strong><p className="text-xs">{new Date(stop.routeDate).toLocaleDateString("en-GB")} · {stop.day} · #{stop.id}</p></div><span className="text-xs capitalize">{stop.state.replace("_"," ")}</span></div>
      <p className="text-sm">{stop.address}</p>
+     {stop.deliveryNotes?.trim()&&<div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950"><p className="font-semibold mb-1">Delivery instructions</p><p className="whitespace-pre-wrap break-words">{stop.deliveryNotes}</p></div>}
      <p className="text-xs">{(stop.items||[]).map(item=>item.quantity+"× "+item.name).join(" · ")}</p>
      <div className="flex flex-wrap gap-2">
       <Button variant="outline" onClick={()=>window.open("https://www.google.com/maps/search/?api=1&query="+encodeURIComponent(stop.address||""),"_blank")}><Navigation className="w-4 h-4 mr-1"/>Navigate</Button>
