@@ -27,7 +27,7 @@ async function deliver(endpoint:string,p256dh:string,auth:string,title:string,bo
  const salt=crypto.randomBytes(16);
  const cek=hkdf(salt,ikm,Buffer.from("Content-Encoding: aes128gcm\0"),16);
  const nonce=hkdf(salt,ikm,Buffer.from("Content-Encoding: nonce\0"),12);
- const payload=Buffer.concat([Buffer.from(JSON.stringify({title,body,tag:"simple-kitchen",url:"/my"})),Buffer.from([2])]);
+ const payload=Buffer.concat([Buffer.from(JSON.stringify({title,body,tag:"simple-kitchen-"+crypto.randomBytes(6).toString("hex"),url:"/my"})),Buffer.from([2])]);
  const cipher=crypto.createCipheriv("aes-128-gcm",cek,nonce);
  const ciphertext=Buffer.concat([cipher.update(payload),cipher.final(),cipher.getAuthTag()]);
  const record=Buffer.alloc(5);record.writeUInt32BE(4096,0);record[4]=senderPublic.length;
@@ -40,7 +40,7 @@ async function deliver(endpoint:string,p256dh:string,auth:string,title:string,bo
  const signature=crypto.sign("sha256",Buffer.from(signed),{key:crypto.createPrivateKey({key:jwk,format:"jwk"}),dsaEncoding:"ieee-p1363"});
  const jwt=signed+"."+b64(signature);
  const response=await fetch(endpoint,{method:"POST",headers:{"TTL":"86400","Content-Encoding":"aes128gcm","Content-Type":"application/octet-stream","Authorization":"vapid t="+jwt+", k="+b64(keys.publicKey)},body:encrypted,signal:AbortSignal.timeout(12000)});
- if(response.status===404||response.status===410){await pool.query("DELETE FROM customer_push_subscriptions WHERE endpoint=$1",[endpoint]);return}
+ if(response.status===404||response.status===410){await pool.query("DELETE FROM customer_push_subscriptions WHERE endpoint=$1",[endpoint]);throw Error("Push subscription expired (HTTP "+response.status+"). Re-enable notifications on the test device.")}
  if(!response.ok)throw Error("Push service responded "+response.status);
  await pool.query("UPDATE customer_push_subscriptions SET last_success_at=now() WHERE endpoint=$1",[endpoint]);
 }
@@ -58,6 +58,6 @@ export async function sendDispatchTestPush(email:string,title:string,body:string
  if(!subs.rowCount)throw Error("No push subscription registered for test email");
  const results=await Promise.allSettled(subs.rows.map(x=>deliver(x.endpoint,x.p256dh,x.auth,title,body)));
  const successful=results.filter(x=>x.status==="fulfilled").length;
- if(!successful)throw Error("Push service rejected all deliveries");
+ if(!successful){const errors=results.filter(x=>x.status==="rejected").map(x=>(x as PromiseRejectedResult).reason?.message||String((x as PromiseRejectedResult).reason));throw Error("Push delivery failed: "+errors.join("; ").slice(0,420))}
  return {registered:subs.rowCount,accepted:successful};
 }
