@@ -1112,15 +1112,9 @@ async function runProductSync(): Promise<{ imported: number; updated: number; mo
 const subscriptionMenuSyncedCategories = new Set<string>();
 
 async function getStrictSubscriptionWeekProducts(categoryName: string) {
-  if (!subscriptionMenuSyncedCategories.has(categoryName)) {
-    try {
-      await runProductSync();
-      subscriptionMenuSyncedCategories.add(categoryName);
-    } catch (error: any) {
-      log(`Subscription menu product refresh failed for ${categoryName}: ${error?.message || error}`, "sync");
-    }
-  }
-
+  // Never block a customer-facing menu request on a network-wide WooCommerce sync.
+  // Import jobs already refresh product data in the background. Return the latest
+  // locally persisted catalogue immediately, including historical invitation weeks.
   const allProducts = await storage.getProducts();
   return allProducts.filter(
     p => (p.category || "").trim().toLowerCase() === categoryName.trim().toLowerCase()
