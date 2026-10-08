@@ -4,6 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { RefreshCcw, AlertTriangle } from "lucide-react";
+import { OrderActions } from "@/components/order-actions";
 
 type Order = { id: number; wooId: number | null; customerName: string; customerEmail: string | null; orderDate: string; status: string; isManual: boolean; isTuesday: boolean; items: {productName: string; quantity: number}[] };
 type Group = {confidence:"high"|"possible"; reason:string; orders:Order[]};
@@ -22,7 +23,7 @@ export default function PossibleDuplicatesPage() {
    {data.groups.length===0&&<Card><CardContent className="p-6">No closely matching orders found in this date range. This does not rule out missing orders or subscription allocation errors.</CardContent></Card>}
    {data.groups.map((g,i)=><Card key={i}><CardContent className="p-4 space-y-3">
     <div className="flex gap-2 items-center flex-wrap"><Badge variant={g.confidence==="high"?"destructive":"secondary"}>{g.confidence==="high"?"High confidence":"Possible"}</Badge><span className="text-sm">{g.reason}</span></div>
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">{g.orders.map(o=><div key={o.id} className="border rounded-lg p-3 text-sm space-y-1"><p className="font-semibold">Order #{o.id}{o.wooId!=null?` · Woo #${o.wooId}`:""}</p><p>{o.customerName}{o.customerEmail?` · ${o.customerEmail}`:""}</p><p className="text-muted-foreground">{new Date(o.orderDate).toLocaleString("en-GB")} · {o.isTuesday?"Tuesday":"Saturday"} · {o.isManual?"Manual":"Online"} · {o.status}</p><ul className="list-disc pl-5">{o.items.map((item,j)=><li key={j}>{item.quantity} × {item.productName}</li>)}</ul></div>)}</div>
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">{g.orders.map(o=><div key={o.id} className="border rounded-lg p-3 text-sm space-y-1"><p className="font-semibold">Order #{o.id}{o.wooId!=null?` · Woo #${o.wooId}`:""}</p><p>{o.customerName}{o.customerEmail?` · ${o.customerEmail}`:""}</p><p className="text-muted-foreground">{new Date(o.orderDate).toLocaleString("en-GB")} · {o.isTuesday?"Tuesday":"Saturday"} · {o.isManual?"Manual":"Online"} · {o.status}</p><ul className="list-disc pl-5">{o.items.map((item,j)=><li key={j}>{item.quantity} × {item.productName}</li>)}</ul><OrderActions orderId={o.id} onComplete={()=>refetch()}/></div>)}</div>
    </CardContent></Card>)}
   </>}
  </div>;
