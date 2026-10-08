@@ -1,3 +1,4 @@
+import DriverApp from "@/pages/driver-app";
 import DispatchDevelopment from "@/pages/dispatch-development";
 import { Switch, Route, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
@@ -39,6 +40,7 @@ import ChristmasManagement from "@/pages/christmas-management";
 function isPublicRoute(location: string) {
   return (
     (location === "/my" || location.startsWith("/my/")) ||
+    location === "/driver" ||
     location.startsWith("/subscribe/") ||
     location.startsWith("/addon/")
   );
@@ -49,6 +51,7 @@ function PublicRoutes() {
     <Switch>
       <Route path="/my/subscribe/:token">{(params) => <SubscribePage params={params} />}</Route>
       <Route path="/my" component={CustomerPortal} />
+      <Route path="/driver" component={DriverApp} />
       <Route path="/subscribe/:token/payment-success">
         {(params) => <PaymentSuccessPage params={params} />}
       </Route>
