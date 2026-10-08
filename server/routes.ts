@@ -2472,7 +2472,38 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/woo/sync-orders", async (req, res) => {
+  // Manual sync is asynchronous: product variations and individual order item
+  // writes can exceed reverse-proxy request timeouts. Query status separately.
+  type ManualSyncState = {
+    running: boolean; phase: string; startedAt: string | null; finishedAt: string | null;
+    result: any; error: string | null; jobId: number; elapsedMs: number;
+  };
+  let manualSync: ManualSyncState = {running:false,phase:"idle",startedAt:null,finishedAt:null,result:null,error:null,jobId:0,elapsedMs:0};
+  let manualSyncSeq = 0;
+  function runManualSync() {
+    if(manualSync.running)return manualSync;
+    const id=++manualSyncSeq;
+    manualSync={running:true,phase:"Fetching WooCommerce products and variations",startedAt:new Date().toISOString(),finishedAt:null,result:null,error:null,jobId:id,elapsedMs:0};
+    const started=Date.now();
+    void (async()=>{
+      try {
+        const products=await runProductSync();
+        manualSync.phase="Fetching WooCommerce orders and importing order items";
+        const orders=await importManualWooOrders();
+        manualSync.result={products,orders};
+        manualSync.phase="Complete";
+      } catch(e:any){
+        manualSync.error=String(e?.message||e);
+        const failedPhase=manualSync.phase;
+        manualSync.phase="Failed";
+        log("Manual WooCommerce sync failed at "+failedPhase+": "+manualSync.error,"sync");
+      } finally {
+        manualSync.running=false;manualSync.finishedAt=new Date().toISOString();manualSync.elapsedMs=Date.now()-started;
+      }
+    })();
+    return manualSync;
+  }
+  async function importManualWooOrders() {
     try {
       const params: Record<string, string> = { status: "processing,completed,on-hold" };
       if (req.query.after) {
@@ -2581,19 +2612,25 @@ export async function registerRoutes(
       }
 
       const upgraded = await persistDeliveryUpgrades();
-      res.json({ imported, updated, upgraded, total: wooOrders.length });
+      return { imported, updated, upgraded, total: wooOrders.length };
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      throw error;
     }
+  }
+  app.post("/api/woo/sync-start",(_req,res)=>{
+    if(manualSync.running)return res.status(409).json({message:"A WooCommerce sync is already in progress",...manualSync});
+    res.status(202).json(runManualSync());
   });
-
-  app.post("/api/woo/sync-products", async (_req, res) => {
-    try {
-      const result = await runProductSync();
-      res.json(result);
-    } catch (error: any) {
-      res.status(500).json({ message: error.message });
-    }
+  app.get("/api/woo/sync-progress",(_req,res)=>{
+    const started=manualSync.startedAt?new Date(manualSync.startedAt).getTime():0;
+    res.setHeader("Cache-Control","no-store");
+    res.json({...manualSync,elapsedMs:manualSync.running?Date.now()-started:manualSync.elapsedMs});
+  });
+  app.post("/api/woo/sync-orders",async(req,res)=>{
+    try{res.json(await importManualWooOrders())}catch(e:any){res.status(502).json({message:"WooCommerce order import failed: "+e.message})}
+  });
+  app.post("/api/woo/sync-products",async(_req,res)=>{
+    try{res.json(await runProductSync())}catch(e:any){res.status(502).json({message:"WooCommerce product import failed: "+e.message})}
   });
 
   app.get("/api/delivery-addresses", async (req, res) => {
