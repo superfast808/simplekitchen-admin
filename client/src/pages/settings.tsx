@@ -127,6 +127,48 @@ function UserManagementCard() {
   );
 }
 
+
+function WooConnectionCard() {
+ const { toast } = useToast();
+ const { data, refetch } = useQuery<{url:string;hasKey:boolean;hasSecret:boolean}>({queryKey:["/api/woo-connection"]});
+ const [url,setUrl] = useState("");
+ const [key,setKey] = useState("");
+ const [secret,setSecret] = useState("");
+ const [saving,setSaving] = useState(false);
+ const [testing,setTesting] = useState(false);
+ useEffect(()=>{if(data)setUrl(data.url)},[data?.url]);
+ async function request(path:string,body?:unknown) {
+  const response=await fetch(path,{method:"POST",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify(body??{})});
+  const result=await response.json();
+  if(!response.ok)throw Error(result.message||"Request failed");
+  return result;
+ }
+ async function save(){
+  setSaving(true);
+  try {await request("/api/woo-connection",{url,key,secret});setKey("");setSecret("");await refetch();toast({title:"WooCommerce connection saved",description:"New credentials apply to imports and refunds immediately."})}
+  catch(e:any){toast({title:"Could not save connection",description:e.message,variant:"destructive"})}
+  finally{setSaving(false)}
+ }
+ async function test(){
+  setTesting(true);
+  try{await request("/api/woo-connection/test");toast({title:"WooCommerce connection successful",description:"Read access verified. Refund/write access must be verified separately."})}
+  catch(e:any){toast({title:"Connection test failed",description:e.message,variant:"destructive"})}
+  finally{setTesting(false)}
+ }
+ return <Card>
+  <CardHeader><CardTitle>WooCommerce REST API</CardTitle><CardDescription>Manage the connection used for order imports, product synchronisation, cancellations and refunds. New API credentials require Read/Write access. Saved secrets are never displayed again.</CardDescription></CardHeader>
+  <CardContent className="space-y-4">
+   <div className="space-y-1"><Label htmlFor="woo-store-url">Store URL</Label><Input id="woo-store-url" value={url} onChange={e=>setUrl(e.target.value)} placeholder="https://simplekitchenprep.com"/></div>
+   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <div className="space-y-1"><Label htmlFor="woo-key">Consumer key</Label><Input id="woo-key" type="password" autoComplete="off" value={key} onChange={e=>setKey(e.target.value)} placeholder={data?.hasKey?"Saved — leave blank to keep":"ck_…"}/></div>
+    <div className="space-y-1"><Label htmlFor="woo-secret">Consumer secret</Label><Input id="woo-secret" type="password" autoComplete="off" value={secret} onChange={e=>setSecret(e.target.value)} placeholder={data?.hasSecret?"Saved — leave blank to keep":"cs_…"}/></div>
+   </div>
+   <p className="text-xs text-muted-foreground">Save first, then test. Leaving a credential blank retains the saved value (or existing environment fallback). If changing the encryption secret, migrate credentials before restarting.</p>
+   <div className="flex flex-wrap gap-2"><Button disabled={saving||!url} onClick={save}>{saving?"Saving…":"Save WooCommerce Connection"}</Button><Button variant="outline" disabled={testing||saving} onClick={test}>{testing?"Testing…":"Test Connection"}</Button></div>
+  </CardContent>
+ </Card>;
+}
+
 export default function SettingsPage() {
   const { toast } = useToast();
 
@@ -807,6 +849,8 @@ export default function SettingsPage() {
           </p>
         </CardContent>
       </Card>
+
+      <WooConnectionCard />
 
       <Button onClick={handleSave} disabled={saveMutation.isPending} data-testid="button-save-settings">
         <Save className="w-4 h-4 mr-1" />
