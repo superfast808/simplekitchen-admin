@@ -13,6 +13,7 @@ import crypto from "crypto";
 import { log } from "./index";
 import { getUncachableStripeClient } from "./stripeClient";
 import { pool } from "./db";
+import { registerKitchenAuditRoutes } from "./kitchen-audit";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
@@ -1852,6 +1853,8 @@ export async function registerRoutes(
       res.status(502).json({ message: error.message });
     }
   });
+
+  registerKitchenAuditRoutes(app);
 
   app.get("/api/orders", async (req, res) => {
     try {
