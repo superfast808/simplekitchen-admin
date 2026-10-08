@@ -33,5 +33,5 @@ export async function wooFetch(path:string,method:"GET"|"PUT"|"POST"="GET",body?
  }
  const raw=await res.text();let json:any;try{json=JSON.parse(raw)}catch{json={message:raw.slice(0,300)}}
  if(!res.ok)throw Error("WooCommerce "+method+" /"+path+" returned HTTP "+res.status+" after "+((Date.now()-began)/1000).toFixed(1)+"s: "+(json?.message||"Request failed"));
- return json;;
+ return json;
 }
