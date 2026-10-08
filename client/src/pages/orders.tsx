@@ -62,6 +62,7 @@ export default function OrdersPage() {
   const [editingOrder, setEditingOrder] = useState<OrderWithItems | null>(null);
   const [showConsistent, setShowConsistent] = useState(true);
   const [hideSubscriptions, setHideSubscriptions] = useState(false);
+  const [showInactiveOrders, setShowInactiveOrders] = useState(false);
   const [orderSortCol, setOrderSortCol] = useState<"customer" | "total" | "spend" | "type" | "status" | null>(null);
   const [orderSortDir, setOrderSortDir] = useState<"asc" | "desc">("asc");
   const SUBSCRIPTION_RE = /meal\s+subscription\s*-\s*\d+/i;
@@ -210,6 +211,7 @@ export default function OrdersPage() {
   });
 
   const orders = allOrders?.filter(o => {
+    if (!showInactiveOrders && ["cancelled","refunded","failed","trash"].includes((o.status || "").toLowerCase())) return false;
     if (dayFilter === "saturday" && o.isTuesday) return false;
     if (dayFilter === "tuesday" && !o.isTuesday) return false;
     if (!sourceFilter.filterOrder(o)) return false;
@@ -494,6 +496,10 @@ export default function OrdersPage() {
             data-testid="checkbox-hide-subscriptions"
           />
           Hide subscriptions
+        </label>
+        <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer select-none" data-testid="label-show-inactive-orders">
+          <Checkbox checked={showInactiveOrders} onCheckedChange={v=>setShowInactiveOrders(!!v)} data-testid="checkbox-show-inactive-orders"/>
+          Show cancelled / refunded
         </label>
       </div>
 
