@@ -1,3 +1,4 @@
+import { sendDispatchTestPush } from "./customer-push";
 import type { Express } from "express";
 import { pool } from "./db";
 import { storage } from "./storage";
@@ -98,7 +99,16 @@ export function registerDispatch(app:Express){
       "dispatch:"+id+":"+kind+":"+new Date().toISOString().slice(0,10));
   };
   if(state==="on_way" && !testReplay)await sendNotice(Number(req.params.id),"on_way");
-  // Test replays should update the journey but never send real customer alerts.
+  // Test replay sends exclusively to the configured test recipient.
+  let testPush:any=null;
+  if(testReplay){
+    const q=await pool.query("SELECT value FROM settings WHERE key='customer_portal_test_email'");
+    const recipient=String(q.rows[0]?.value||"").trim().toLowerCase();
+    if(recipient){
+      try{testPush=await sendDispatchTestPush(recipient,"[TEST] Your Simple Kitchen delivery is on its way!","Your driver is now heading to you. Open My Simple Kitchen to follow your delivery.");}
+      catch(e:any){testPush={error:e.message}}
+    }else testPush={error:"Test email missing in customer portal settings"};
+  }
   let nextStop:number|null=null;
   if(state==="delivered"){
     await sendNotice(Number(req.params.id),"delivered");
@@ -112,7 +122,12 @@ export function registerDispatch(app:Express){
       await sendNotice(nextStop,"on_way");
     }
   }
-  res.json({ok:true,state,nextStop});
+  res.json({ok:true,state,nextStop,testPush});
+ });
+ app.get("/api/driver/location-status",driverOnly,async(req:any,res)=>{
+  const q=await pool.query('SELECT sharing,updated_at AS "updatedAt" FROM dispatch_locations WHERE driver_id=$1',[req.driverId]);
+  res.setHeader("Cache-Control","no-store");
+  res.json({sharing:q.rows[0]?.sharing===true,updatedAt:q.rows[0]?.updatedAt||null});
  });
  app.post("/api/driver/location",driverOnly,async(req:any,res)=>{
   const {lat,lng,sharing}=req.body||{};
