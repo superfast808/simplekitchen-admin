@@ -271,6 +271,25 @@ export default function SubscribePage({ params }: { params: { token: string } })
     },
   });
 
+  // A customer who arrived from My Simple Kitchen has already verified their email
+  // through a one-time magic link. Match that authenticated session to this invite.
+  useEffect(() => {
+    let active = true;
+    fetch(`/api/customer/subscription-session/${encodeURIComponent(token)}`, { credentials: "include" })
+      .then(async res => {
+        if (!res.ok) return null;
+        return res.json() as Promise<{ matched: boolean; email: string }>;
+      })
+      .then(result => {
+        if (!active || !result?.matched || !result.email) return;
+        setEmail(result.email);
+        setEmailError("");
+        setEmailVerified(true);
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [token]);
+
   // Pre-fill selections from server data
   useEffect(() => {
     if (!data) return;
