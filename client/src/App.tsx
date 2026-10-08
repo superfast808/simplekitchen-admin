@@ -33,6 +33,7 @@ import IngredientLibraryPage from "@/pages/ingredient-library";
 import LoginPage from "@/pages/login";
 import SystemStatusPage from "@/pages/system-status";
 import CustomerPortal from "@/pages/customer-portal";
+import ChristmasManagement from "@/pages/christmas-management";
 
 function isPublicRoute(location: string) {
   return (
@@ -68,6 +69,10 @@ function PageRouter() {
     <Switch>
       <Route path="/" component={OrdersPage} />
       <Route path="/products" component={ProductsPage} />
+      <Route path="/christmas/orders">{() => <ChristmasManagement mode="orders" />}</Route>
+      <Route path="/christmas/delivery">{() => <ChristmasManagement mode="delivery" />}</Route>
+      <Route path="/christmas/weekly">{() => <ChristmasManagement mode="weekly" />}</Route>
+      <Route path="/christmas/monthly">{() => <ChristmasManagement mode="monthly" />}</Route>
       <Route path="/product-totals" component={ProductTotalsPage} />
       <Route path="/kitchen-production" component={KitchenProductionPage} />
       <Route path="/possible-duplicates" component={PossibleDuplicatesPage} />
