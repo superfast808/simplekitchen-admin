@@ -6,6 +6,26 @@ import { Textarea } from "@/components/ui/textarea";
 type Order={id:number;wooId:number|null;orderDate:string;status:string;isTuesday:boolean;fulfillmentType:string;instructions:string|null;customerName:string;deliveryAddress:string|null;deliveryDate:string;group:"current"|"upcoming"|"past";journey:string;canEditInstructions:boolean;items:{name:string;quantity:number}[]};
 type Invite={token:string;weekFrom:string;weekTo:string;status:string};
 async function api(url:string,method="GET",data?:unknown){const r=await fetch(url,{method,credentials:"include",headers:{"Content-Type":"application/json"},body:data?JSON.stringify(data):undefined});const v=await r.json();if(!r.ok)throw Error(v.message||"Request failed");return v}
+type TrackingStatus={available:boolean;state?:string;driverName?:string;location?:{lat:number;lng:number;updatedAt:string}|null;etaMinutes?:number|null;roadKm?:number|null;etaSource?:string|null};
+function DriverTracking({orderId}:{orderId:number}){
+ const [visible,setVisible]=useState(false),[data,setData]=useState<TrackingStatus|null>(null),[error,setError]=useState("");
+ useEffect(()=>{
+  if(!visible)return;
+  let cancelled=false;
+  const refresh=()=>api("/api/customer/tracking/"+orderId).then(v=>{if(!cancelled)setData(v)}).catch((e:Error)=>{if(!cancelled)setError(e.message)});
+  refresh();const timer=window.setInterval(refresh,30000);
+  return()=>{cancelled=true;window.clearInterval(timer)};
+ },[visible,orderId]);
+ const lat=Number(data?.location?.lat),lng=Number(data?.location?.lng);
+ const mapUrl=data?.location?("https://www.openstreetmap.org/export/embed.html?bbox="+encodeURIComponent([lng-.012,lat-.008,lng+.012,lat+.008].join(","))+"&layer=mapnik&marker="+encodeURIComponent(lat+","+lng)):"";
+ return <div className="space-y-2"><Button variant="outline" size="sm" onClick={()=>setVisible(v=>!v)}>{visible?"Hide driver tracking":"Track my delivery"}</Button>
+ {visible&&<div className="rounded-xl border p-3 space-y-2"><p className="text-sm font-semibold">{data?.available?"Driver: "+data.driverName:"No active driver assignment yet"}</p>
+ {data?.available&&<p className="text-xs">Status: {String(data.state||"assigned").replace("_"," ")}</p>}
+ {data?.etaMinutes!=null&&<p className="text-sm font-medium">Approx. {data.etaMinutes} min · {data.roadKm} km by road</p>}
+ {data?.etaSource&&<p className="text-xs text-muted-foreground">{data.etaSource}. Traffic and stops ahead may change arrival time.</p>}
+ {data?.location?<><iframe title="Driver's latest reported position" loading="lazy" src={mapUrl} className="w-full h-56 rounded-lg border"/><p className="text-xs text-muted-foreground">Last updated {new Date(data.location.updatedAt).toLocaleTimeString("en-GB")}. Updates approximately every 30 seconds while the driver shares location.</p></>:<p className="text-xs text-muted-foreground">Live location will appear when your driver is on the way and has enabled sharing.</p>}
+ {error&&<p role="alert" className="text-xs text-red-600">{error}</p>}</div>}</div>
+}
 export default function CustomerPortal(){
  const [alerts,setAlerts]=useState<{id:string;title:string;body:string;createdAt:string;read:boolean}[]>([]);
  const [notificationsOn,setNotificationsOn]=useState(false);
@@ -76,6 +96,7 @@ export default function CustomerPortal(){
     <div className="flex justify-between gap-2 flex-wrap"><div><h4 className="font-semibold">Order #{o.wooId||o.id}</h4><p className="text-xs">Delivery {new Date(o.deliveryDate+"T12:00:00").toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})} · {o.fulfillmentType}</p></div><span className="rounded-full px-3 py-1 text-xs font-semibold self-start" style={{background:"#e6eee6"}}>{["cancelled","refunded"].includes(o.status)? "Cancelled":o.journey}</span></div>
     <ul className="text-sm space-y-1">{o.items.map((it,i)=><li key={i}>{it.quantity} × {it.name}</li>)}</ul>
     {o.deliveryAddress&&<p className="text-xs text-muted-foreground">Delivery: {o.deliveryAddress}</p>}
+    {o.fulfillmentType==="delivery"&&!["cancelled","refunded"].includes(o.status)&&<DriverTracking orderId={o.id}/> }
     {editing===o.id?<div className="space-y-2"><label className="text-sm">Delivery instructions (e.g. gate code, safe location)</label><Textarea value={instructions} maxLength={1000} onChange={e=>setInstructions(e.target.value)}/><div className="flex gap-2"><Button onClick={async()=>{try{await api("/api/customer/orders/"+o.id+"/instructions","PATCH",{instructions});setEditing(null);await reload()}catch(e:any){setMessage(e.message)}}}>Save</Button><Button variant="outline" onClick={()=>setEditing(null)}>Cancel</Button></div>{message&&<p className="text-sm">{message}</p>}</div>:
     <div className="flex justify-between items-center gap-2"><p className="text-sm">Instructions: {o.instructions||"Not supplied"}</p>{o.canEditInstructions&&<Button size="sm" variant="outline" onClick={()=>{setMessage("");setEditing(o.id);setInstructions(o.instructions||"")}}>Edit</Button>}</div>}
    </CardContent></Card>)}</section>)}
