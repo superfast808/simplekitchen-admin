@@ -126,6 +126,18 @@ export function registerDispatch(app:Express){
   res.clearCookie("sk_driver",{path:"/"});res.json({ok:true});
  });
 
+ app.get("/api/dispatch/test-mode",onlyAdmin,(_req,res)=>{
+   res.json({enabled:process.env.DISPATCH_TEST_MODE==="enabled",liveNotifications:process.env.DISPATCH_CUSTOMER_NOTIFICATIONS==="enabled"});
+ });
+ app.post("/api/dispatch/test-login",onlyAdmin,async(req,res)=>{
+  if(process.env.DISPATCH_TEST_MODE!=="enabled")return res.status(403).json({message:"Dispatch test mode is disabled"});
+  const driver=await pool.query("SELECT id FROM dispatch_drivers WHERE id=$1 AND enabled=true",[req.body?.driverId]);
+  if(!driver.rowCount)return res.sendStatus(404);
+  const token=crypto.randomBytes(32).toString("base64url");
+  await pool.query("INSERT INTO dispatch_driver_sessions(token_hash,driver_id,expires_at) VALUES($1,$2,now()+interval '8 hours')",[digest(token),driver.rows[0].id]);
+  res.cookie("sk_driver",token,{httpOnly:true,secure:true,sameSite:"lax",maxAge:8*3600000,path:"/"});
+  res.json({ok:true,url:"/driver"});
+ });
  app.get("/api/dispatch/drivers",onlyAdmin,async(_req,res)=>{try{res.json((await pool.query('SELECT id::text,name,registration,photo_url AS "photoUrl",email,enabled FROM dispatch_drivers ORDER BY name')).rows)}catch(e:any){res.status(500).json({message:e.message})}});
  app.post("/api/dispatch/drivers",onlyAdmin,async(req,res)=>{
   const {name,registration,photoUrl,email}=req.body||{};
