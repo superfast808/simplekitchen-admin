@@ -5387,7 +5387,14 @@ export async function registerRoutes(
           return { ...order, items };
         })
       );
-      applyAddDeliveryUpgrades(ordersWithItems);
+      const festiveProducts = (await storage.getProducts()).filter(p=>/(^|\W)(xmas|christmas)(\W|$)/i.test(p.category||""));
+      const festiveIds = new Set(festiveProducts.map(p=>p.id));
+      const festiveNames = new Set(festiveProducts.map(p=>p.name.trim().toLowerCase()));
+      for(const o of ordersWithItems){
+        o.items = o.items.filter(i=>!(i.productId && festiveIds.has(i.productId)) && !festiveNames.has(i.productName.trim().toLowerCase()));
+      }
+      const regularOrders = regularOrders.filter(o=>o.items.length>0);
+      applyAddDeliveryUpgrades(regularOrders);
 
       const priorOrders = await storage.getOrders(undefined, new Date(from.getTime() - 1));
 
@@ -5397,7 +5404,7 @@ export async function registerRoutes(
 
       const subscriptionPattern = /meal\s+subscription\s*-\s*(\d+)/i;
 
-      for (const order of ordersWithItems) {
+      for (const order of regularOrders) {
         revenue += parseFloat((order as any).shippingTotal || "0");
         for (const item of order.items) {
           if (subscriptionPattern.test(item.productName)) continue;
@@ -5412,10 +5419,10 @@ export async function registerRoutes(
         }
       }
 
-      const orderCount = ordersWithItems.length;
+      const orderCount = regularOrders.length;
       const avgOrderValue = orderCount > 0 ? revenue / orderCount : 0;
 
-      const deliveryStops = ordersWithItems.filter(o => o.fulfillmentType === "delivery").length;
+      const deliveryStops = regularOrders.filter(o => o.fulfillmentType === "delivery").length;
 
       const priorEmails = new Set<string>();
       const priorNames = new Set<string>();
@@ -5427,7 +5434,7 @@ export async function registerRoutes(
       let newCustomers = 0;
       let returningCustomers = 0;
       const counted = new Set<string>();
-      for (const o of ordersWithItems) {
+      for (const o of regularOrders) {
         const key = o.customerEmail ? o.customerEmail.toLowerCase() : o.customerName.toLowerCase();
         if (counted.has(key)) continue;
         counted.add(key);
