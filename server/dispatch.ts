@@ -92,7 +92,8 @@ export function registerDispatch(app:Express){
  });
  app.post("/api/driver/location",driverOnly,async(req:any,res)=>{
   const {lat,lng,sharing}=req.body||{};
-  if(typeof sharing!=="boolean"||!Number.isFinite(lat)||!Number.isFinite(lng)||lat<49||lat>61||lng< -9||lng>3)return res.status(400).json({message:"Invalid coordinates"});
+  if(sharing===false){await pool.query("UPDATE dispatch_locations SET sharing=false,updated_at=now() WHERE driver_id=$1",[req.driverId]);return res.json({ok:true})}
+  if(sharing!==true||!Number.isFinite(lat)||!Number.isFinite(lng)||lat<49||lat>61||lng< -9||lng>3)return res.status(400).json({message:"Invalid coordinates"});
   await pool.query(`INSERT INTO dispatch_locations(driver_id,latitude,longitude,sharing,updated_at) VALUES($1,$2,$3,$4,now())
    ON CONFLICT(driver_id) DO UPDATE SET latitude=EXCLUDED.latitude,longitude=EXCLUDED.longitude,sharing=EXCLUDED.sharing,updated_at=now()`,[req.driverId,lat,lng,sharing]);
   res.json({ok:true});
