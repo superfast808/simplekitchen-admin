@@ -3,6 +3,7 @@ import { pool } from "./db";
 import { storage } from "./storage";
 import crypto from "crypto";
 import nodemailer from "nodemailer";
+import { createCustomerAlert } from "./customer-portal";
 const inactive=new Set(["cancelled","refunded","failed","trash"]);
 const onlyAdmin=(req:any,res:any,next:any)=>req.session?.userId?next():res.status(401).json({message:"Admin authentication required"});
 export async function setupDispatchTables(){
@@ -87,8 +88,29 @@ export function registerDispatch(app:Express){
    WHERE order_id=$2 AND driver_id=$3 AND route_date BETWEEN current_date-1 AND current_date+7 RETURNING order_id,driver_id`,[state,req.params.id,req.driverId]);
   if(!q.rowCount)return res.sendStatus(404);
   await pool.query("INSERT INTO dispatch_events(order_id,driver_id,kind) VALUES($1,$2,$3)",[req.params.id,req.driverId,state]);
-  // Dispatch events are stored; customer-facing messages remain gated pending end-to-end QA.
-  res.json({ok:true,state});
+  const sendNotice=async(id:number,kind:string)=>{
+    if(process.env.DISPATCH_CUSTOMER_NOTIFICATIONS!=="enabled")return;
+    const o=await pool.query("SELECT customer_email,woo_id FROM orders WHERE id=$1",[id]);
+    const email=o.rows[0]?.customer_email;
+    if(email)await createCustomerAlert(email,kind==="on_way"?"Your Simple Kitchen delivery is on its way":"Your delivery is complete",
+      kind==="on_way"?"Your driver is heading to you. Open My Simple Kitchen to follow your delivery.":"Your driver has marked your order delivered.",
+      "dispatch:"+id+":"+kind+":"+new Date().toISOString().slice(0,10));
+  };
+  if(state==="on_way")await sendNotice(Number(req.params.id),"on_way");
+  let nextStop:number|null=null;
+  if(state==="delivered"){
+    await sendNotice(Number(req.params.id),"delivered");
+    const next=await pool.query(
+      "SELECT a.order_id FROM dispatch_assignments a WHERE a.driver_id=$1 AND a.route_date=(SELECT route_date FROM dispatch_assignments WHERE order_id=$2 AND driver_id=$1 ORDER BY updated_at DESC LIMIT 1) AND a.state='assigned' ORDER BY sequence NULLS LAST,order_id LIMIT 1",
+      [req.driverId,req.params.id]);
+    if(next.rowCount){
+      nextStop=Number(next.rows[0].order_id);
+      await pool.query("UPDATE dispatch_assignments SET state='on_way',updated_at=now() WHERE order_id=$1 AND driver_id=$2 AND state='assigned'",[nextStop,req.driverId]);
+      await pool.query("INSERT INTO dispatch_events(order_id,driver_id,kind) VALUES($1,$2,'on_way')",[nextStop,req.driverId]);
+      await sendNotice(nextStop,"on_way");
+    }
+  }
+  res.json({ok:true,state,nextStop});
  });
  app.post("/api/driver/location",driverOnly,async(req:any,res)=>{
   const {lat,lng,sharing}=req.body||{};
@@ -143,9 +165,17 @@ export function registerDispatch(app:Express){
   if(!Number.isInteger(orderId)||!["saturday","tuesday"].includes(day)||!/^\d{4}-\d{2}-\d{2}$/.test(String(routeDate)))return res.status(400).json({message:"Invalid assignment"});
   try{
    if(driverId!==null){const found=await pool.query('SELECT id FROM dispatch_drivers WHERE id=$1 AND enabled=true',[driverId]);if(!found.rowCount)return res.status(400).json({message:"Driver not found or disabled"})}
-   const q=await pool.query(`INSERT INTO dispatch_assignments(order_id,delivery_day,route_date,driver_id,state) VALUES($1,$2,$3,$4,'assigned')
-    ON CONFLICT(order_id,delivery_day,route_date) DO UPDATE SET driver_id=EXCLUDED.driver_id,state='assigned',updated_at=now()
-    RETURNING order_id,driver_id::text`,[orderId,day,routeDate,driverId]);
+   const eligible=await pool.query("SELECT id FROM orders WHERE id=$1 AND is_tuesday=$2 AND lower(status) NOT IN ('cancelled','refunded','failed','trash')",[orderId,day==="tuesday"]);
+   if(!eligible.rowCount)return res.status(400).json({message:"Inactive order or delivery day mismatch"});
+   const items=await storage.getOrderItems(orderId);
+   const festiveProducts=await storage.getProducts();
+   const festiveIds=new Set(festiveProducts.filter(p=>/(^|\\W)(christmas|xmas)(\\W|$)/i.test(p.category||"")).map(p=>p.id));
+   if(items.length===0||items.every(i=>!!(i.productId&&festiveIds.has(i.productId))||/\\b(christmas|xmas)\\b/i.test(i.productName)))
+     return res.status(400).json({message:"Christmas-only or empty orders cannot be dispatched on regular routes"});
+   const nextSequence=driverId===null?null:Number((await pool.query("SELECT COALESCE(MAX(sequence),0)+1 AS n FROM dispatch_assignments WHERE driver_id=$1 AND delivery_day=$2 AND route_date=$3",[driverId,day,routeDate])).rows[0].n);
+   const q=await pool.query(`INSERT INTO dispatch_assignments(order_id,delivery_day,route_date,driver_id,state,sequence) VALUES($1,$2,$3,$4,'assigned',$5)
+    ON CONFLICT(order_id,delivery_day,route_date) DO UPDATE SET driver_id=EXCLUDED.driver_id,sequence=CASE WHEN dispatch_assignments.driver_id IS NOT DISTINCT FROM EXCLUDED.driver_id THEN dispatch_assignments.sequence ELSE EXCLUDED.sequence END,state='assigned',updated_at=now()
+    RETURNING order_id,driver_id::text`,[orderId,day,routeDate,driverId,nextSequence]);
    res.json(q.rows[0]);
   }catch(e:any){res.status(500).json({message:e.message})}
  });
