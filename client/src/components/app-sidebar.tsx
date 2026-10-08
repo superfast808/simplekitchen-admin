@@ -1,4 +1,4 @@
-import { Package, ShoppingCart, ChefHat, MapPin, BarChart3, Plus, Settings, HelpCircle, Activity, Mail, CalendarCheck, CalendarDays, BookOpen, Server } from "lucide-react";
+import { Package, ShoppingCart, ChefHat, MapPin, BarChart3, Plus, Settings, HelpCircle, Activity, Mail, CalendarCheck, CalendarDays, BookOpen, Server, ClipboardCheck, CopyCheck } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { SIMPLE_KITCHEN_LOGO_URL } from "@/lib/brand";
 import {
@@ -19,6 +19,8 @@ const menuItems = [
   { title: "Tuesday Orders", url: "/tuesday", icon: CalendarCheck },
   { title: "Saturday Orders", url: "/saturday", icon: CalendarDays },
   { title: "Product Totals", url: "/product-totals", icon: BarChart3 },
+  { title: "Kitchen Production", url: "/kitchen-production", icon: ClipboardCheck },
+  { title: "Possible Duplicates", url: "/possible-duplicates", icon: CopyCheck },
   { title: "Ingredients", url: "/ingredients", icon: ChefHat },
   { title: "Manual Stock", url: "/manual-stock", icon: Plus },
   { title: "Tue Routes", url: "/routes/tuesday", icon: MapPin },
