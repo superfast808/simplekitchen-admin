@@ -79,7 +79,7 @@ export default function CustomerPortal(){
    setAlerts(old=>{
     const seen=new Set(old.map((x:{id:string})=>x.id));
     if(notificationsOn && "Notification" in window && Notification.permission==="granted")
-     incoming.filter((a:{id:string})=>!seen.has(a.id)).forEach((a:{title:string;body:string})=>new Notification(a.title,{body:a.body,icon:"/my-icon.svg"}));
+     incoming.filter((a:{id:string})=>!seen.has(a.id)).forEach((a:{title:string;body:string})=>new Notification(a.title,{body:a.body,icon:"https://simplekitchenprep.com/wp-content/uploads/2026/04/logonormal.png"}));
     return incoming;
    });
   }catch{}
