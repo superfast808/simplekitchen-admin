@@ -5382,6 +5382,51 @@ export async function registerRoutes(
     }
   });
 
+  // Read-only independent reconciliation of recorded line items, labels and duplicate candidates.
+  app.get("/api/weekly-verify", async (req,res) => {
+    if (!req.session?.userId) return res.status(401).json({message:"Unauthorized"});
+    try {
+      const from=new Date(String(req.query.from||"")),to=new Date(String(req.query.to||""));
+      if(!Number.isFinite(from.getTime())||!Number.isFinite(to.getTime())||to<from||to.getTime()-from.getTime()>15*86400000)
+        return res.status(400).json({message:"Invalid weekly date range"});
+      const orders=await storage.getOrders(from,to);
+      const itemsByOrder=await storage.getOrderItemsBatch(orders.map(o=>o.id));
+      const products=await storage.getProducts();
+      const byId=new Map(products.map(p=>[p.id,p]));
+      const byName=new Map(products.map(p=>[p.name.trim().toLowerCase(),p]));
+      const isXmas=(item:{productId?:number|null;productName:string})=>{
+        const p=(item.productId?byId.get(item.productId):undefined)||byName.get(item.productName.trim().toLowerCase());
+        return /(^|\\W)(xmas|christmas)(\\W|$)/i.test(p?.category||"");
+      };
+      const included=orders.map(o=>({...o,items:(itemsByOrder.get(o.id)||[]).filter(i=>!isXmas(i))}))
+        .filter(o=>o.items.length>0&&!["cancelled","refunded","failed","trash"].includes((o.status||"").toLowerCase()));
+      const productionItems=included.flatMap(o=>o.items.filter(i=>!/meal\\s+subscription|add\\s+delivery|gift\\s*card/i.test(i.productName))
+        .map(i=>({orderId:o.id,wooId:o.wooId,customerName:o.customerName,customerEmail:o.customerEmail,isTuesday:o.isTuesday,productName:i.productName,quantity:i.quantity,price:i.price})));
+      const productMap=new Map<string,{productName:string;quantity:number;orders:{orderId:number;customerName:string;quantity:number}[]}>();
+      for(const i of productionItems){
+        const k=i.productName.trim().toLowerCase();
+        const p=productMap.get(k)||{productName:i.productName,quantity:0,orders:[]};
+        p.quantity+=i.quantity;p.orders.push({orderId:i.orderId,customerName:i.customerName,quantity:i.quantity});productMap.set(k,p);
+      }
+      const duplicates:{first:number;second:number;customerName:string;reason:string}[]=[];
+      const basket=(o:typeof included[number])=>o.items.map(i=>[i.productName.trim().toLowerCase(),i.quantity].join(":")).sort().join("|");
+      for(let i=0;i<included.length;i++)for(let j=i+1;j<included.length;j++){
+        const a=included[i],b=included[j];
+        if(a.isTuesday!==b.isTuesday||!basket(a)||basket(a)!==basket(b))continue;
+        const sameMail=!!a.customerEmail&&a.customerEmail.toLowerCase()===b.customerEmail?.toLowerCase();
+        const sameName=a.customerName.trim().toLowerCase()===b.customerName.trim().toLowerCase();
+        if(!sameMail&&!sameName)continue;
+        const delta=Math.abs(new Date(a.orderDate).getTime()-new Date(b.orderDate).getTime())/60000;
+        if(delta<=20)duplicates.push({first:a.id,second:b.id,customerName:a.customerName,reason:`Matching basket within ${Math.round(delta)} minutes`});
+      }
+      res.setHeader("Cache-Control","no-store");
+      res.json({checkedAt:new Date().toISOString(),orderCount:included.length,totalUnits:productionItems.reduce((n,i)=>n+i.quantity,0),
+        products:[...productMap.values()].sort((a,b)=>a.productName.localeCompare(b.productName)),duplicates,
+        orders:included.map(o=>({id:o.id,wooId:o.wooId,customerName:o.customerName,isTuesday:o.isTuesday,
+          items:o.items.map(i=>({name:i.productName,quantity:i.quantity}))}))});
+    }catch(e:any){res.status(500).json({message:e.message})}
+  });
+
   app.get("/api/weekly-stats", async (req, res) => {
     try {
       const from = req.query.from ? new Date(req.query.from as string) : undefined;
