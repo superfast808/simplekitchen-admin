@@ -15,7 +15,7 @@ import { getUncachableStripeClient } from "./stripeClient";
 import { pool } from "./db";
 import { registerKitchenAuditRoutes } from "./kitchen-audit";
 import { registerOrderActions } from "./order-actions";
-import { registerCustomerPortal, sendCustomerPortalNotification, customerEmailContent } from "./customer-portal";
+import { registerCustomerPortal, sendCustomerPortalNotification, customerEmailContent, createCustomerAlert } from "./customer-portal";
 import { wooCredentials, saveWooCredentials, wooFetch } from "./woo-credentials";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
@@ -948,6 +948,7 @@ async function performSync() {
         const customerFacing = email && !categoryNames.some((n:string)=>/^(shop|wholesale|custom order)/.test(n));
         if(customerFacing){
           const base=await storage.getSetting("customer_portal_url") || "https://admin.simplekitchenprep.com/my";
+          await createCustomerAlert(email,"Your order is with us","We've received your order #"+String(wo.number||wo.id)+". Follow your upcoming delivery in My Simple Kitchen.","order-received:"+String(wo.id));
           await sendCustomerPortalNotification(email,"Welcome to My Simple Kitchen",customerEmailContent("welcome",{link:base}),"welcome:"+email);
           await sendCustomerPortalNotification(email,"We've received your Simple Kitchen order",customerEmailContent("order",{link:base,orderNumber:String(wo.number||wo.id)}),"order-created:"+wo.id);
         }
