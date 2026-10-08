@@ -15,7 +15,7 @@ import { getUncachableStripeClient } from "./stripeClient";
 import { pool } from "./db";
 import { registerKitchenAuditRoutes } from "./kitchen-audit";
 import { registerOrderActions } from "./order-actions";
-import { registerCustomerPortal } from "./customer-portal";
+import { registerCustomerPortal, sendCustomerPortalNotification } from "./customer-portal";
 import { wooCredentials, saveWooCredentials, wooFetch } from "./woo-credentials";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
@@ -941,6 +941,20 @@ async function performSync() {
           });
         }
         imported++;
+        // Safe by default: testing mode redirects all notifications to the alias;
+        // manually-entered shop orders never reach this WooCommerce sync path.
+        const email = String(billing.email || "").trim().toLowerCase();
+        const categoryNames = (wo.line_items || []).map((i:any) => String(i.name || "").toLowerCase());
+        const customerFacing = email && !categoryNames.some((n:string)=>/^(shop|wholesale|custom order)/.test(n));
+        if(customerFacing){
+          const base=await storage.getSetting("customer_portal_url") || "https://admin.simplekitchenprep.com/my";
+          await sendCustomerPortalNotification(email,"Welcome to My Simple Kitchen",
+            `<div style="font-family:Arial,sans-serif;max-width:540px;padding:24px"><h1 style="color:#314d40">Welcome to My Simple Kitchen 🤎</h1><p>You can now follow your order journey, view past meals and manage your subscriptions.</p><p><a href="${base}">Explore your account</a> — enter your email to request a secure sign-in link.</p></div>`,
+            "welcome:"+email);
+          await sendCustomerPortalNotification(email,"We've received your Simple Kitchen order",
+            `<div style="font-family:Arial,sans-serif;padding:24px"><h2>Thank you for your order!</h2><p>We've received order #${wo.number||wo.id}. Follow its progress in <a href="${base}">My Simple Kitchen</a>.</p></div>`,
+            "order-created:"+wo.id);
+        }
       }
     }
 
