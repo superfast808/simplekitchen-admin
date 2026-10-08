@@ -265,17 +265,33 @@ export default function SettingsPage() {
     },
   });
 
+  const [wooSyncProgress, setWooSyncProgress] = useState<{running:boolean;phase:string;elapsedMs:number;error:string|null;result?:{products?:{imported:number;updated:number;total:number};orders?:{imported:number;updated:number;total:number}}}|null>(null);
   const syncNowMutation = useMutation({
     mutationFn: async () => {
-      await apiRequest("POST", "/api/woo/sync-products");
-      return apiRequest("POST", "/api/woo/sync-orders");
+      const started = await apiRequest("POST", "/api/woo/sync-start");
+      const details = await started.json();
+      if(!started.ok && started.status!==202)throw Error(details.message||"Could not start sync");
+      for(let i=0;i<240;i++){
+        await new Promise(resolve=>setTimeout(resolve,1500));
+        const response=await fetch("/api/woo/sync-progress",{credentials:"include",cache:"no-store"});
+        if(!response.ok)throw Error("Cannot read sync progress: HTTP "+response.status);
+        const state=await response.json();
+        setWooSyncProgress(state);
+        if(!state.running){
+          if(state.error)throw Error(state.phase+": "+state.error);
+          if(!state.result)throw Error("Sync stopped without a result. Please check Docker logs.");
+          return state.result;
+        }
+      }
+      throw Error("The sync is still running after six minutes. You can check its progress in server logs. Don't start a duplicate sync.");
     },
-    onSuccess: async (res) => {
-      const data = await res.json();
-      toast({ title: "Sync complete", description: `Orders: imported=${data.imported}, updated=${data.updated}` });
+    onMutate: () => setWooSyncProgress({running:true,phase:"Starting WooCommerce sync",elapsedMs:0,error:null}),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries();
+      toast({title:"WooCommerce sync complete",description:`Products: ${data.products?.total??0} checked. Orders: ${data.orders?.imported??0} imported, ${data.orders?.updated??0} updated.`});
     },
     onError: (error: Error) => {
-      toast({ title: "Sync failed", description: error.message, variant: "destructive" });
+      toast({title:"WooCommerce sync failed",description:error.message,variant:"destructive"});
     },
   });
 
@@ -488,7 +504,7 @@ export default function SettingsPage() {
             data-testid="button-sync-now"
           >
             <RefreshCw className={`w-4 h-4 mr-1 ${syncNowMutation.isPending ? "animate-spin" : ""}`} />
-            {syncNowMutation.isPending ? "Syncing..." : "Sync Now"}
+            {syncNowMutation.isPending ? "Sync running…" : "Sync Now"}
           </Button>
         </CardContent>
       </Card>
