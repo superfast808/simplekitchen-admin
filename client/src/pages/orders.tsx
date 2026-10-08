@@ -1,3 +1,4 @@
+import { DebugExportButton } from "@/components/debug-export-button";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { OrderActions } from "@/components/order-actions";
@@ -422,7 +423,7 @@ export default function OrdersPage() {
           <DeliveryDatePills weekStart={from} />
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <DateFilter {...dateFilter} testIdPrefix="orders" showMonth />
+          <DateFilter {...dateFilter} testIdPrefix="orders" showMonth /><DebugExportButton page="orders" from={from} to={to} day={dayFilter}/>
           <Button size="sm" onClick={() => syncMutation.mutate()} disabled={syncMutation.isPending} data-testid="button-sync-orders">
             <RefreshCw className={`w-4 h-4 mr-1 ${syncMutation.isPending ? "animate-spin" : ""}`} />
             Sync from Woo
