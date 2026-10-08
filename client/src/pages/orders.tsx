@@ -1,5 +1,6 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import { OrderActions } from "@/components/order-actions";
 import { format } from "date-fns";
 import { useState, useMemo } from "react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -1010,14 +1011,7 @@ export default function OrdersPage() {
                               </>
                             );
                           })()}
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            onClick={() => deleteMutation.mutate(order.id)}
-                            data-testid={`button-delete-order-${order.id}`}
-                          >
-                            <Trash2 className="w-4 h-4 text-muted-foreground" />
-                          </Button>
+                          <OrderActions orderId={order.id} />
                         </div>
                       </TableCell>
                     </TableRow>
