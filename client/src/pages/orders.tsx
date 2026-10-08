@@ -346,9 +346,11 @@ export default function OrdersPage() {
       return pa !== pb ? pa - pb : a.localeCompare(b);
     });
 
+  // Operational totals must exclude cancelled/refunded orders, just like Kitchen Production.
+  const countableOrders = (orders || []).filter(o => !["cancelled","refunded","failed","trash"].includes((o.status||"").toLowerCase()));
   const productTotals: Record<string, number> = {};
   for (const name of allProductNames) {
-    productTotals[name] = (orders || []).reduce((sum, order) => {
+    productTotals[name] = countableOrders.reduce((sum, order) => {
       return sum + order.items.filter(i => i.productName === name).reduce((s, i) => s + i.quantity, 0);
     }, 0);
   }
