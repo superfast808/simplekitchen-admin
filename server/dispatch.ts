@@ -128,6 +128,7 @@ export function registerDispatch(app:Express){
   res.clearCookie("sk_driver",{path:"/"});res.json({ok:true});
  });
 
+ app.get("/api/driver/test-status",driverOnly,(_req,res)=>res.json({enabled:process.env.DISPATCH_TEST_MODE==="enabled"}));
  app.get("/api/dispatch/test-mode",onlyAdmin,(_req,res)=>{
    res.json({enabled:process.env.DISPATCH_TEST_MODE==="enabled",liveNotifications:process.env.DISPATCH_CUSTOMER_NOTIFICATIONS==="enabled"});
  });
