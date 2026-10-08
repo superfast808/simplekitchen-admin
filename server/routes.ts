@@ -14,6 +14,7 @@ import { log } from "./index";
 import { getUncachableStripeClient } from "./stripeClient";
 import { pool } from "./db";
 import { registerKitchenAuditRoutes } from "./kitchen-audit";
+import { registerDebugExport } from "./debug-export";
 import { registerOrderActions } from "./order-actions";
 import { registerCustomerPortal, sendCustomerPortalNotification, customerEmailContent, createCustomerAlert } from "./customer-portal";
 import { wooCredentials, saveWooCredentials, wooFetch } from "./woo-credentials";
@@ -1863,6 +1864,7 @@ export async function registerRoutes(
   });
 
   registerKitchenAuditRoutes(app);
+  registerDebugExport(app);
   registerOrderActions(app);
   registerCustomerPortal(app);
 
