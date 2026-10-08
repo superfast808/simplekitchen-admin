@@ -24,8 +24,8 @@ export default function KitchenProductionPage() {
       <div><h1 className="text-2xl font-semibold">Kitchen Production Check</h1><DateRangeLabel from={dates.from} to={dates.to}/></div>
       <div className="flex flex-wrap gap-2"><DateFilter {...dates} testIdPrefix="kitchen"/><Button variant="outline" onClick={()=>refetch()} disabled={isFetching}><RefreshCcw className="w-4 h-4 mr-2"/>Refresh</Button><Button variant="outline" onClick={()=>window.print()}><Printer className="w-4 h-4 mr-2"/>Print</Button></div>
     </div>
-    <p className="text-sm text-muted-foreground">Live order-by-order production reconciliation. Day selection applies to order allocations; manual/shop stock is displayed separately. Physical counts entered here are for checking only and are not saved.</p>
-    <div className="flex gap-2 flex-wrap">{[["saturday","Saturday only"],["tuesday","Tuesday only"],["all","Both days"]].map(([value,title])=><Button key={value} size="sm" variant={day===value?"default":"outline"} onClick={()=>{setDay(value);setPrepared({});}}>{title}</Button>)}</div>
+    <p className="text-sm text-muted-foreground">Live order-by-order production reconciliation. Christmas products are shown separately from regular meal preparation. Day selection applies to order allocations; manual/shop stock is displayed separately. Physical counts entered here are for checking only and are not saved.</p>
+    <div className="flex gap-2 flex-wrap">{[["saturday","Saturday only"],["tuesday","Tuesday only"],["all","Both days"],["xmas","🎄 Christmas"]].map(([value,title])=><Button key={value} size="sm" variant={day===value?"default":"outline"} onClick={()=>{setDay(value);setPrepared({});}}>{title}</Button>)}</div>
     {isError && <p className="text-destructive">Couldn't load production data. Please refresh.</p>}
     {isLoading ? <p>Loading order allocations…</p> : data && <>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
