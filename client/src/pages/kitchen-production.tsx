@@ -11,13 +11,15 @@ import { ChevronDown, ChevronRight, RefreshCcw, Printer } from "lucide-react";
 type Detail = { orderId: number; wooId: number | null; customerName: string; quantity: number; isTuesday: boolean; status: string };
 type Product = { productName: string; required: number; orders: Detail[] };
 type Reconciliation = {productName:string;allRecorded:number;activeAllDays:number;selectedActive:number;inactive:number;otherDay:number;records:{orderId:number;wooId:number|null;customerName:string;quantity:number;status:string;day:string;included:boolean;reason:string}[]};
-type Audit = {reconciliation:Reconciliation[]; generatedAt: string; day: string; ordersCount: number; products: Product[]; manualStock: {productName: string; quantity: number}[]; duplicates: unknown[] };
+type SourceName="woo"|"subscriptions"|"manual";
+type Audit = {sourceTotals:Record<SourceName,{orders:number;units:number}>;bySourceProducts:Record<SourceName,Record<string,number>>;reconciliation:Reconciliation[]; generatedAt: string; day: string; ordersCount: number; products: Product[]; manualStock: {productName: string; quantity: number}[]; duplicates: unknown[] };
 export default function KitchenProductionPage() {
   const dates = useDateFilter();
   const [day, setDay] = useState("all");
+  const [source,setSource]=useState("all");
   const [expanded, setExpanded] = useState<string | null>(null);
   const [prepared, setPrepared] = useState<Record<string, string>>({});
-  const qs = `?from=${encodeURIComponent(dates.from.toISOString())}&to=${encodeURIComponent(dates.to.toISOString())}&day=${day}`;
+  const qs = `?from=${encodeURIComponent(dates.from.toISOString())}&to=${encodeURIComponent(dates.to.toISOString())}&day=${day}&source=${source}`;
   const { data, isLoading, isError, refetch, isFetching } = useQuery<Audit>({ queryKey: ["/api/kitchen-audit", qs], refetchInterval:10000 });
   const [showAudit,setShowAudit] = useState(false);
   const [auditProduct,setAuditProduct] = useState<string|null>(null);
@@ -31,6 +33,8 @@ export default function KitchenProductionPage() {
     </div>
     <p className="text-sm text-muted-foreground">Live order-by-order production reconciliation. Defaults to both delivery days to match the Orders page. Select Saturday or Tuesday for day-specific production. Christmas products are shown separately from regular meal preparation. Day selection applies to order allocations; manual/shop stock is displayed separately. Physical counts entered here are for checking only and are not saved.</p>
     <div className="flex gap-2 flex-wrap">{[["saturday","Saturday only"],["tuesday","Tuesday only"],["all","Both days"],["xmas","🎄 Christmas"]].map(([value,title])=><Button key={value} size="sm" variant={day===value?"default":"outline"} onClick={()=>{setDay(value);setPrepared({});}}>{title}</Button>)}</div>
+    <div className="flex flex-wrap gap-2 items-center"><span className="text-sm font-semibold">Order source:</span>{[["all","All orders"],["woo","WooCommerce"],["subscriptions","Subscriptions"],["manual","Other manual / staff"]].map(([value,label])=><Button key={value} size="sm" variant={source===value?"default":"outline"} onClick={()=>{setSource(value);setPrepared({});}}>{label}</Button>)}</div>
+    {data&&<div className="grid grid-cols-1 md:grid-cols-3 gap-3">{([["woo","WooCommerce"],["subscriptions","Subscription selections"],["manual","Other manual / staff"]] as [SourceName,string][]).map(([key,label])=><Card key={key}><CardContent className="p-4"><div className="text-sm text-muted-foreground">{label}</div><div className="text-xl font-semibold">{data.sourceTotals?.[key]?.units??0} units</div><div className="text-xs text-muted-foreground">{data.sourceTotals?.[key]?.orders??0} orders</div></CardContent></Card>)}</div>}
     {isError && <p className="text-destructive">Couldn't load production data. Please refresh.</p>}
     {isLoading ? <p>Loading order allocations…</p> : data && <>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -56,7 +60,7 @@ export default function KitchenProductionPage() {
         {data.products.map(p=>{const entered=prepared[p.productName];const diff=entered!==undefined&&entered!==""?Number(entered)-p.required:null;return <div key={p.productName} className="border rounded-lg">
           <div className="flex gap-3 flex-wrap justify-between items-center p-3">
             <button className="flex gap-2 items-center text-left font-medium min-w-0 flex-1" onClick={()=>setExpanded(expanded===p.productName?null:p.productName)}>{expanded===p.productName?<ChevronDown className="w-4 h-4 shrink-0"/>:<ChevronRight className="w-4 h-4 shrink-0"/>}<span>{p.productName}</span></button>
-            <span className="text-sm">Required: <strong className="text-lg">{p.required}</strong></span>
+            <span className="text-sm">Required: <strong className="text-lg">{p.required}</strong></span>{source==="all"&&<span className="text-xs text-muted-foreground">Woo {data.bySourceProducts?.woo?.[p.productName]??0} · Subs {data.bySourceProducts?.subscriptions?.[p.productName]??0} · Manual {data.bySourceProducts?.manual?.[p.productName]??0}</span>}
             <label className="flex items-center gap-2 text-sm">Prepared <Input aria-label={`Prepared ${p.productName}`} type="number" min={0} className="w-24" placeholder="Count" value={entered??""} onChange={e=>setPrepared(prev=>({...prev,[p.productName]:e.target.value}))}/></label>
             {diff!==null && <Badge variant={diff===0?"secondary":"destructive"}>{diff===0?"Matches":diff>0?`+${diff} extra`:`${Math.abs(diff)} short`}</Badge>}
           </div>
