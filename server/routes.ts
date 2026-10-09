@@ -1,3 +1,4 @@
+import { registerOperationsAssistant } from "./operations-ai";
 import { registerDispatch, setupDispatchTables } from "./dispatch";
 import express from "express";
 import type { Express } from "express";
@@ -1879,6 +1880,7 @@ export async function registerRoutes(
   });
 
   registerKitchenAuditRoutes(app);
+  registerOperationsAssistant(app);
   registerDebugExport(app);
   registerOrderActions(app);
   registerCustomerPortal(app);
