@@ -83,7 +83,16 @@ export function registerKitchenAuditRoutes(app: Express) {
       const day = String(req.query.day || "saturday");
       if (!["saturday", "tuesday", "all", "xmas"].includes(day)) return res.status(400).json({ message: "Invalid day" });
       const orders = await getAuditOrders(window.from, window.to);
-      const selected = orders.filter(o => day === "xmas" ? o.items.some(i => i.isXmas) : day === "all" || o.isTuesday === (day === "tuesday"));
+      // Subscription selections generate manual operational orders; distinguish them
+      // from staff-entered manual orders by the linked order IDs.
+      const linked=await pool.query(`SELECT selections_order_id AS id FROM subscription_invites WHERE selections_order_id IS NOT NULL
+        UNION SELECT tuesday_selections_order_id AS id FROM subscription_invites WHERE tuesday_selections_order_id IS NOT NULL`);
+      const subscriptionIds=new Set<number>(linked.rows.map(x=>Number(x.id)));
+      const sourceOf=(o:AuditOrder):"woo"|"subscriptions"|"manual" =>
+        subscriptionIds.has(o.id)?"subscriptions":o.isManual?"manual":"woo";
+      const source=String(req.query.source||"all");
+      if(!["all","woo","subscriptions","manual"].includes(source))return res.status(400).json({message:"Invalid source"});
+      const selected = orders.filter(o => (source==="all"||sourceOf(o)===source) && (day === "xmas" ? o.items.some(i => i.isXmas) : day === "all" || o.isTuesday === (day === "tuesday")));
       const products = new Map<string, {
         productName: string; required: number; orders: { orderId: number; wooId: number | null; customerName: string; quantity: number; isTuesday: boolean; status: string }[];
       }>();
@@ -96,6 +105,20 @@ export function registerKitchenAuditRoutes(app: Express) {
         p.required += item.quantity;
         p.orders.push({ orderId: o.id, wooId: o.wooId, customerName: o.customerName,
           quantity: item.quantity, isTuesday: o.isTuesday, status: o.status });
+      }
+      const sourceTotals={woo:{orders:0,units:0},subscriptions:{orders:0,units:0},manual:{orders:0,units:0}};
+      const bySourceProducts:Record<string,Record<string,number>>={woo:{},subscriptions:{},manual:{}};
+      for(const o of orders){
+        if(inactiveStatus(o.status))continue;
+        if(day!=="all"&&day!=="xmas"&&o.isTuesday!==(day==="tuesday"))continue;
+        const included=o.items.filter(i=>day==="xmas"?i.isXmas:!i.isXmas);
+        if(!included.length)continue;
+        const bucket=sourceOf(o);
+        sourceTotals[bucket].orders++;
+        for(const item of included){
+          sourceTotals[bucket].units+=item.quantity;
+          bySourceProducts[bucket][item.productName]=(bySourceProducts[bucket][item.productName]||0)+item.quantity;
+        }
       }
       // Explain disagreements with the Orders page using the very same order rows:
       // inactive statuses, other delivery day, and regular/Xmas category.
@@ -127,7 +150,7 @@ export function registerKitchenAuditRoutes(app: Express) {
       `, [window.from, window.to]);
       // Manual stock isn't attributable to a delivery day. Show it separately,
       // never silently mix it into Saturday or Tuesday allocations.
-      res.json({ generatedAt: new Date().toISOString(), day, ordersCount: selected.filter(o => !["cancelled","refunded","failed","trash"].includes(o.status.toLowerCase())).length,
+      res.json({ generatedAt: new Date().toISOString(), day, source, sourceTotals, bySourceProducts, ordersCount: selected.filter(o => !["cancelled","refunded","failed","trash"].includes(o.status.toLowerCase())).length,
         products: [...products.values()].sort((a,b) => a.productName.localeCompare(b.productName)),
         manualStock: day === "xmas" ? [] : manual.rows, reconciliation:[...diagnostics.values()].sort((a,b)=>a.productName.localeCompare(b.productName)), duplicates: duplicateGroups(selected) });
     } catch (error: any) { res.status(500).json({ message: error.message }); }
