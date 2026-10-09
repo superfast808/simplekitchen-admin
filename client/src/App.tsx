@@ -11,7 +11,7 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
-import { LogOut } from "lucide-react";
+import { LogOut, RefreshCw } from "lucide-react";
 import NotFound from "@/pages/not-found";
 import OrdersPage from "@/pages/orders";
 import ProductsPage from "@/pages/products";
@@ -107,6 +107,15 @@ const sidebarStyle = {
   "--sidebar-width-icon": "3rem",
 };
 
+function hardRefreshAdmin() {
+  // Recreate the page and all active queries with a new navigation URL.
+  // This does not trigger a WooCommerce import or change operational records.
+  queryClient.clear();
+  const url = new URL(window.location.href);
+  url.searchParams.set("_sk_refresh", String(Date.now()));
+  window.location.replace(url.toString());
+}
+
 function AuthenticatedApp({ username, onLogout }: { username: string; onLogout: () => void }) {
   return (
     <SidebarProvider style={sidebarStyle as React.CSSProperties}>
@@ -116,6 +125,10 @@ function AuthenticatedApp({ username, onLogout }: { username: string; onLogout: 
           <header className="brand-topbar flex items-center justify-between gap-1 border-b px-3 py-2">
             <SidebarTrigger data-testid="button-sidebar-toggle" />
             <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" onClick={hardRefreshAdmin} title="Reload this page and fetch fresh operational data" data-testid="button-hard-refresh" className="gap-2">
+                <RefreshCw className="w-4 h-4" />
+                <span className="hidden sm:inline">Hard refresh</span>
+              </Button>
               <span className="text-sm text-muted-foreground" data-testid="text-current-user">{username}</span>
               <Button size="icon" variant="ghost" onClick={onLogout} data-testid="button-logout" title="Sign out">
                 <LogOut className="w-4 h-4" />
