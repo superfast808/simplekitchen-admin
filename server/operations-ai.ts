@@ -40,27 +40,36 @@ export function registerOperationsAssistant(app:Express){
     const data=await buildIndependentDiagnostics(from,to,requestedDay);
     const saturday=requestedDay==="all"?await buildIndependentDiagnostics(from,to,"saturday"):null;
     const tuesday=requestedDay==="all"?await buildIndependentDiagnostics(from,to,"tuesday"):null;
-    const {sections,comparison}=data;
+    const {sections}=data;
     const kitchen=sections["kitchen-production"];
-    const ordered=sections.orders;
-    const sourceSummary={
-      woo:sections["weekly-stats"].woo,
-      manual:sections["weekly-stats"].manual,
-      subscriptionLinks:sections.subscriptions.invites.length,
-      missingSubscriptionLinks:sections.subscriptions.missingLinkedOrders,
-    };
-    // No names, email, phone, street address, pricing or customer instructions are sent to OpenAI.
-    const dayLabel=requestedDay==="saturday"?"SATURDAY ONLY":requestedDay==="tuesday"?"TUESDAY ONLY":requestedDay==="xmas"?"CHRISTMAS ONLY":"SATURDAY AND TUESDAY — SEPARATELY";
+    // All figures in the AI evidence must be derived from the same DAY-FILTERED
+    // production lines. In particular, the old "orders", "ingredients" and
+    // "weekly stats" sections contain BOTH delivery days and must not be sent.
+    const productionLines=kitchen.lines.filter(row=>!row.exclude);
+    const scopedTotals=kitchen.totals;
+    const orderIds=new Set(productionLines.map(row=>row.orderId));
+    const dayLabel=requestedDay==="saturday"?"SATURDAY ONLY":requestedDay==="tuesday"?"TUESDAY ONLY":requestedDay==="xmas"?"CHRISTMAS ONLY":"BOTH DAYS";
     const perDay=requestedDay==="all"?{
       saturday:saturday!.sections["kitchen-production"].totals,
-      tuesday:tuesday!.sections["kitchen-production"].totals,
-    }:undefined;
-    const context={deliveryScope:dayLabel,perDayProduction:perDay,calculationRules:codeKnowledge,dateRange:{from:from.toISOString(),to:to.toISOString(),day:requestedDay},
-      orders:ordered.totals,kitchen:kitchen.totals,
-      sourceSummary,manualStock:sections["product-totals"].manualStockTotals,
-      missingRecipes:sections.ingredients.missingRecipes,
-      comparisons:comparison,delivery:sections["labels-routes"].packingLineTotals,
-      note:"The day filter is authoritative. All displayed numbers MUST be scoped to the selected delivery day; do not include quantities from the other delivery day. These diagnostics are source-specific and not proof of physical packing. Product totals include varied categories, not solely meals."};
+      tuesday:tuesday!.sections["kitchen-production"].totals
+    }:null;
+    const context={
+      deliveryScope:dayLabel,
+      dateRange:{from:from.toISOString(),to:to.toISOString(),day:requestedDay},
+      calculationRules:{
+        "Production":"Sum eligible order lines by their selected Saturday or Tuesday allocation, excluding cancelled/refunded and Christmas. Saturday production NEVER includes Tuesday allocations.",
+        "Subscriptions":"Subscription-generated operational orders can contribute to either day. Do not confuse order creation date with delivery day.",
+        "Limitations":"Only day-scoped kitchen data supplied here. Other screens and ingredient quantities are not independently verified for this day."
+      },
+      production:scopedTotals,
+      eligibleOrderCount:orderIds.size,
+      sourceBreakdown:{
+        woo:productionLines.filter(row=>row.source==="woo").reduce((n,row)=>n+row.quantity,0),
+        manualIncludingSubscriptions:productionLines.filter(row=>row.source==="manual").reduce((n,row)=>n+row.quantity,0)
+      },
+      perDayProduction:perDay,
+      note:"All quantities are filtered to the specified delivery day. Do not infer physical shortage from differences between screens. Units may include food categories other than meals."
+    };
     const response=await fetch("https://api.openai.com/v1/chat/completions",{
       method:"POST",headers:{"Authorization":"Bearer "+key,"Content-Type":"application/json"},
       body:JSON.stringify({model:process.env.SK_AI_MODEL||"gpt-4.1-mini",temperature:0.1,max_tokens:850,
@@ -73,10 +82,10 @@ export function registerOperationsAssistant(app:Express){
     const body:any=await response.json().catch(()=>({}));
     if(!response.ok)return res.status(502).json({message:"OpenAI request failed ("+response.status+"): "+String(body.error?.message||"Try again").slice(0,170)});
     const answer=String(body.choices?.[0]?.message?.content||"No response returned").slice(0,6000);
-    const top=Object.entries(kitchen.totals).map(([name,quantity])=>({name,quantity:Number(quantity)})).sort((a,b)=>b.quantity-a.quantity).slice(0,8);
+    const top=Object.entries(scopedTotals).map(([name,quantity])=>({name,quantity:Number(quantity)})).sort((a,b)=>b.quantity-a.quantity).slice(0,8);
     res.setHeader("Cache-Control","no-store");
     res.json({answer,deliveryScope:dayLabel,checkedAt:new Date().toISOString(),chart:top.length?{title:"Production quantities — "+dayLabel,bars:top}:null,
-      evidence:{missingRecipes:sections.ingredients.missingRecipes.length,subscriptionLinksMissing:sections.subscriptions.missingLinkedOrders.length},
+      evidence:{eligibleOrders:orderIds.size,selectedDay:requestedDay},
       scope:"Live read-only, 40-day maximum; no customer personal information sent to OpenAI."});
   }catch(e:any){res.status(500).json({message:"Assistant query failed: "+String(e.message).slice(0,200)})}
  });
