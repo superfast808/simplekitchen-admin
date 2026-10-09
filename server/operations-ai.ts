@@ -36,7 +36,7 @@ export function registerOperationsAssistant(app:Express){
     const mentionsSat=/\b(sat|saturday)\b/i.test(question);
     const mentionsTue=/\b(tue|tues|tuesday)\b/i.test(question);
     const explicitBoth=/\b(both days|both deliveries|combined|sat(urday)? and tue(sday)?|tue(sday)? and sat(urday)?)\b/i.test(question);
-    const requestedDay=explicitBoth||(mentionsSat&&mentionsTue)?"all":mentionsSat?"saturday":mentionsTue?"tuesday":day;
+    const requestedDay=explicitBoth?"all":mentionsSat?"saturday":mentionsTue?"tuesday":day;
     const data=await buildIndependentDiagnostics(from,to,requestedDay);
     const saturday=requestedDay==="all"?await buildIndependentDiagnostics(from,to,"saturday"):null;
     const tuesday=requestedDay==="all"?await buildIndependentDiagnostics(from,to,"tuesday"):null;
