@@ -68,7 +68,7 @@ export function registerOperationsAssistant(app:Express){
         manualIncludingSubscriptions:productionLines.filter(row=>row.source==="manual").reduce((n,row)=>n+row.quantity,0)
       },
       perDayProduction:perDay,
-      targetedEvidence:null,
+      targetedEvidence:{} as any,
       note:"All quantities are filtered to the specified delivery day. Do not infer physical shortage from differences between screens. Units may include food categories other than meals."
     };
     // Targeted, read-only evidence for exact product or order questions.
