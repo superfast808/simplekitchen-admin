@@ -56,7 +56,7 @@ export function registerOperationsAssistant(app:Express){
     }:null;
     const guidanceQuestion=/\b(how|where|guide|instructions|explain|tutorial|navigate|workflow|connected|connects|link|linked|works|knitted|relationship|query|filter|export|print|sync|setup|set up|use the system)\b/i.test(question);
     const queryTerms=question.toLowerCase().split(/[^a-z0-9]+/).filter(t=>t.length>3);
-    const rankedGuide=systemGuide.map(section=>({section,score:queryTerms.reduce((n,term)=>n+(section.name+" "+section.purpose).toLowerCase().includes(term)?n+1:n,0)})).sort((a,b)=>b.score-a.score).filter(x=>x.score>0).slice(0,8).map(x=>x.section);
+    const rankedGuide=systemGuide.map(section=>({section,score:queryTerms.reduce((n,term)=>n+((section.name+" "+section.purpose).toLowerCase().includes(term)?1:0),0)})).sort((a,b)=>b.score-a.score).filter(x=>x.score>0).slice(0,8).map(x=>x.section);
     const guideContext={sections:rankedGuide.length?rankedGuide:guidanceQuestion?systemGuide:[],relationships,knowledgeType:"Reviewed admin workflow descriptions; do not invent buttons or guarantee features not mentioned."};
     const context={
       guidance:guideContext,
