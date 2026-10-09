@@ -1,3 +1,4 @@
+import { OperationsAssistant } from "@/components/operations-assistant";
 import DriverLocations from "@/pages/driver-locations";
 import DriverApp from "@/pages/driver-app";
 import DispatchDevelopment from "@/pages/dispatch-development";
@@ -136,6 +137,7 @@ function AuthenticatedApp({ username, onLogout }: { username: string; onLogout: 
               <ThemeToggle />
             </div>
           </header>
+          <OperationsAssistant context="admin" />
           <main className="brand-main flex-1 overflow-auto">
             <PageRouter />
           </main>
