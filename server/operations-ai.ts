@@ -68,7 +68,7 @@ export function registerOperationsAssistant(app:Express){
         manualIncludingSubscriptions:productionLines.filter(row=>row.source==="manual").reduce((n,row)=>n+row.quantity,0)
       },
       perDayProduction:perDay,
-      targetedEvidence:{matchedProducts,matchingTotals,orderContributors,contributorLimitReached:selectedLines.length>100,requestedOrderId:explicitOrderId||null},
+      targetedEvidence:null,
       note:"All quantities are filtered to the specified delivery day. Do not infer physical shortage from differences between screens. Units may include food categories other than meals."
     };
     // Targeted, read-only evidence for exact product or order questions.
@@ -94,6 +94,7 @@ export function registerOperationsAssistant(app:Express){
       .filter((m:any)=>m&&typeof m.question==="string"&&typeof m.answer==="string")
       .map((m:any)=>({question:m.question.slice(0,400),answer:m.answer.slice(0,1100)})):[];
     const socialFollowUp=/^(?:thanks|thank you|cheers|great|perfect|good|brilliant|nice|reassuring|sounds good|that's good|that is good|seems reassuring|okay|ok|excellent|understood|makes sense)[.! ]*$/i.test(question);
+    context.targetedEvidence={matchedProducts,matchingTotals,orderContributors,contributorLimitReached:selectedLines.length>100,requestedOrderId:explicitOrderId||null};
     const response=await fetch("https://api.openai.com/v1/chat/completions",{
       method:"POST",headers:{"Authorization":"Bearer "+key,"Content-Type":"application/json"},
       body:JSON.stringify({model:process.env.SK_AI_MODEL||"gpt-4.1-mini",temperature:0.25,max_tokens:1100,
