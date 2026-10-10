@@ -39,6 +39,20 @@ export async function runStartupMigrations() {
         consumed_at timestamptz, created_at timestamptz NOT NULL DEFAULT now()
       )
     `);
+    // Keep interest sign-ups separate from authentication links. A person can
+    // register once, and failed SMTP delivery can be retried after 30 minutes.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS customer_portal_interest (
+        email text PRIMARY KEY,
+        ip_hash text NOT NULL,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        last_attempt_at timestamptz NOT NULL DEFAULT now(),
+        customer_sent_at timestamptz,
+        owner_sent_at timestamptz
+      )
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_customer_portal_interest_ip ON customer_portal_interest (ip_hash, created_at)`);
+
     await client.query(`
       CREATE TABLE IF NOT EXISTS customer_portal_sessions (
         token_hash text PRIMARY KEY, email text NOT NULL, expires_at timestamptz NOT NULL,

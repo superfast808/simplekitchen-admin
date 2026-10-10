@@ -3,6 +3,7 @@ import { Card,CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { SIMPLE_KITCHEN_LOGO_URL } from "@/lib/brand";
 type Order={id:number;wooId:number|null;orderDate:string;status:string;isTuesday:boolean;fulfillmentType:string;instructions:string|null;customerName:string;deliveryAddress:string|null;deliveryDate:string;group:"current"|"upcoming"|"past";journey:string;canEditInstructions:boolean;items:{name:string;quantity:number}[]};
 type Invite={token:string;weekFrom:string;weekTo:string;status:string};
 async function api(url:string,method="GET",data?:unknown){const r=await fetch(url,{method,credentials:"include",headers:{"Content-Type":"application/json"},body:data?JSON.stringify(data):undefined});const v=await r.json();if(!r.ok)throw Error(v.message||"Request failed");return v}
@@ -42,9 +43,11 @@ export default function CustomerPortal(){
  const [notificationsOn,setNotificationsOn]=useState(false);
  const [notificationChecking,setNotificationChecking]=useState(true);
  const [installPrompt,setInstallPrompt]=useState<any>(null);
+ const [portalLive,setPortalLive]=useState<boolean|null>(null);
  const [email,setEmail]=useState(""),[me,setMe]=useState<{email:string;orders:Order[];selectionInvites:Invite[]}|null>(null);
  const [message,setMessage]=useState(""),[loading,setLoading]=useState(false),[editing,setEditing]=useState<number|null>(null),[instructions,setInstructions]=useState("");
  async function reload(){try{setMe(await api("/api/customer/me"));setAlerts(await api("/api/customer/alerts"))}catch{setMe(null)}}
+ useEffect(()=>{api("/api/customer/public-status").then(v=>setPortalLive(Boolean(v.live))).catch(()=>{})},[]);
  useEffect(()=>{
   if("serviceWorker" in navigator)navigator.serviceWorker.register("/my-sw.js",{scope:"/my"}).catch(()=>{});
   const manifest=document.createElement("link");manifest.rel="manifest";manifest.href="/my-manifest.webmanifest";document.head.appendChild(manifest);
@@ -88,8 +91,8 @@ export default function CustomerPortal(){
  async function login(){setLoading(true);try{const v=await api("/api/customer/access","POST",{email});setMessage(v.message)}catch(e:any){setMessage(e.message)}finally{setLoading(false)}}
  return <div className="min-h-screen" style={{background:"#f4f1e9",color:"#314d40"}}>
  <div className="max-w-3xl mx-auto p-4 md:p-8 space-y-6">
-  <header className="flex justify-between items-center border-b pb-4"><div><h1 className="text-2xl font-bold">Simple Kitchen</h1><p className="text-xs uppercase tracking-widest">My account</p></div>{me&&<Button variant="outline" onClick={async()=>{await api("/api/customer/logout","POST");setMe(null)}}>Sign out</Button>}</header>
-  {!me?<Card><CardContent className="p-6 space-y-4"><h2 className="text-xl font-semibold">Your Simple Kitchen, all in one place.</h2><p>Follow your orders, see your previous meals and choose your next favourites. No password needed.</p><label className="block text-sm font-medium">Email address</label><Input type="email" autoComplete="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com"/><Button onClick={login} disabled={loading||!email.includes("@")}>{loading?"Sending…":"Email me a secure link"}</Button>{message&&<p role="status" className="text-sm">{message}</p>}</CardContent></Card>:
+  <header className="flex justify-between items-center border-b pb-4"><div><img src={SIMPLE_KITCHEN_LOGO_URL} alt="Simple Kitchen" className="h-16 w-auto max-w-[210px] object-contain" /><p className="text-xs uppercase tracking-widest mt-2">{portalLive===false&&!me?"Coming soon":"My account"}</p></div>{me&&<Button variant="outline" onClick={async()=>{await api("/api/customer/logout","POST");setMe(null)}}>Sign out</Button>}</header>
+  {!me?<Card><CardContent className="p-6 space-y-4"><div className="inline-flex rounded-full bg-[#e4ebe0] text-[#314d40] px-3 py-1 text-xs font-semibold tracking-wide">{portalLive===false?"A little something special is coming":"MY SIMPLE KITCHEN"}</div><h2 className="text-xl font-semibold">{portalLive===false?"Your Simple Kitchen, all in one place. Coming soon! 🤎":"Your Simple Kitchen, all in one place."}</h2><p>{portalLive===false?"We're getting your own little Simple Kitchen space ready, where you'll be able to follow orders, find your favourites and keep everything in one place. Leave your email and we'll let you know when it's ready.":"Follow your orders, see your previous meals and choose your next favourites. No password needed."}</p><label className="block text-sm font-medium" htmlFor="customer-email">Email address</label><Input id="customer-email" type="email" autoComplete="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com"/><Button onClick={login} disabled={loading||!email.includes("@")}>{loading?(portalLive===false?"Registering…":"Sending…"):(portalLive===false?"Register my interest":"Email me a secure link")}</Button>{portalLive===false&&<p className="text-xs text-[#718276]">No password needed and no fuss — just a note when your new space is ready.</p>}{message&&<p role="status" className="text-sm font-medium text-[#314d40] bg-[#e4ebe0] rounded-lg p-3">{message}</p>}</CardContent></Card>:
   <>
    <div className="flex flex-wrap gap-2">
     {installPrompt&&<Button onClick={async()=>{await installPrompt.prompt();setInstallPrompt(null)}}>Install My Simple Kitchen</Button>}

@@ -65,7 +65,74 @@ export async function createCustomerAlert(email:string,title:string,body:string,
  const saved=await pool.query("INSERT INTO customer_portal_alerts(email,title,body,event_key) VALUES($1,$2,$3,$4) ON CONFLICT(event_key) DO NOTHING RETURNING id",[email.trim().toLowerCase(),title,body,key]);
  if(saved.rowCount)sendPush(email,title,body).catch(e=>console.error("Push notification delivery failed",e));
 }
+
+const INTEREST_REPLY = "Thanks so much for your interest! We've saved your details and My Simple Kitchen will be ready soon. Keep an eye on your inbox. 🤎";
+const INTEREST_LOGO_URL = "https://simplekitchenprep.com/wp-content/uploads/2026/04/logonormal.png";
+
+function interestThankYouHtml() {
+ return `<!doctype html><html lang="en"><head><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+ <body style="margin:0;padding:24px 12px;background:#f4f1e9;color:#314d40;font-family:Arial,Helvetica,sans-serif">
+ <div style="display:none;font-size:1px;color:#f4f1e9;line-height:1px;max-height:0;opacity:0;overflow:hidden">A little thank you from Simple Kitchen — something lovely is coming soon.</div>
+ <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="max-width:600px;margin:0 auto;background:#ffffff;border-radius:18px;overflow:hidden">
+ <tr><td align="center" style="background:#314d40;padding:28px 25px"><img src="${INTEREST_LOGO_URL}" alt="Simple Kitchen" width="190" style="display:block;max-width:100%;height:auto;border:0;color:#ffffff;font-size:22px;font-weight:bold"><div style="padding-top:14px;color:#e4e9df;font-size:11px;letter-spacing:2px">FRESHLY PREPARED WITH LOVE</div></td></tr>
+ <tr><td style="padding:36px 32px 24px">
+ <div style="font-size:13px;font-weight:bold;letter-spacing:1.8px;color:#78917b">MY SIMPLE KITCHEN</div>
+ <h1 style="font-size:27px;line-height:1.3;margin:12px 0 22px;color:#314d40">Thanks for your interest! 🤎</h1>
+ <p style="font-size:16px;line-height:1.8;margin:0 0 18px;color:#526759">Hello!</p>
+ <p style="font-size:16px;line-height:1.8;margin:0 0 18px;color:#526759">Thank you so much for registering your interest in <strong>My Simple Kitchen</strong>. We're working on a lovely little space to make keeping up with your orders and favourite meals even easier.</p>
+ <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:24px 0;background:#f4f1e9;border-radius:12px"><tr><td style="padding:22px 24px;color:#314d40;font-size:16px;line-height:1.7"><strong>It's coming soon!</strong><div style="padding-top:6px;font-size:14px;color:#607565">We'll let you know when it's ready, so there's nothing more you need to do.</div></td></tr></table>
+ <p style="font-size:16px;line-height:1.8;margin:0 0 22px;color:#526759">Thanks for being part of Simple Kitchen. We can't wait to share it with you!</p>
+ <p style="font-size:16px;line-height:1.7;margin:0;color:#314d40">With love,<br><strong>Si &amp; Katy</strong><br>Simple Kitchen</p>
+ </td></tr>
+ <tr><td align="center" style="padding:22px 30px;background:#f4f1e9;color:#708075;font-size:12px;line-height:1.7">Fresh meals, thoughtfully prepared 🤎<br><span style="font-size:11px">You're receiving this because your email address was used to register interest in My Simple Kitchen. If that wasn't you, no action is needed.</span></td></tr>
+ </table></body></html>`;
+}
+
+async function registerInterest(email:string,req:Request):Promise<boolean>{
+ // No public access to real account data, sign-in tokens or test aliases.
+ // A hashed IP and a unique email keep the acknowledgement form from becoming a mail relay.
+ const ipHash=hash((process.env.SESSION_SECRET||"simple-kitchen")+"|"+(req.ip||"unknown"));
+ const limits=await pool.query(`SELECT
+   (SELECT count(*)::int FROM customer_portal_interest WHERE ip_hash=$1 AND created_at>now()-interval '1 hour') AS per_ip,
+   (SELECT count(*)::int FROM customer_portal_interest WHERE created_at>now()-interval '1 minute') AS global_minute`,[ipHash]);
+ if(Number(limits.rows[0]?.per_ip)>=8 || Number(limits.rows[0]?.global_minute)>=60)return false;
+ // First registration sends once. If SMTP fails, a fresh request after 30 minutes retries only unsent mail.
+ const inserted=await pool.query(`INSERT INTO customer_portal_interest(email,ip_hash) VALUES($1,$2)
+ ON CONFLICT(email) DO UPDATE SET last_attempt_at=now()
+ WHERE (customer_portal_interest.customer_sent_at IS NULL OR customer_portal_interest.owner_sent_at IS NULL)
+   AND customer_portal_interest.last_attempt_at < now()-interval '30 minutes'
+ RETURNING customer_sent_at,owner_sent_at`,[email,ipHash]);
+ if(!inserted.rowCount)return true;
+ try{
+  const host=await setting("smtp_host",process.env.SMTP_HOST||"");
+  const port=Number(await setting("smtp_port",process.env.SMTP_PORT||"587"));
+  const user=await setting("smtp_user",process.env.SMTP_USER||"");
+  const pass=await setting("smtp_pass",process.env.SMTP_PASS||"");
+  const from=(await setting("smtp_from",process.env.SMTP_FROM_EMAIL||user))||user;
+  if(!host||!user||!pass)throw Error("SMTP not configured");
+  const transporter=nodemailer.createTransport({host,port,secure:port===465,auth:{user,pass}});
+  if(!inserted.rows[0].customer_sent_at){
+   try{
+    await transporter.sendMail({from,to:email,subject:"Thanks for your interest in My Simple Kitchen 🤎",html:interestThankYouHtml(),text:"Hello!\n\nThank you so much for registering your interest in My Simple Kitchen. We're putting the finishing touches on your new space for orders and favourite meals. It'll be ready soon and we'll let you know when it's available.\n\nWith love,\nSi & Katy\nSimple Kitchen\n\nIf you didn't request this, no action is needed."});
+    await pool.query("UPDATE customer_portal_interest SET customer_sent_at=now() WHERE email=$1",[email]);
+   }catch(error){console.error("Customer interest thank-you failed",error);}
+  }
+  const owner=(await setting("customer_portal_test_email"))||user;
+  if(owner && !inserted.rows[0].owner_sent_at){
+   try{
+    await transporter.sendMail({from,to:owner,subject:"My Simple Kitchen — new feature interest",text:"A visitor has registered interest in My Simple Kitchen: "+email,html:'<p>A visitor has registered interest in <strong>My Simple Kitchen</strong>:</p><p>'+escapeHtml(email)+'</p>'});
+    await pool.query("UPDATE customer_portal_interest SET owner_sent_at=now() WHERE email=$1",[email]);
+   }catch(error){console.error("Customer interest owner notification failed",error);}
+  }
+ }catch(error){console.error("Customer interest email setup failed",error);}
+ return true;
+}
+
 export function registerCustomerPortal(app:Express){
+ app.get("/api/customer/public-status",async(_req,res)=>{
+  res.setHeader("Cache-Control","no-store");
+  res.json({live:(await setting("customer_portal_live","false"))==="true"});
+ });
  app.get("/api/customer/tracking/:orderId",async(req,res)=>{
   const email=await sessionEmail(req);
   if(!email)return res.status(401).json({message:"Not signed in"});
@@ -149,6 +216,15 @@ export function registerCustomerPortal(app:Express){
   const email=normalize(String(req.body?.email||""));
   if(!/^\S+@\S+\.\S+$/.test(email)||email.length>254)return res.status(400).json({message:"Enter a valid email address"});
   const testMode=(await setting("customer_portal_live","false"))!=="true";
+  if(testMode && !req.session?.userId){
+   try{
+    if(!(await registerInterest(email,req)))return res.status(429).json({message:"We've had lots of interest! Please try again a little later."});
+    return res.json({message:INTEREST_REPLY});
+   }catch(error){
+    console.error("Customer portal interest registration failed",error);
+    return res.status(503).json({message:"Sorry, we couldn't save your interest just now. Please try again shortly."});
+   }
+  }
   const adminTesting=testMode && !!req.session?.userId;
   // Legitimate testing can require repeated login requests. Keep a higher
   // per-address allowance for authenticated administrators only.
@@ -161,11 +237,7 @@ export function registerCustomerPortal(app:Express){
     res.setHeader("Retry-After",String(retrySeconds));
     return res.status(429).json({message:adminTesting?"Testing request limit reached. Try again in "+Math.ceil(retrySeconds/60)+" minute(s).":"Too many sign-in requests. Please try again later.",retryAfterSeconds:retrySeconds});
   }
-  // In test mode, only authenticated portal administrators can generate
-  // impersonation links redirected to the test alias. Never expose this publicly.
-  if((await setting("customer_portal_live","false"))!=="true" && !req.session?.userId){
-    return res.json({message:"If an eligible account exists, a sign-in link has been sent."});
-  }
+
   if(await eligible(email)){
    const raw=token();
    const testRecipient=testMode?normalize(await setting("customer_portal_test_email")):null;
