@@ -1,0 +1,18 @@
+{
+  "name": "Simple Kitchen Driver",
+  "short_name": "SK Driver",
+  "description": "Simple Kitchen delivery driver portal",
+  "start_url": "/driver",
+  "scope": "/driver",
+  "display": "standalone",
+  "background_color": "#f4f1e9",
+  "theme_color": "#3f5034",
+  "icons": [
+    {
+      "src": "https://simplekitchenprep.com/wp-content/uploads/2026/04/logonormal.png",
+      "sizes": "300x300",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

@@ -239,6 +239,66 @@ function MealSelectorPanel({
   );
 }
 
+
+function CookingChoicesLoader() {
+  const messages = [
+    "Your choices are cooking up…",
+    "Whisking together this week's menu…",
+    "Stirring in your meal options…",
+    "Plating up your subscription choices…",
+    "Almost ready to serve your picks…",
+  ];
+  const [messageIndex, setMessageIndex] = useState(0);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setMessageIndex(i => (i + 1) % messages.length), 1700);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-[#f4f1e9] via-white to-[#e7eee6] flex items-center justify-center p-4">
+      <Card className="w-full max-w-md border-0 shadow-xl overflow-hidden">
+        <CardContent className="p-8 text-center space-y-6">
+          <BrandLogo size="lg" />
+          <div className="space-y-2">
+            <h2 className="text-2xl font-bold text-[#314d40]">Preparing your choices</h2>
+            <p className="text-sm text-muted-foreground">We're gathering your meals, extras and saved selections.</p>
+          </div>
+          <div className="relative mx-auto w-32 h-32" role="img" aria-label="Animated mixing bowl">
+            <div className="absolute left-1/2 top-1 -translate-x-1/2 flex items-end gap-2" aria-hidden="true">
+              <span className="block w-2 h-8 rounded-full bg-emerald-200 animate-pulse" />
+              <span className="block w-2 h-10 rounded-full bg-orange-200 animate-pulse" style={{animationDelay:"0.25s"}} />
+              <span className="block w-2 h-8 rounded-full bg-emerald-200 animate-pulse" style={{animationDelay:"0.5s"}} />
+            </div>
+            <div className="sk-mixing-spoon absolute left-1/2 top-8 w-16 h-16 -translate-x-1/2" aria-hidden="true">
+              <div className="absolute left-1/2 top-0 w-6 h-6 -translate-x-1/2 rounded-full border-4 border-[#314d40] bg-white" />
+              <div className="absolute left-1/2 top-5 w-1.5 h-10 -translate-x-1/2 rounded-full bg-[#314d40]" />
+            </div>
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 w-24 h-12 rounded-b-[999px] border-[6px] border-t-0 border-[#314d40] bg-orange-100 shadow-inner" />
+            <div className="absolute bottom-10 left-1/2 -translate-x-1/2 w-20 h-4 rounded-full bg-orange-50/80" />
+          </div>
+          <div className="space-y-3" role="status" aria-live="polite">
+            <p className="text-base font-medium min-h-[24px] text-[#314d40]">{messages[messageIndex]}</p>
+            <div className="flex justify-center gap-2" aria-hidden="true">
+              {messages.map((_, i) => <span key={i} className={`h-2.5 w-2.5 rounded-full transition-all ${i===messageIndex?"bg-[#314d40] scale-110":"bg-emerald-200"}`} />)}
+            </div>
+          </div>
+          <style>{`
+            @keyframes sk-stir {
+              0%, 100% { transform: translateX(-50%) rotate(-18deg); }
+              50% { transform: translateX(-50%) rotate(18deg); }
+            }
+            .sk-mixing-spoon { animation: sk-stir 1.8s ease-in-out infinite; transform-origin: 50% 90%; }
+            @media (prefers-reduced-motion: reduce) {
+              .sk-mixing-spoon { animation: none; }
+            }
+          `}</style>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 export default function SubscribePage({ params }: { params: { token: string } }) {
   const token = params.token;
   const [email, setEmail] = useState("");
@@ -262,14 +322,44 @@ export default function SubscribePage({ params }: { params: { token: string } })
   const { data, isLoading, error } = useQuery<InviteData>({
     queryKey: ["/api/subscribe", token],
     queryFn: async () => {
-      const res = await fetch(`/api/subscribe/${token}`);
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 12000);
+      let res: Response;
+      try {
+        res = await fetch(`/api/subscribe/${encodeURIComponent(token)}`, { signal: controller.signal, credentials: "include" });
+      } catch (e) {
+        throw new Error(controller.signal.aborted ? "The menu is taking too long to respond. Please try again." : "Unable to connect to the kitchen. Please try again.");
+      } finally {
+        window.clearTimeout(timeout);
+      }
       if (!res.ok) {
         const err = await res.json();
         throw new Error(err.message || "Not found");
       }
       return res.json();
     },
+    retry: false,
+    staleTime: 60_000,
   });
+
+  // A customer who arrived from My Simple Kitchen has already verified their email
+  // through a one-time magic link. Match that authenticated session to this invite.
+  useEffect(() => {
+    let active = true;
+    fetch(`/api/customer/subscription-session/${encodeURIComponent(token)}`, { credentials: "include" })
+      .then(async res => {
+        if (!res.ok) return null;
+        return res.json() as Promise<{ matched: boolean; email: string }>;
+      })
+      .then(result => {
+        if (!active || !result?.matched || !result.email) return;
+        setEmail(result.email);
+        setEmailError("");
+        setEmailVerified(true);
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [token]);
 
   // Pre-fill selections from server data
   useEffect(() => {
@@ -379,13 +469,7 @@ export default function SubscribePage({ params }: { params: { token: string } })
     }
   };
 
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-orange-50 dark:from-gray-900 dark:via-gray-900 dark:to-gray-900 flex items-center justify-center p-4">
-        <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
-  }
+  if (isLoading) return <CookingChoicesLoader />;
 
   if (error || !data) {
     return (
@@ -394,7 +478,8 @@ export default function SubscribePage({ params }: { params: { token: string } })
           <CardContent className="p-8">
             <UtensilsCrossed className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
             <h2 className="text-xl font-bold mb-2">Link Not Found</h2>
-            <p className="text-muted-foreground">This meal selection link may have expired or is no longer valid. Please contact us if you need assistance.</p>
+            <p className="text-muted-foreground">We couldn’t load your meal selection. Please try again, or contact Simple Kitchen if the problem continues.</p>
+            <p className="text-xs text-muted-foreground mt-2">{error instanceof Error ? error.message : ""}</p>
           </CardContent>
         </Card>
       </div>

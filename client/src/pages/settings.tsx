@@ -127,6 +127,71 @@ function UserManagementCard() {
   );
 }
 
+
+function WooConnectionCard() {
+ const { toast } = useToast();
+ const { data, refetch } = useQuery<{url:string;hasKey:boolean;hasSecret:boolean}>({queryKey:["/api/woo-connection"]});
+ const [url,setUrl] = useState("");
+ const [key,setKey] = useState("");
+ const [secret,setSecret] = useState("");
+ const [saving,setSaving] = useState(false);
+ const [testing,setTesting] = useState(false);
+ useEffect(()=>{if(data)setUrl(data.url)},[data?.url]);
+ async function request(path:string,body?:unknown) {
+  const response=await fetch(path,{method:"POST",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify(body??{})});
+  const result=await response.json();
+  if(!response.ok)throw Error(result.message||"Request failed");
+  return result;
+ }
+ async function save(){
+  setSaving(true);
+  try {await request("/api/woo-connection",{url,key,secret});setKey("");setSecret("");await refetch();toast({title:"WooCommerce connection saved",description:"New credentials apply to imports and refunds immediately."})}
+  catch(e:any){toast({title:"Could not save connection",description:e.message,variant:"destructive"})}
+  finally{setSaving(false)}
+ }
+ async function test(){
+  setTesting(true);
+  try{await request("/api/woo-connection/test");toast({title:"WooCommerce connection successful",description:"Read access verified. Refund/write access must be verified separately."})}
+  catch(e:any){toast({title:"Connection test failed",description:e.message,variant:"destructive"})}
+  finally{setTesting(false)}
+ }
+ return <Card>
+  <CardHeader><CardTitle>WooCommerce REST API</CardTitle><CardDescription>Manage the connection used for order imports, product synchronisation, cancellations and refunds. New API credentials require Read/Write access. Saved secrets are never displayed again.</CardDescription></CardHeader>
+  <CardContent className="space-y-4">
+   <div className="space-y-1"><Label htmlFor="woo-store-url">Store URL</Label><Input id="woo-store-url" value={url} onChange={e=>setUrl(e.target.value)} placeholder="https://simplekitchenprep.com"/></div>
+   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <div className="space-y-1"><Label htmlFor="woo-key">Consumer key</Label><Input id="woo-key" type="password" autoComplete="off" value={key} onChange={e=>setKey(e.target.value)} placeholder={data?.hasKey?"Saved — leave blank to keep":"ck_…"}/></div>
+    <div className="space-y-1"><Label htmlFor="woo-secret">Consumer secret</Label><Input id="woo-secret" type="password" autoComplete="off" value={secret} onChange={e=>setSecret(e.target.value)} placeholder={data?.hasSecret?"Saved — leave blank to keep":"cs_…"}/></div>
+   </div>
+   <p className="text-xs text-muted-foreground">Save first, then test. Leaving a credential blank retains the saved value (or existing environment fallback). If changing the encryption secret, migrate credentials before restarting.</p>
+   <div className="flex flex-wrap gap-2"><Button disabled={saving||!url} onClick={save}>{saving?"Saving…":"Save WooCommerce Connection"}</Button><Button variant="outline" disabled={testing||saving} onClick={test}>{testing?"Testing…":"Test Connection"}</Button></div>
+  </CardContent>
+ </Card>;
+}
+
+
+function CustomerPortalSettingsCard(){
+ const {toast}=useToast();
+ const {data,refetch}=useQuery<{live:boolean;testEmail:string;url:string}>({queryKey:["/api/customer-admin/config"]});
+ const [live,setLive]=useState(false),[testEmail,setTestEmail]=useState(""),[url,setUrl]=useState("https://admin.simplekitchenprep.com/my"),[saving,setSaving]=useState(false);
+ useEffect(()=>{if(data){setLive(data.live);setTestEmail(data.testEmail);setUrl(data.url)}},[data]);
+ async function save(){
+  if(live&&!window.confirm("Enable LIVE customer emails? This will send new customer messages to real addresses rather than the testing alias."))return;
+  setSaving(true);
+  try {
+   const r=await fetch("/api/customer-admin/config",{method:"POST",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify({live,testEmail,url})});
+   const v=await r.json();if(!r.ok)throw Error(v.message||"Couldn't save");
+   await refetch();toast({title:"Customer portal settings saved"});
+  }catch(e:any){toast({title:"Unable to save",description:e.message,variant:"destructive"})}finally{setSaving(false)}
+ }
+ return <Card><CardHeader><CardTitle>My Simple Kitchen — Customer Portal</CardTitle><CardDescription>Magic-link customer access and safe email testing. Defaults to testing mode; no customer messages go to real customers until explicitly enabled.</CardDescription></CardHeader><CardContent className="space-y-4">
+ <div className="flex flex-wrap items-center justify-between gap-3 border rounded-lg p-3"><div><Label>Live customer emails</Label><p className="text-xs text-muted-foreground">{live?"LIVE — real recipients":"TESTING — alias receives outgoing messages"}</p></div><Switch checked={live} onCheckedChange={setLive}/></div>
+ <div className="space-y-1"><Label>Testing email alias</Label><Input type="email" value={testEmail} onChange={e=>setTestEmail(e.target.value)} placeholder="your@email.com"/><p className="text-xs text-muted-foreground">When testing is on, outgoing customer emails go here instead. Keep this filled before testing magic links.</p></div>
+ <div className="space-y-1"><Label>Customer portal address</Label><Input type="url" value={url} onChange={e=>setUrl(e.target.value)} placeholder="https://admin.simplekitchenprep.com/my"/><p className="text-xs text-muted-foreground">Set this to the public URL customers will use. The admin domain may remain separately protected.</p></div>
+ <Button disabled={saving} onClick={save}>{saving?"Saving…":"Save customer portal settings"}</Button>
+ </CardContent></Card>
+}
+
 export default function SettingsPage() {
   const { toast } = useToast();
 
@@ -200,17 +265,33 @@ export default function SettingsPage() {
     },
   });
 
+  const [wooSyncProgress, setWooSyncProgress] = useState<{running:boolean;phase:string;elapsedMs:number;error:string|null;result?:{products?:{imported:number;updated:number;total:number};orders?:{imported:number;updated:number;total:number}}}|null>(null);
   const syncNowMutation = useMutation({
     mutationFn: async () => {
-      await apiRequest("POST", "/api/woo/sync-products");
-      return apiRequest("POST", "/api/woo/sync-orders");
+      const started = await apiRequest("POST", "/api/woo/sync-start");
+      const details = await started.json();
+      if(!started.ok && started.status!==202)throw Error(details.message||"Could not start sync");
+      for(let i=0;i<240;i++){
+        await new Promise(resolve=>setTimeout(resolve,1500));
+        const response=await fetch("/api/woo/sync-progress",{credentials:"include",cache:"no-store"});
+        if(!response.ok)throw Error("Cannot read sync progress: HTTP "+response.status);
+        const state=await response.json();
+        setWooSyncProgress(state);
+        if(!state.running){
+          if(state.error)throw Error(state.phase+": "+state.error);
+          if(!state.result)throw Error("Sync stopped without a result. Please check Docker logs.");
+          return state.result;
+        }
+      }
+      throw Error("The sync is still running after six minutes. You can check its progress in server logs. Don't start a duplicate sync.");
     },
-    onSuccess: async (res) => {
-      const data = await res.json();
-      toast({ title: "Sync complete", description: `Orders: imported=${data.imported}, updated=${data.updated}` });
+    onMutate: () => setWooSyncProgress({running:true,phase:"Starting WooCommerce sync",elapsedMs:0,error:null}),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries();
+      toast({title:"WooCommerce sync complete",description:`Products: ${data.products?.total??0} checked. Orders: ${data.orders?.imported??0} imported, ${data.orders?.updated??0} updated.`});
     },
     onError: (error: Error) => {
-      toast({ title: "Sync failed", description: error.message, variant: "destructive" });
+      toast({title:"WooCommerce sync failed",description:error.message,variant:"destructive"});
     },
   });
 
@@ -423,8 +504,14 @@ export default function SettingsPage() {
             data-testid="button-sync-now"
           >
             <RefreshCw className={`w-4 h-4 mr-1 ${syncNowMutation.isPending ? "animate-spin" : ""}`} />
-            {syncNowMutation.isPending ? "Syncing..." : "Sync Now"}
+            {syncNowMutation.isPending ? "Sync running…" : "Sync Now"}
           </Button>
+          {wooSyncProgress && <div className="rounded-lg border p-3 mt-3 text-sm space-y-1" role="status">
+            <p className="font-medium">WooCommerce sync: {wooSyncProgress.phase}</p>
+            <p className="text-muted-foreground">Elapsed: {Math.round(wooSyncProgress.elapsedMs / 1000)} seconds</p>
+            {wooSyncProgress.error && <p className="text-destructive break-words">{wooSyncProgress.error}</p>}
+            {wooSyncProgress.result && <p>Products processed: {wooSyncProgress.result.products?.total ?? "—"} · Orders imported: {wooSyncProgress.result.orders?.imported ?? 0} · Updated: {wooSyncProgress.result.orders?.updated ?? 0}</p>}
+          </div>}
         </CardContent>
       </Card>
 
@@ -807,6 +894,9 @@ export default function SettingsPage() {
           </p>
         </CardContent>
       </Card>
+
+      <WooConnectionCard />
+      <CustomerPortalSettingsCard />
 
       <Button onClick={handleSave} disabled={saveMutation.isPending} data-testid="button-save-settings">
         <Save className="w-4 h-4 mr-1" />

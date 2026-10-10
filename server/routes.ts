@@ -1,3 +1,5 @@
+import { registerOperationsAssistant } from "./operations-ai";
+import { registerDispatch, setupDispatchTables } from "./dispatch";
 import express from "express";
 import type { Express } from "express";
 import { createServer, type Server } from "http";
@@ -13,6 +15,11 @@ import crypto from "crypto";
 import { log } from "./index";
 import { getUncachableStripeClient } from "./stripeClient";
 import { pool } from "./db";
+import { registerKitchenAuditRoutes } from "./kitchen-audit";
+import { registerDebugExport } from "./debug-export";
+import { registerOrderActions } from "./order-actions";
+import { registerCustomerPortal, sendCustomerPortalNotification, customerEmailContent, createCustomerAlert } from "./customer-portal";
+import { wooCredentials, saveWooCredentials, wooFetch } from "./woo-credentials";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
@@ -291,14 +298,28 @@ async function persistDeliveryUpgrades(): Promise<number> {
 }
 
 function detectFulfillmentType(wooOrder: any): string {
-  const shippingLines = wooOrder.shipping_lines || [];
-  if (shippingLines.length === 0) return "collection";
+  const shippingLines = Array.isArray(wooOrder.shipping_lines) ? wooOrder.shipping_lines : [];
+  // WooCommerce and Christmas delivery plugins often use names like
+  // "Christmas Eve Delivery", not the literal prefix "Delivery".
+  // Explicit collection method must win over a shipping address or delivery note.
   for (const line of shippingLines) {
-    const methodTitle = (line.method_title || "").toLowerCase();
-    const methodId = (line.method_id || "").toLowerCase();
-    if (methodTitle.startsWith("delivery") || methodId === "flat_rate") {
-      return "delivery";
-    }
+    const title = String(line.method_title || "").toLowerCase();
+    const id = String(line.method_id || "").toLowerCase();
+    if (/local[_-]?pickup|collection|collect|pick\s*up/.test(id+" "+title)) return "collection";
+  }
+  for (const line of shippingLines) {
+    const title = String(line.method_title || "").toLowerCase();
+    const id = String(line.method_id || "").toLowerCase();
+    if (/delivery|shipping|flat[_-]?rate|free[_-]?shipping|courier|postcode/.test(id+" "+title)) return "delivery";
+  }
+  // Checkout-specific method saved in Woo order metadata.
+  const metadata = Array.isArray(wooOrder.meta_data) ? wooOrder.meta_data : [];
+  const methodKeys = /delivery.?method|shipping.?method|fulfilment.?method|fulfillment.?method|delivery.?collection|collection.?delivery|order.?type/i;
+  for (const m of metadata) {
+    if (!methodKeys.test(String(m.key||""))) continue;
+    const val=String(m.value||"").toLowerCase();
+    if (/collection|collect|pickup|pick\s*up/.test(val)) return "collection";
+    if (/delivery|shipping|courier/.test(val)) return "delivery";
   }
   return "collection";
 }
@@ -937,6 +958,17 @@ async function performSync() {
           });
         }
         imported++;
+        // Safe by default: testing mode redirects all notifications to the alias;
+        // manually-entered shop orders never reach this WooCommerce sync path.
+        const email = String(billing.email || "").trim().toLowerCase();
+        const categoryNames = (wo.line_items || []).map((i:any) => String(i.name || "").toLowerCase());
+        const customerFacing = email && !categoryNames.some((n:string)=>/^(shop|wholesale|custom order)/.test(n));
+        if(customerFacing){
+          const base=await storage.getSetting("customer_portal_url") || "https://admin.simplekitchenprep.com/my";
+          await createCustomerAlert(email,"Your order is with us","We've received your order #"+String(wo.number||wo.id)+". Follow your upcoming delivery in My Simple Kitchen.","order-received:"+String(wo.id));
+          await sendCustomerPortalNotification(email,"Welcome to My Simple Kitchen",customerEmailContent("welcome",{link:base}),"welcome:"+email);
+          await sendCustomerPortalNotification(email,"We've received your Simple Kitchen order",customerEmailContent("order",{link:base,orderNumber:String(wo.number||wo.id)}),"order-created:"+wo.id);
+        }
       }
     }
 
@@ -1097,15 +1129,9 @@ async function runProductSync(): Promise<{ imported: number; updated: number; mo
 const subscriptionMenuSyncedCategories = new Set<string>();
 
 async function getStrictSubscriptionWeekProducts(categoryName: string) {
-  if (!subscriptionMenuSyncedCategories.has(categoryName)) {
-    try {
-      await runProductSync();
-      subscriptionMenuSyncedCategories.add(categoryName);
-    } catch (error: any) {
-      log(`Subscription menu product refresh failed for ${categoryName}: ${error?.message || error}`, "sync");
-    }
-  }
-
+  // Never block a customer-facing menu request on a network-wide WooCommerce sync.
+  // Import jobs already refresh product data in the background. Return the latest
+  // locally persisted catalogue immediately, including historical invitation weeks.
   const allProducts = await storage.getProducts();
   return allProducts.filter(
     p => (p.category || "").trim().toLowerCase() === categoryName.trim().toLowerCase()
@@ -1853,6 +1879,34 @@ export async function registerRoutes(
     }
   });
 
+  registerKitchenAuditRoutes(app);
+  registerOperationsAssistant(app);
+  registerDebugExport(app);
+  registerOrderActions(app);
+  registerCustomerPortal(app);
+  await setupDispatchTables();
+  registerDispatch(app);
+
+  app.get("/api/woo-connection", async (req, res) => {
+    if(!req.session?.userId)return res.status(401).json({message:"Unauthorized"});
+    try { const c=await wooCredentials();res.setHeader("Cache-Control","no-store");res.json({url:c.url,hasKey:!!c.key,hasSecret:!!c.secret}); }
+    catch(e:any){res.status(500).json({message:e.message})}
+  });
+  app.post("/api/woo-connection", async (req,res) => {
+    if(!req.session?.userId)return res.status(401).json({message:"Unauthorized"});
+    try {
+      const {url,key,secret}=req.body||{};
+      if(typeof url!=="string"||typeof key!=="string"||typeof secret!=="string")return res.status(400).json({message:"Invalid connection fields"});
+      await saveWooCredentials({url,key,secret});res.json({success:true});
+    } catch(e:any){res.status(400).json({message:e.message})}
+  });
+  app.post("/api/woo-connection/test", async(req,res)=>{
+    if(!req.session?.userId)return res.status(401).json({message:"Unauthorized"});
+    try {const response=await wooFetch("system_status");res.json({success:true,environment:response?.environment?.site_url||"Connected",note:"Read connection verified. Refund permissions require a separate transaction test."});}
+    catch(e:any){res.status(502).json({message:e.message})}
+  });
+
+
   app.get("/api/orders", async (req, res) => {
     try {
       const from = req.query.from ? new Date(req.query.from as string) : undefined;
@@ -1865,7 +1919,7 @@ export async function registerRoutes(
         ...order,
         items: itemsMap.get(order.id) ?? [],
       }));
-      applyAddDeliveryUpgrades(ordersWithItems);
+      if (req.query.category !== "xmas") applyAddDeliveryUpgrades(ordersWithItems);
 
       // Annotate orders with pending (paid but unprocessed) addon links
       const pendingLinks = await storage.getPendingAddonLinks();
@@ -1904,7 +1958,19 @@ export async function registerRoutes(
         };
       });
 
-      res.json(annotated);
+      const productsForCategories = await storage.getProducts();
+      const byProductId = new Map(productsForCategories.map(p => [p.id, p]));
+      const byProductName = new Map(productsForCategories.map(p => [p.name.trim().toLowerCase(),p]));
+      const isXmas = (item: {productId?:number|null;productName:string}) => {
+        const p = (item.productId ? byProductId.get(item.productId) : undefined) || byProductName.get(item.productName.trim().toLowerCase());
+        return /(^|\W)(xmas|christmas)(\W|$)/i.test(p?.category || "");
+      };
+      const category = req.query.category === "xmas" ? "xmas" : "regular";
+      // Split line items rather than entire orders, preserving mixed purchases.
+      const visibleOrders = annotated.map(o => ({
+        ...o, items: o.items.filter(i => category === "xmas" ? isXmas(i) : !isXmas(i))
+      })).filter(o => o.items.length > 0);
+      res.json(visibleOrders);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
@@ -2089,13 +2155,9 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/orders/:id", async (req, res) => {
-    try {
-      await storage.deleteOrder(parseInt(req.params.id));
-      res.json({ success: true });
-    } catch (error: any) {
-      res.status(500).json({ message: error.message });
-    }
+  // Hard-delete is intentionally disabled; financial and fulfilment records must be retained.
+  app.delete("/api/orders/:id", (req, res) => {
+    res.status(403).json({ message: "Permanent deletion is disabled. Use Cancel or Refund & Cancel instead." });
   });
 
   app.get("/api/order-items", async (req, res) => {
@@ -2115,11 +2177,15 @@ export async function registerRoutes(
       const to = req.query.to ? new Date(req.query.to as string) : undefined;
       const sourceFilter = parseSourceFilter(req.query.source as string | undefined);
       let items = await storage.getOrderItemsByDateRange(from, to);
+      const christmasProducts = (await storage.getProducts()).filter(p=>/(^|\W)(xmas|christmas)(\W|$)/i.test(p.category||""));
+      const christmasIds = new Set(christmasProducts.map(p=>p.id));
+      const christmasNames = new Set(christmasProducts.map(p=>p.name.trim().toLowerCase()));
+      items = items.filter(i=>!(i.productId && christmasIds.has(i.productId)) && !christmasNames.has(i.productName.trim().toLowerCase()));
       if (sourceFilter) {
         items = items.filter(item => matchesSource(item, sourceFilter));
       }
       const includeManualStock = !sourceFilter || sourceFilter.manual;
-      const manualQtys = includeManualStock ? await storage.getManualQuantities(from, to) : [];
+      const manualQtys = (includeManualStock ? await storage.getManualQuantities(from, to) : []).filter(m=>!christmasIds.has(m.productId));
 
       type ProductTotalEntry = {
         productName: string;
@@ -2166,11 +2232,15 @@ export async function registerRoutes(
       const to = req.query.to ? new Date(req.query.to as string) : undefined;
       const sourceFilter = parseSourceFilter(req.query.source as string | undefined);
       let items = await storage.getOrderItemsByDateRange(from, to);
+      const christmasProducts = (await storage.getProducts()).filter(p=>/(^|\W)(xmas|christmas)(\W|$)/i.test(p.category||""));
+      const christmasIds = new Set(christmasProducts.map(p=>p.id));
+      const christmasNames = new Set(christmasProducts.map(p=>p.name.trim().toLowerCase()));
+      items = items.filter(i=>!(i.productId && christmasIds.has(i.productId)) && !christmasNames.has(i.productName.trim().toLowerCase()));
       if (sourceFilter) {
         items = items.filter(item => matchesSource(item, sourceFilter));
       }
       const includeManualStock = !sourceFilter || sourceFilter.manual;
-      const manualQtys = includeManualStock ? await storage.getManualQuantities(from, to) : [];
+      const manualQtys = (includeManualStock ? await storage.getManualQuantities(from, to) : []).filter(m=>!christmasIds.has(m.productId));
       const allIngredients = await storage.getAllIngredients();
       const allProducts = await storage.getProducts();
 
@@ -2443,11 +2513,42 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/woo/sync-orders", async (req, res) => {
+  // Manual sync is asynchronous: product variations and individual order item
+  // writes can exceed reverse-proxy request timeouts. Query status separately.
+  type ManualSyncState = {
+    running: boolean; phase: string; startedAt: string | null; finishedAt: string | null;
+    result: any; error: string | null; jobId: number; elapsedMs: number;
+  };
+  let manualSync: ManualSyncState = {running:false,phase:"idle",startedAt:null,finishedAt:null,result:null,error:null,jobId:0,elapsedMs:0};
+  let manualSyncSeq = 0;
+  function runManualSync() {
+    if(manualSync.running)return manualSync;
+    const id=++manualSyncSeq;
+    manualSync={running:true,phase:"Fetching WooCommerce products and variations",startedAt:new Date().toISOString(),finishedAt:null,result:null,error:null,jobId:id,elapsedMs:0};
+    const started=Date.now();
+    void (async()=>{
+      try {
+        const products=await runProductSync();
+        manualSync.phase="Fetching WooCommerce orders and importing order items";
+        const orders=await importManualWooOrders();
+        manualSync.result={products,orders};
+        manualSync.phase="Complete";
+      } catch(e:any){
+        manualSync.error=String(e?.message||e);
+        const failedPhase=manualSync.phase;
+        manualSync.phase="Failed";
+        log("Manual WooCommerce sync failed at "+failedPhase+": "+manualSync.error,"sync");
+      } finally {
+        manualSync.running=false;manualSync.finishedAt=new Date().toISOString();manualSync.elapsedMs=Date.now()-started;
+      }
+    })();
+    return manualSync;
+  }
+  async function importManualWooOrders(after?: string) {
     try {
       const params: Record<string, string> = { status: "processing,completed,on-hold" };
-      if (req.query.after) {
-        params.after = req.query.after as string;
+      if (after) {
+        params.after = after;
       } else {
         const fourWeeksAgo = new Date();
         fourWeeksAgo.setDate(fourWeeksAgo.getDate() - 28);
@@ -2552,19 +2653,25 @@ export async function registerRoutes(
       }
 
       const upgraded = await persistDeliveryUpgrades();
-      res.json({ imported, updated, upgraded, total: wooOrders.length });
+      return { imported, updated, upgraded, total: wooOrders.length };
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      throw error;
     }
+  }
+  app.post("/api/woo/sync-start",(_req,res)=>{
+    if(manualSync.running)return res.status(409).json({message:"A WooCommerce sync is already in progress",...manualSync});
+    res.status(202).json(runManualSync());
   });
-
-  app.post("/api/woo/sync-products", async (_req, res) => {
-    try {
-      const result = await runProductSync();
-      res.json(result);
-    } catch (error: any) {
-      res.status(500).json({ message: error.message });
-    }
+  app.get("/api/woo/sync-progress",(_req,res)=>{
+    const started=manualSync.startedAt?new Date(manualSync.startedAt).getTime():0;
+    res.setHeader("Cache-Control","no-store");
+    res.json({...manualSync,elapsedMs:manualSync.running?Date.now()-started:manualSync.elapsedMs});
+  });
+  app.post("/api/woo/sync-orders",async(req,res)=>{
+    try{res.json(await importManualWooOrders(typeof req.query.after==="string"?req.query.after:undefined))}catch(e:any){res.status(502).json({message:"WooCommerce order import failed: "+e.message})}
+  });
+  app.post("/api/woo/sync-products",async(_req,res)=>{
+    try{res.json(await runProductSync())}catch(e:any){res.status(502).json({message:"WooCommerce product import failed: "+e.message})}
   });
 
   app.get("/api/delivery-addresses", async (req, res) => {
@@ -2585,6 +2692,29 @@ export async function registerRoutes(
           return { ...order, items };
         })
       );
+      const christmasProducts = (await storage.getProducts()).filter(p=>/(^|\W)(xmas|christmas)(\W|$)/i.test(p.category||""));
+      const christmasIds = new Set(christmasProducts.map(p=>p.id));
+      const christmasNames = new Set(christmasProducts.map(p=>p.name.trim().toLowerCase()));
+      // Holiday checkout sells bundles of sides; product imports may lose the WC category.
+      // A multi-side festive bundle is never part of an ordinary Tue/Sat run.
+      const festiveSideNames = [
+        "garlic & herb roast potatoes", "potato dauphinoise",
+        "honey roasted carrots & parsnips", "cauliflower cheese",
+        "pigs in blankets", "sage & onion stuffing",
+        "maple & bacon brussels sprouts", "braised red cabbage & apple",
+      ];
+      const normaliseFestive = (name:string) => name.toLowerCase().replace(/&amp;/g,"&").replace(/[^a-z0-9]+/g," ").trim();
+      const festiveSideSet = new Set(festiveSideNames.map(normaliseFestive));
+      const explicitChristmas = (i:{productId:number|null;productName:string}) =>
+        Boolean((i.productId && christmasIds.has(i.productId)) ||
+          christmasNames.has(i.productName.trim().toLowerCase()) ||
+          /\b(christmas|xmas|festive bundle)\b/i.test(i.productName));
+      for (const o of ordersWithItems) {
+        const matchedSides=o.items.filter(i=>festiveSideSet.has(normaliseFestive(i.productName)));
+        const isHolidayBundle=matchedSides.length>=2;
+        o.items=o.items.filter(i=>!explicitChristmas(i) &&
+          !(isHolidayBundle && festiveSideSet.has(normaliseFestive(i.productName))));
+      }
       applyAddDeliveryUpgrades(ordersWithItems);
       // Exclude any order whose items are subscription products (they show via stamped manual orders instead)
       const isSubscriptionItem = (name: string) => isSubscriptionProductName(name);
@@ -2594,7 +2724,7 @@ export async function registerRoutes(
       const subscriptionOrderIds = await storage.getSubscriptionOriginOrderIds();
       const addresses = ordersWithItems
         .filter(o =>
-          (o.deliveryAddress || o.fulfillmentType === "collection") &&
+          o.items.length > 0 && !["cancelled","refunded","failed","trash"].includes((o.status||"").toLowerCase()) && (o.deliveryAddress || o.fulfillmentType === "collection") &&
           !o.items.some(i => isSubscriptionItem(i.productName)) &&
           !isAddDeliveryOnly(o.items)
         )
@@ -2616,6 +2746,7 @@ export async function registerRoutes(
             lng: coordsValid ? storedLng : null,
             fulfillment: fulfillment as "delivery" | "collection",
             isManual: effectiveIsManual,
+            itemSummary: Object.entries(o.items.filter(i=>!/add\s+delivery|meal\s+subscription/i.test(i.productName)).reduce((acc:Record<string,number>,i)=>{acc[i.productName]=(acc[i.productName]||0)+i.quantity;return acc;},{})).map(([name,quantity])=>({name,quantity})),
             coordinateStatus: coordsValid ? "verified-local" : (storedLat !== null || storedLng !== null ? "recheck" : "missing"),
           };
         });
@@ -2758,6 +2889,8 @@ export async function registerRoutes(
       const safe = {
         ...settingsMap,
         smtp_pass: settingsMap.smtp_pass ? "••••••••" : "",
+        wc_admin_key: settingsMap.wc_admin_key ? "••••••••" : "",
+        wc_admin_secret: settingsMap.wc_admin_secret ? "••••••••" : "",
         stripe_test_secret_key: settingsMap.stripe_test_secret_key ? "••••••••" : "",
         stripe_live_secret_key: settingsMap.stripe_live_secret_key ? "••••••••" : "",
       };
@@ -2911,9 +3044,19 @@ export async function registerRoutes(
       const from = req.query.from ? new Date(req.query.from as string) : undefined;
       const to = req.query.to ? new Date(req.query.to as string) : undefined;
       const tuesdayParam = req.query.tuesday as string | undefined;
+      const xmasMode = req.query.mode === "xmas";
+      const allProductsForLabels = await storage.getProducts();
+      const byId = new Map(allProductsForLabels.map(p=>[p.id,p]));
+      const byName = new Map(allProductsForLabels.map(p=>[p.name.trim().toLowerCase(),p]));
+      const christmasItem = (item: { productId?: number | null; productName: string }) => {
+        const product = (item.productId ? byId.get(item.productId) : undefined) || byName.get(item.productName.trim().toLowerCase());
+        return /(^|\W)(xmas|christmas)(\W|$)/i.test(product?.category || "");
+      };
       const ordersList = await storage.getOrders(from, to);
       let filteredOrders = ordersList;
-      if (tuesdayParam === "true") {
+      if (xmasMode) {
+        filteredOrders = ordersList;
+      } else if (tuesdayParam === "true") {
         filteredOrders = ordersList.filter(o => o.isTuesday);
       } else if (tuesdayParam === "false") {
         filteredOrders = ordersList.filter(o => !o.isTuesday);
@@ -2921,10 +3064,10 @@ export async function registerRoutes(
       const ordersWithItems = await Promise.all(
         filteredOrders.map(async (order) => {
           const items = await storage.getOrderItems(order.id);
-          return { ...order, items };
+          return { ...order, items: items.filter(i => xmasMode ? christmasItem(i) : !christmasItem(i)) };
         })
       );
-      applyAddDeliveryUpgrades(ordersWithItems);
+      if (!xmasMode) applyAddDeliveryUpgrades(ordersWithItems);
 
       const subscriptionItemRe = /meal\s+subscription\s*-\s*\d+/i;
       const isAddDeliveryOnlyLabel = (items: { productName: string }[]) =>
@@ -2932,6 +3075,7 @@ export async function registerRoutes(
       // Print labels for all orders that are not subscription parent orders and not
       // standalone "Add Delivery" charge orders (collection orders get a label too)
       const labelOrders = ordersWithItems.filter(o =>
+        o.items.length > 0 && !["cancelled","refunded","failed","trash"].includes((o.status||"").toLowerCase()) &&
         !o.items.some(i => subscriptionItemRe.test(i.productName)) &&
         !isAddDeliveryOnlyLabel(o.items)
       );
@@ -2997,35 +3141,43 @@ export async function registerRoutes(
           if (item.productName.toLowerCase().includes("add delivery")) continue;
           itemSummary[item.productName] = (itemSummary[item.productName] || 0) + item.quantity;
         }
-        const summaryText = Object.entries(itemSummary).map(([n, q]) => `${q} x ${n}`).join(", ");
-        const mealCount = order.items.reduce((sum, item) =>
-          sum + (/add\s+delivery|meal\s+subscription|oat|porridge|overnight|soup/i.test(item.productName) ? 0 : item.quantity), 0);
-        const oatCount = order.items.reduce((sum, item) =>
-          sum + (/oat|porridge|overnight/i.test(item.productName) ? item.quantity : 0), 0);
-        const totalsText = [
-          `Meals ${mealCount} + Oats ${oatCount} = ${mealCount + oatCount}`,
-          ...(order.wooPaidTotal !== null ? [`Paid: £${Number(order.wooPaidTotal).toFixed(2)}`] : []),
-        ].join("  |  ");
-        const noteText = order.notes?.trim() || "";
+        const summaryText = Object.entries(itemSummary).map(([n, q]) => `${q}× ${n.replace(/slow cooked /gi,"").replace(/homemade /gi,"").replace(/with /gi,"w/")}`).join(" · ");
+        const typeCounts = { Meals: 0, Oats: 0, Snacks: 0, Soup: 0 };
+        for (const item of order.items) {
+          const name = item.productName.toLowerCase();
+          const product = (item.productId ? byId.get(item.productId) : undefined) || byName.get(name.trim());
+          const category = (product?.category || "").toLowerCase();
+          if (/add\s+delivery|meal\s+subscription|gift\s*card/i.test(name)) continue;
+          // Product category takes priority: snack names are not reliably descriptive.
+          if (/snack|bar|treat/i.test(category) || /snack|protein\s*(bar|ball)|brownie|cookie|flapjack|chocolate.*bar|gold\s*bar/i.test(name)) typeCounts.Snacks += item.quantity;
+          else if (/oat|porridge|overnight/i.test(category+" "+name)) typeCounts.Oats += item.quantity;
+          else if (/soup/i.test(category+" "+name)) typeCounts.Soup += item.quantity;
+          else typeCounts.Meals += item.quantity;
+        }
+        const activeTypes = Object.entries(typeCounts).filter(([,count]) => count > 0);
+        const categorySummary = activeTypes.map(([name,count]) => `${count} ${name.toLowerCase()}`).join(" | ");
+        const totalsText = categorySummary;
+        const noteText = (order.customerDeliveryInstructions || order.notes || "").trim();
 
         // Pre-measure each section
-        const NOTE_FONT_SIZE = 5.5;
-        const GAP1 = 1.5;  // gap after name
-        const GAP2 = 1.5;  // gap after tag
-        const GAP3 = 2;    // gap after address
-        const GAP4 = 2;    // gap between items and note
+        const NOTE_FONT_SIZE = 5.1;
+        const GAP1 = 0.7;  // gap after name
+        const GAP2 = 0.7;  // gap after tag
+        const GAP3 = 0.7;    // gap after address
+        const GAP4 = 0.7;    // gap between items and note
 
         doc.font("Helvetica-Bold").fontSize(9);
-        const nameH = doc.heightOfString(order.customerName, { width: innerW });
+        const printedName = `${order.customerName}  #${order.wooId || order.id}`;
+        const nameH = doc.heightOfString(printedName, { width: innerW });
 
         doc.font("Helvetica-Bold").fontSize(7);
         const tagH = doc.heightOfString(tag, { width: innerW });
 
-        doc.font("Helvetica").fontSize(7);
+        doc.font("Helvetica").fontSize(6);
         const addrText = order.deliveryAddress || "";
         const addrH = addrText ? doc.heightOfString(addrText, { width: innerW }) : 0;
 
-        doc.font("Helvetica").fontSize(6.5);
+        doc.font("Helvetica").fontSize(5.8);
         const itemsH = summaryText ? doc.heightOfString(summaryText, { width: innerW }) : 0;
 
         doc.font("Helvetica-Bold").fontSize(6.5);
@@ -3033,7 +3185,9 @@ export async function registerRoutes(
 
         doc.font("Helvetica-Oblique").fontSize(NOTE_FONT_SIZE);
         const noteH = noteText ? doc.heightOfString(noteText, { width: innerW, lineBreak: false }) : 0;
-        const totalsY = labelY + labelH - 2 - totalsH - (noteH > 0 ? GAP4 + noteH : 0);
+        const notesY = labelY + labelH - 2 - (noteH > 0 ? noteH : 0);
+        // Counts now sit directly below delivery/collection tag, rather than at the bottom.
+        // Remaining space is allocated to address and product descriptions.
 
         // Reserve the compact totals line and notes before allowing long item lists to use the remaining space.
         const totalContentH =
@@ -3046,10 +3200,7 @@ export async function registerRoutes(
 
         // Vertically center the whole block; never start above top padding
         const minPadY = 2 * MM;
-        const startY = Math.max(
-          labelY + minPadY,
-          labelY + (labelH - totalContentH) / 2
-        );
+        const startY = labelY + minPadY;
 
         const cx = labelX + padX; // content x (left edge of content area)
         const opts = { width: innerW, align: "center" as const };
@@ -3058,7 +3209,7 @@ export async function registerRoutes(
 
         // Name
         doc.font("Helvetica-Bold").fontSize(9);
-        doc.text(order.customerName, cx, cy, { ...opts, height: Math.min(nameH, labelH * 0.35) });
+        doc.text(printedName, cx, cy, { ...opts, height: Math.min(nameH, labelH * 0.35) });
         cy = Math.min(doc.y, labelY + labelH * 0.4) + GAP1;
 
         // Tag
@@ -3068,11 +3219,18 @@ export async function registerRoutes(
           cy = doc.y + GAP2;
         }
 
+        // Meal-type counts sit near the top, just under the delivery/collection tag.
+        if (cy + totalsH + GAP2 < notesY) {
+          doc.font("Helvetica-Bold").fontSize(6.5).fillColor("black");
+          doc.text(totalsText, cx, cy, { ...opts, lineBreak: false, ellipsis: true, height: totalsH });
+          cy = doc.y + GAP2;
+        }
+
         // Address
         if (addrText && cy < labelY + labelH - 10) {
-          doc.font("Helvetica").fontSize(7);
+          doc.font("Helvetica").fontSize(6);
           const maxAddrH = Math.min(
-            totalsY - cy - GAP3 - (itemsH > 0 ? Math.min(itemsH, 18) + GAP4 : 0),
+            notesY - cy - GAP3 - (itemsH > 0 ? Math.min(itemsH, 18) + GAP4 : 0),
             24
           );
           if (maxAddrH > 7) {
@@ -3082,22 +3240,18 @@ export async function registerRoutes(
         }
 
         // Items
-        if (summaryText && cy < totalsY - 6) {
-          doc.font("Helvetica").fontSize(6.5);
-          const maxItemH = totalsY - cy - GAP4;
+        if (summaryText && cy < notesY - 6) {
+          doc.font("Helvetica").fontSize(5.8);
+          const maxItemH = notesY - cy - GAP4;
           if (maxItemH > 6) {
             doc.text(summaryText, cx, cy, { ...opts, height: maxItemH, ellipsis: true });
           }
         }
 
-        // Counts and confirmed WooCommerce paid amount.
-        doc.font("Helvetica-Bold").fontSize(6.5).fillColor("black");
-        doc.text(totalsText, cx, totalsY, { ...opts, lineBreak: false, ellipsis: true, height: totalsH });
-
         // Notes — small italic red text flowing directly below items
         if (noteText) {
           doc.font("Helvetica-Oblique").fontSize(NOTE_FONT_SIZE).fillColor("red");
-          const noteY = totalsY + totalsH + GAP4;
+          const noteY = notesY;
           const maxNoteH = labelY + labelH - noteY - 1;
           if (maxNoteH > 4) {
             doc.text(noteText, cx, noteY, { ...opts, lineBreak: false, ellipsis: true, height: maxNoteH });
@@ -3114,7 +3268,7 @@ export async function registerRoutes(
 
       const dateLabel = from ? `${from.toISOString().split("T")[0]}` : "all";
       res.setHeader("Content-Type", "application/pdf");
-      res.setHeader("Content-Disposition", `attachment; filename="labels_${dateLabel}.pdf"`);
+      res.setHeader("Content-Disposition", `attachment; filename="${xmasMode ? "xmas" : tuesdayParam === "true" ? "tuesday" : "saturday"}_labels_${dateLabel}.pdf"`);
       res.send(pdfBuf);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
@@ -3267,6 +3421,21 @@ export async function registerRoutes(
   // WooCommerce signs the raw JSON payload with HMAC-SHA256 and sends the
   // base64 digest in X-WC-Webhook-Signature. Configure order.created and
   // order.updated webhooks to POST here using the same WC_WEBHOOK_SECRET.
+  // Debounce webhook bursts; the existing importer performs full order/item reconciliation.
+  let webhookSyncTimer: ReturnType<typeof setTimeout> | null = null;
+  function queueWebhookSync() {
+    if (webhookSyncTimer) clearTimeout(webhookSyncTimer);
+    webhookSyncTimer = setTimeout(async () => {
+      webhookSyncTimer = null;
+      if (syncInProgress) {
+        webhookSyncTimer = setTimeout(queueWebhookSync, 2000);
+        return;
+      }
+      try { await performSync(); }
+      catch (error: any) { log("Webhook-triggered sync failed: " + error.message, "sync"); }
+    }, 1200);
+  }
+
   app.post("/api/webhooks/woocommerce", async (req, res) => {
     const webhookSecret = process.env.WC_WEBHOOK_SECRET;
     const isProduction = process.env.NODE_ENV === "production";
@@ -3285,7 +3454,7 @@ export async function registerRoutes(
 
     const topicHeader = req.headers["x-wc-webhook-topic"];
     const topic = (Array.isArray(topicHeader) ? topicHeader[0] : topicHeader || "").toLowerCase();
-    if (topic && topic !== "order.created" && topic !== "order.updated") {
+    if (topic && !["order.created", "order.updated", "order.deleted"].includes(topic)) {
       return res.json({ received: true, ignored: true, topic });
     }
 
@@ -3298,19 +3467,22 @@ export async function registerRoutes(
 
     try {
       const existing = await storage.getOrderByWooId(wooId);
-      if (!existing) {
-        // The regular Woo sync imports complete new orders. Returning success here
-        // prevents webhook retries while the next sync safely creates the order.
-        log(`Woo webhook received delivery notes for order ${wooId}; awaiting order sync`, "sync");
-        return res.json({ received: true, updated: false, awaitingSync: true });
+      // A signed webhook updates local status immediately, even if the full
+      // product/order import is still waiting to run.
+      if (existing) {
+        const updates: Record<string, any> = {};
+        const status = String(wooOrder?.status || "").toLowerCase();
+        if (["processing","completed","on-hold","refunded","cancelled","pending","failed","trash"].includes(status)) {
+          updates.status = status;
+        }
+        const note = getWooOrderNote(wooOrder);
+        if (note) updates.notes = note;
+        if (Object.keys(updates).length) await storage.updateOrder(existing.id, updates);
       }
-
-      const note = getWooOrderNote(wooOrder);
-      if (note) {
-        await storage.updateOrder(existing.id, { notes: note });
-      }
-      log(`Woo webhook updated delivery notes for order ${wooId}`, "sync");
-      return res.json({ received: true, updated: !!note });
+      // Queue an immediate import for new orders and edited items; retain periodic
+      // polling as a fallback if WooCommerce cannot deliver the webhook.
+      queueWebhookSync();
+      return res.json({ received: true, updated: !!existing, queuedSync: true });
     } catch (error: any) {
       log(`Woo webhook update failed for order ${wooId}: ${error.message}`, "sync");
       return res.status(500).json({ message: "Webhook update failed" });
@@ -5251,6 +5423,51 @@ export async function registerRoutes(
     }
   });
 
+  // Read-only independent reconciliation of recorded line items, labels and duplicate candidates.
+  app.get("/api/weekly-verify", async (req,res) => {
+    if (!req.session?.userId) return res.status(401).json({message:"Unauthorized"});
+    try {
+      const from=new Date(String(req.query.from||"")),to=new Date(String(req.query.to||""));
+      if(!Number.isFinite(from.getTime())||!Number.isFinite(to.getTime())||to<from||to.getTime()-from.getTime()>15*86400000)
+        return res.status(400).json({message:"Invalid weekly date range"});
+      const orders=await storage.getOrders(from,to);
+      const itemsByOrder=await storage.getOrderItemsBatch(orders.map(o=>o.id));
+      const products=await storage.getProducts();
+      const byId=new Map(products.map(p=>[p.id,p]));
+      const byName=new Map(products.map(p=>[p.name.trim().toLowerCase(),p]));
+      const isXmas=(item:{productId?:number|null;productName:string})=>{
+        const p=(item.productId?byId.get(item.productId):undefined)||byName.get(item.productName.trim().toLowerCase());
+        return /(^|\\W)(xmas|christmas)(\\W|$)/i.test(p?.category||"");
+      };
+      const included=orders.map(o=>({...o,items:(itemsByOrder.get(o.id)||[]).filter(i=>!isXmas(i))}))
+        .filter(o=>o.items.length>0&&!["cancelled","refunded","failed","trash"].includes((o.status||"").toLowerCase()));
+      const productionItems=included.flatMap(o=>o.items.filter(i=>!/meal\\s+subscription|add\\s+delivery|gift\\s*card/i.test(i.productName))
+        .map(i=>({orderId:o.id,wooId:o.wooId,customerName:o.customerName,customerEmail:o.customerEmail,isTuesday:o.isTuesday,productName:i.productName,quantity:i.quantity,price:i.price})));
+      const productMap=new Map<string,{productName:string;quantity:number;orders:{orderId:number;customerName:string;quantity:number}[]}>();
+      for(const i of productionItems){
+        const k=i.productName.trim().toLowerCase();
+        const p=productMap.get(k)||{productName:i.productName,quantity:0,orders:[]};
+        p.quantity+=i.quantity;p.orders.push({orderId:i.orderId,customerName:i.customerName,quantity:i.quantity});productMap.set(k,p);
+      }
+      const duplicates:{first:number;second:number;customerName:string;reason:string}[]=[];
+      const basket=(o:typeof included[number])=>o.items.map(i=>[i.productName.trim().toLowerCase(),i.quantity].join(":")).sort().join("|");
+      for(let i=0;i<included.length;i++)for(let j=i+1;j<included.length;j++){
+        const a=included[i],b=included[j];
+        if(a.isTuesday!==b.isTuesday||!basket(a)||basket(a)!==basket(b))continue;
+        const sameMail=!!a.customerEmail&&a.customerEmail.toLowerCase()===b.customerEmail?.toLowerCase();
+        const sameName=a.customerName.trim().toLowerCase()===b.customerName.trim().toLowerCase();
+        if(!sameMail&&!sameName)continue;
+        const delta=Math.abs(new Date(a.orderDate).getTime()-new Date(b.orderDate).getTime())/60000;
+        if(delta<=20)duplicates.push({first:a.id,second:b.id,customerName:a.customerName,reason:`Matching basket within ${Math.round(delta)} minutes`});
+      }
+      res.setHeader("Cache-Control","no-store");
+      res.json({checkedAt:new Date().toISOString(),orderCount:included.length,totalUnits:productionItems.reduce((n,i)=>n+i.quantity,0),
+        products:[...productMap.values()].sort((a,b)=>a.productName.localeCompare(b.productName)),duplicates,
+        orders:included.map(o=>({id:o.id,wooId:o.wooId,customerName:o.customerName,isTuesday:o.isTuesday,
+          items:o.items.map(i=>({name:i.productName,quantity:i.quantity}))}))});
+    }catch(e:any){res.status(500).json({message:e.message})}
+  });
+
   app.get("/api/weekly-stats", async (req, res) => {
     try {
       const from = req.query.from ? new Date(req.query.from as string) : undefined;
@@ -5266,7 +5483,14 @@ export async function registerRoutes(
           return { ...order, items };
         })
       );
-      applyAddDeliveryUpgrades(ordersWithItems);
+      const festiveProducts = (await storage.getProducts()).filter(p=>/(^|\W)(xmas|christmas)(\W|$)/i.test(p.category||""));
+      const festiveIds = new Set(festiveProducts.map(p=>p.id));
+      const festiveNames = new Set(festiveProducts.map(p=>p.name.trim().toLowerCase()));
+      for(const o of ordersWithItems){
+        o.items = o.items.filter(i=>!(i.productId && festiveIds.has(i.productId)) && !festiveNames.has(i.productName.trim().toLowerCase()));
+      }
+      const regularOrders = ordersWithItems.filter(o=>o.items.length>0);
+      applyAddDeliveryUpgrades(regularOrders);
 
       const priorOrders = await storage.getOrders(undefined, new Date(from.getTime() - 1));
 
@@ -5276,7 +5500,7 @@ export async function registerRoutes(
 
       const subscriptionPattern = /meal\s+subscription\s*-\s*(\d+)/i;
 
-      for (const order of ordersWithItems) {
+      for (const order of regularOrders) {
         revenue += parseFloat((order as any).shippingTotal || "0");
         for (const item of order.items) {
           if (subscriptionPattern.test(item.productName)) continue;
@@ -5291,10 +5515,10 @@ export async function registerRoutes(
         }
       }
 
-      const orderCount = ordersWithItems.length;
+      const orderCount = regularOrders.length;
       const avgOrderValue = orderCount > 0 ? revenue / orderCount : 0;
 
-      const deliveryStops = ordersWithItems.filter(o => o.fulfillmentType === "delivery").length;
+      const deliveryStops = regularOrders.filter(o => o.fulfillmentType === "delivery").length;
 
       const priorEmails = new Set<string>();
       const priorNames = new Set<string>();
@@ -5306,7 +5530,7 @@ export async function registerRoutes(
       let newCustomers = 0;
       let returningCustomers = 0;
       const counted = new Set<string>();
-      for (const o of ordersWithItems) {
+      for (const o of regularOrders) {
         const key = o.customerEmail ? o.customerEmail.toLowerCase() : o.customerName.toLowerCase();
         if (counted.has(key)) continue;
         counted.add(key);

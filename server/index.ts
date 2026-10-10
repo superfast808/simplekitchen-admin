@@ -84,6 +84,7 @@ app.use(
 app.use((req, res, next) => {
   if (req.path.startsWith("/api/auth/")) return next();
   if (req.path.startsWith("/api/subscribe/")) return next();
+  if (req.path.startsWith("/api/customer/")) return next();
   if (req.path.startsWith("/api/stripe/session-status")) return next();
   if (req.path.startsWith("/api/addon/")) return next();
   if (req.path.startsWith("/api/webhooks/")) return next(); // Stripe webhooks use signature verification
@@ -120,7 +121,7 @@ app.use((req, res, next) => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
+      if (capturedJsonResponse && !path.startsWith("/api/customer/") && !path.startsWith("/api/customer-admin/")) {
         logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
       }
 

@@ -1,3 +1,4 @@
+import { DebugExportButton } from "@/components/debug-export-button";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
@@ -72,7 +73,7 @@ export default function ProductTotalsPage() {
           <h1 className="text-2xl font-semibold tracking-tight" data-testid="text-totals-title">Product Totals</h1>
           <DateRangeLabel from={from} to={to} />
         </div>
-        <DateFilter {...dateFilter} testIdPrefix="totals" showMonth />
+        <DebugExportButton page="product-totals" from={from} to={to}/><DateFilter {...dateFilter} testIdPrefix="totals" showMonth />
       </div>
 
       <OrderSourceFilter filter={sourceFilter} testIdPrefix="totals-source" />

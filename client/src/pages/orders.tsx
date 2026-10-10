@@ -1,5 +1,7 @@
+import { DebugExportButton } from "@/components/debug-export-button";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import { OrderActions } from "@/components/order-actions";
 import { format } from "date-fns";
 import { useState, useMemo } from "react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -60,6 +62,7 @@ export default function OrdersPage() {
   const [editingOrder, setEditingOrder] = useState<OrderWithItems | null>(null);
   const [showConsistent, setShowConsistent] = useState(true);
   const [hideSubscriptions, setHideSubscriptions] = useState(false);
+  const [showInactiveOrders, setShowInactiveOrders] = useState(false);
   const [orderSortCol, setOrderSortCol] = useState<"customer" | "total" | "spend" | "type" | "status" | null>(null);
   const [orderSortDir, setOrderSortDir] = useState<"asc" | "desc">("asc");
   const SUBSCRIPTION_RE = /meal\s+subscription\s*-\s*\d+/i;
@@ -208,6 +211,7 @@ export default function OrdersPage() {
   });
 
   const orders = allOrders?.filter(o => {
+    if (!showInactiveOrders && ["cancelled","refunded","failed","trash"].includes((o.status || "").toLowerCase())) return false;
     if (dayFilter === "saturday" && o.isTuesday) return false;
     if (dayFilter === "tuesday" && !o.isTuesday) return false;
     if (!sourceFilter.filterOrder(o)) return false;
@@ -235,16 +239,31 @@ export default function OrdersPage() {
     ),
   [allOrders]);
 
+  const [orderSyncPhase,setOrderSyncPhase] = useState("");
   const syncMutation = useMutation({
-    mutationFn: () => apiRequest("POST", "/api/woo/sync-orders"),
-    onSuccess: async (res) => {
-      const data = await res.json();
-      toast({ title: "Orders synced", description: `Imported: ${data.imported}, Updated: ${data.updated}` });
-      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+    mutationFn: async () => {
+      const start=await apiRequest("POST","/api/woo/sync-start");
+      const initial=await start.json();
+      if(!start.ok)throw Error(initial.message||"Unable to start WooCommerce sync");
+      for(let attempt=0;attempt<240;attempt++){
+        await new Promise(resolve=>setTimeout(resolve,1500));
+        const res=await fetch("/api/woo/sync-progress",{credentials:"include",cache:"no-store"});
+        if(!res.ok)throw Error("Sync status unavailable (HTTP "+res.status+")");
+        const state=await res.json();
+        setOrderSyncPhase(state.phase+" · "+Math.round(state.elapsedMs/1000)+"s");
+        if(!state.running){
+          if(state.error)throw Error(state.error);
+          return state.result;
+        }
+      }
+      throw Error("Sync continues in the background; check sync progress before starting another.");
     },
-    onError: (error: Error) => {
-      toast({ title: "Sync failed", description: error.message, variant: "destructive" });
+    onMutate:()=>setOrderSyncPhase("Starting WooCommerce sync…"),
+    onSuccess: async (data) => {
+      toast({title:"Orders synced",description:`Imported: ${data.orders?.imported??0}, Updated: ${data.orders?.updated??0}`});
+      queryClient.invalidateQueries({queryKey:["/api/orders"]});
     },
+    onError: (error: Error) => toast({ title: "Sync failed", description: error.message, variant: "destructive" }),
   });
 
   const deleteMutation = useMutation({
@@ -330,9 +349,11 @@ export default function OrdersPage() {
       return pa !== pb ? pa - pb : a.localeCompare(b);
     });
 
+  // Operational totals must exclude cancelled/refunded orders, just like Kitchen Production.
+  const countableOrders = (orders || []).filter(o => !["cancelled","refunded","failed","trash"].includes((o.status||"").toLowerCase()));
   const productTotals: Record<string, number> = {};
   for (const name of allProductNames) {
-    productTotals[name] = (orders || []).reduce((sum, order) => {
+    productTotals[name] = countableOrders.reduce((sum, order) => {
       return sum + order.items.filter(i => i.productName === name).reduce((s, i) => s + i.quantity, 0);
     }, 0);
   }
@@ -385,12 +406,13 @@ export default function OrdersPage() {
     window.open(`/api/orders/export?${params.toString()}`, "_blank");
   };
 
-  const handleLabels = (tuesday?: boolean) => {
+  const handleLabels = (tuesday?: boolean, mode?: "xmas") => {
     const params = new URLSearchParams({
       from: from.toISOString(),
       to: to.toISOString(),
     });
     if (tuesday !== undefined) params.set("tuesday", String(tuesday));
+    if (mode === "xmas") params.set("mode", "xmas");
     window.open(`/api/orders/labels?${params.toString()}`, "_blank");
   };
 
@@ -403,11 +425,12 @@ export default function OrdersPage() {
           <DeliveryDatePills weekStart={from} />
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <DateFilter {...dateFilter} testIdPrefix="orders" showMonth />
+          <DateFilter {...dateFilter} testIdPrefix="orders" showMonth /><DebugExportButton page="orders" from={from} to={to} day={dayFilter}/><DebugExportButton page="full-reconciliation" from={from} to={to} day={dayFilter}/>
           <Button size="sm" onClick={() => syncMutation.mutate()} disabled={syncMutation.isPending} data-testid="button-sync-orders">
             <RefreshCw className={`w-4 h-4 mr-1 ${syncMutation.isPending ? "animate-spin" : ""}`} />
             Sync from Woo
           </Button>
+          {syncMutation.isPending && <span role="status" className="text-xs text-muted-foreground">{orderSyncPhase}</span>}
           {orders && orders.length > 0 && (
             <>
               <Button size="sm" variant="outline" onClick={handleExport} data-testid="button-export-xlsx">
@@ -421,6 +444,10 @@ export default function OrdersPage() {
               <Button size="sm" variant="outline" onClick={() => handleLabels(true)} data-testid="button-print-labels-tuesday">
                 <Tag className="w-4 h-4 mr-1" />
                 Tue Labels
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => handleLabels(undefined, "xmas")} data-testid="button-print-labels-christmas">
+                <Tag className="w-4 h-4 mr-1" />
+                🎄 Xmas Labels
               </Button>
             </>
           )}
@@ -469,6 +496,10 @@ export default function OrdersPage() {
             data-testid="checkbox-hide-subscriptions"
           />
           Hide subscriptions
+        </label>
+        <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer select-none" data-testid="label-show-inactive-orders">
+          <Checkbox checked={showInactiveOrders} onCheckedChange={v=>setShowInactiveOrders(!!v)} data-testid="checkbox-show-inactive-orders"/>
+          Show cancelled / refunded
         </label>
       </div>
 
@@ -749,6 +780,7 @@ export default function OrdersPage() {
                       <TableCell className="font-medium">
                         <div className="flex items-center gap-1 flex-wrap">
                           <span data-testid={`text-customer-${order.id}`}>{order.customerName}</span>
+                          {order.customerDeliveryInstructions && <Badge variant="secondary" title={order.customerDeliveryInstructions} className="max-w-[260px] truncate">Delivery instructions: {order.customerDeliveryInstructions}</Badge>}
                           {order.isManual && (
                             <Badge variant="outline" className="text-xs">Manual</Badge>
                           )}
@@ -1010,14 +1042,7 @@ export default function OrdersPage() {
                               </>
                             );
                           })()}
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            onClick={() => deleteMutation.mutate(order.id)}
-                            data-testid={`button-delete-order-${order.id}`}
-                          >
-                            <Trash2 className="w-4 h-4 text-muted-foreground" />
-                          </Button>
+                          <OrderActions orderId={order.id} />
                         </div>
                       </TableCell>
                     </TableRow>

@@ -1,3 +1,4 @@
+import { DebugExportButton } from "@/components/debug-export-button";
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
@@ -20,10 +21,17 @@ type OrderWithItems = {
   fulfillmentType: string;
   isManual: boolean;
   isTuesday: boolean;
+  status: string;
   cashAmount: string | null;
   paymentMethod: string | null;
   shippingTotal: string | null;
   items: OrderItem[];
+};
+type VerifyResult = {
+  checkedAt:string;orderCount:number;totalUnits:number;
+  products:{productName:string;quantity:number;orders:{orderId:number;customerName:string;quantity:number}[]}[];
+  duplicates:{first:number;second:number;customerName:string;reason:string}[];
+  orders:{id:number;wooId:number|null;customerName:string;isTuesday:boolean;items:{name:string;quantity:number}[]}[];
 };
 type GroupStats = {
   orderCount: number;
@@ -158,6 +166,8 @@ function StatMini({ label, value }: { label: string; value: string }) {
 
 export default function WeeklyStatsPage() {
   const [offset, setOffset] = useState(0);
+  const [verifyVisible,setVerifyVisible] = useState(false);
+  const [expandedProduct,setExpandedProduct] = useState<string|null>(null);
   const [hideAddons, setHideAddons] = useState(false);
   const [hideAddDelivery, setHideAddDelivery] = useState(false);
   const [hideSubscriptionBase, setHideSubscriptionBase] = useState(false);
@@ -165,6 +175,19 @@ export default function WeeklyStatsPage() {
 
   const { from, to, isCurrent } = getWeekRange(offset);
   const weekFinalized = isCurrent && isWeekFinalized();
+  const verifyQuery = useQuery<VerifyResult>({
+    queryKey:["/api/weekly-verify",from.toISOString(),to.toISOString()],
+    enabled:verifyVisible,
+    staleTime:0,
+    queryFn:async()=>{
+      const q=new URLSearchParams({from:from.toISOString(),to:to.toISOString()});
+      const response=await fetch("/api/weekly-verify?"+q,{credentials:"include",cache:"no-store"});
+      const payload=await response.json();
+      if(!response.ok)throw Error(payload.message||"Verification failed");
+      return payload;
+    },
+  });
+
 
   const { data: rawOrders, isLoading, isFetching } = useQuery<OrderWithItems[]>({
     queryKey: ["/api/orders", `?from=${from.toISOString()}&to=${to.toISOString()}`],
@@ -191,23 +214,24 @@ export default function WeeklyStatsPage() {
 
   const computed = useMemo(() => {
     if (!rawOrders) return null;
-    const webOrders = rawOrders.filter(o => !o.isManual);
-    const manualOrders = rawOrders.filter(o => o.isManual);
-    const all = computeGroup(rawOrders, hideAddons, hideAddDelivery, hideSubscriptionBase, rawOrders, includeDelivery);
-    const web = computeGroup(webOrders, hideAddons, hideAddDelivery, hideSubscriptionBase, rawOrders, includeDelivery);
-    const manual = computeGroup(manualOrders, hideAddons, hideAddDelivery, hideSubscriptionBase, rawOrders, includeDelivery);
+    const activeOrders = rawOrders.filter(o => !["cancelled","refunded","failed","trash"].includes((o.status||"").toLowerCase()));
+    const webOrders = activeOrders.filter(o => !o.isManual);
+    const manualOrders = activeOrders.filter(o => o.isManual);
+    const all = computeGroup(activeOrders, hideAddons, hideAddDelivery, hideSubscriptionBase, activeOrders, includeDelivery);
+    const web = computeGroup(webOrders, hideAddons, hideAddDelivery, hideSubscriptionBase, activeOrders, includeDelivery);
+    const manual = computeGroup(manualOrders, hideAddons, hideAddDelivery, hideSubscriptionBase, activeOrders, includeDelivery);
     const entries = Object.entries(all.mealCounts).sort((a, b) => b[1] - a[1]);
     const topSeller = entries.length > 0 ? `${entries[0][0]} (${entries[0][1]})` : "—";
     const worstSeller = entries.length > 0 ? `${entries[entries.length - 1][0]} (${entries[entries.length - 1][1]})` : "—";
 
     // Three-bucket revenue breakdown
     const subCustomers = new Set(
-      rawOrders
+      activeOrders
         .filter(o => !o.isManual && o.items.some(i => SUB_RE.test(i.productName)))
         .map(o => o.customerName)
     );
     let cashRevenue = 0, bankRevenue = 0, onlineSubsRevenue = 0, onlineOtherRevenue = 0;
-    for (const o of rawOrders) {
+    for (const o of activeOrders) {
       const cash = parseFloat(o.cashAmount || "0");
       if (o.isManual) {
         if (cash > 0) {
@@ -246,7 +270,7 @@ export default function WeeklyStatsPage() {
           <p className="text-sm text-muted-foreground" data-testid="text-weekly-stats-range">
             {format(from, "EEE, MMM d")} – {format(to, "EEE d MMM, yyyy")} 07:00
           </p>
-          <DeliveryDatePills weekStart={from} />
+          <DeliveryDatePills weekStart={from} /><DebugExportButton page="weekly-stats" from={from} to={to}/>
           {weekFinalized && (
             <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1 font-medium" data-testid="text-stats-cutoff-notice">
               ✓ Meals finalised — orders locked as of Thu 7am
@@ -265,6 +289,42 @@ export default function WeeklyStatsPage() {
           </Button>
         </div>
       </div>
+
+      <Card>
+        <CardContent className="p-4 space-y-3">
+          <div className="flex flex-wrap justify-between items-center gap-3">
+            <div><h2 className="font-semibold">Verify weekly totals against orders</h2>
+              <p className="text-xs text-muted-foreground">Independent read-only recount of individual customer order lines, excluding Christmas and cancelled orders.</p>
+            </div>
+            <Button variant="outline" disabled={verifyQuery.isFetching} onClick={() => {setVerifyVisible(true);void verifyQuery.refetch()}}>
+              <RefreshCw className={`w-4 h-4 mr-2 ${verifyQuery.isFetching?"animate-spin":""}`}/>
+              {verifyQuery.isFetching?"Verifying…":"Verify Weekly Totals"}
+            </Button>
+          </div>
+          {verifyVisible && verifyQuery.isError && <p className="text-sm text-destructive">{verifyQuery.error instanceof Error?verifyQuery.error.message:"Verification unavailable"}</p>}
+          {verifyVisible && verifyQuery.data && <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">Checked {new Date(verifyQuery.data.checkedAt).toLocaleString("en-GB")} · {verifyQuery.data.orderCount} recorded orders · {verifyQuery.data.totalUnits} production units</p>
+            <p className="text-xs text-muted-foreground">Counts include every eligible order, even suspected duplicates. Filtering options above may change the displayed statistics; this audit uses the unfiltered operational order records.</p>
+            {verifyQuery.data.duplicates.length>0 ? <div className="border rounded-lg p-3 space-y-2">
+              <strong className="text-sm text-amber-700">{verifyQuery.data.duplicates.length} possible duplicate pairs — review before packing</strong>
+              {verifyQuery.data.duplicates.map(d=><p className="text-xs" key={d.first+"-"+d.second}>{d.customerName}: orders #{d.first} / #{d.second} — {d.reason}</p>)}
+            </div> : <p className="text-sm">No high-similarity order pairs detected in this week's records.</p>}
+            <div className="space-y-2">
+              {verifyQuery.data.products.map(p=>{
+                const display=(!hideAddons&&!hideAddDelivery&&!hideSubscriptionBase) ? computed?.all.mealCounts[p.productName] : undefined;
+                const differs=display!==undefined&&display!==p.quantity;
+                return <div key={p.productName} className="rounded-lg border p-3 space-y-2">
+                  <button type="button" className="w-full flex justify-between items-center gap-3 text-sm text-left" onClick={()=>setExpandedProduct(expandedProduct===p.productName?null:p.productName)}>
+                    <span className="font-medium">{p.productName}</span>
+                    <span className={differs?"text-destructive font-semibold":"font-semibold"}>Records: {p.quantity}{display!==undefined?` · Page: ${display}`:""} {differs?"⚠":"▾"}</span>
+                  </button>
+                  {expandedProduct===p.productName && <div className="border-t pt-2 space-y-1">{p.orders.map((o,i)=><div key={o.orderId+"-"+i} className="text-xs flex justify-between gap-2"><span>#{o.orderId} · {o.customerName}</span><strong>{o.quantity}</strong></div>)}</div>}
+                </div>;
+              })}
+            </div>
+          </div>}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardContent className="py-3 px-4">

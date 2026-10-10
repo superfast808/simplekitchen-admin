@@ -1,3 +1,7 @@
+import { OperationsAssistant } from "@/components/operations-assistant";
+import DriverLocations from "@/pages/driver-locations";
+import DriverApp from "@/pages/driver-app";
+import DispatchDevelopment from "@/pages/dispatch-development";
 import { Switch, Route, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider, useQuery } from "@tanstack/react-query";
@@ -8,11 +12,13 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
-import { LogOut } from "lucide-react";
+import { LogOut, RefreshCw } from "lucide-react";
 import NotFound from "@/pages/not-found";
 import OrdersPage from "@/pages/orders";
 import ProductsPage from "@/pages/products";
 import ProductTotalsPage from "@/pages/product-totals";
+import KitchenProductionPage from "@/pages/kitchen-production";
+import PossibleDuplicatesPage from "@/pages/possible-duplicates";
 import IngredientsPage from "@/pages/ingredients";
 import ManualStockPage from "@/pages/manual-stock";
 import TuesdayDeliveryRoutesPage from "@/pages/tuesday-delivery-routes";
@@ -30,9 +36,13 @@ import AddonPage, { AddonSuccessPage } from "@/pages/addon";
 import IngredientLibraryPage from "@/pages/ingredient-library";
 import LoginPage from "@/pages/login";
 import SystemStatusPage from "@/pages/system-status";
+import CustomerPortal from "@/pages/customer-portal";
+import ChristmasManagement from "@/pages/christmas-management";
 
 function isPublicRoute(location: string) {
   return (
+    (location === "/my" || location.startsWith("/my/")) ||
+    location === "/driver" ||
     location.startsWith("/subscribe/") ||
     location.startsWith("/addon/")
   );
@@ -41,6 +51,9 @@ function isPublicRoute(location: string) {
 function PublicRoutes() {
   return (
     <Switch>
+      <Route path="/my/subscribe/:token">{(params) => <SubscribePage params={params} />}</Route>
+      <Route path="/my" component={CustomerPortal} />
+      <Route path="/driver" component={DriverApp} />
       <Route path="/subscribe/:token/payment-success">
         {(params) => <PaymentSuccessPage params={params} />}
       </Route>
@@ -62,10 +75,19 @@ function PageRouter() {
     <Switch>
       <Route path="/" component={OrdersPage} />
       <Route path="/products" component={ProductsPage} />
+      <Route path="/christmas/orders">{() => <ChristmasManagement mode="orders" />}</Route>
+      <Route path="/christmas/delivery">{() => <ChristmasManagement mode="delivery" />}</Route>
+      <Route path="/christmas/weekly">{() => <ChristmasManagement mode="weekly" />}</Route>
+      <Route path="/christmas/monthly">{() => <ChristmasManagement mode="monthly" />}</Route>
       <Route path="/product-totals" component={ProductTotalsPage} />
+      <Route path="/kitchen-production" component={KitchenProductionPage} />
+      <Route path="/possible-duplicates" component={PossibleDuplicatesPage} />
       <Route path="/ingredients" component={IngredientsPage} />
       <Route path="/manual-stock" component={ManualStockPage} />
       <Route path="/routes/tuesday" component={TuesdayDeliveryRoutesPage} />
+      <Route path="/dispatch/locations" component={DriverLocations} />
+      <Route path="/dispatch/dev/tuesday">{() => <DispatchDevelopment day="tuesday" />}</Route>
+      <Route path="/dispatch/dev/saturday">{() => <DispatchDevelopment day="saturday" />}</Route>
       <Route path="/routes/saturday" component={SaturdayDeliveryRoutesPage} />
       <Route path="/weekly-stats" component={WeeklyStatsPage} />
       <Route path="/monthly-stats" component={MonthlyStatsPage} />
@@ -86,6 +108,15 @@ const sidebarStyle = {
   "--sidebar-width-icon": "3rem",
 };
 
+function hardRefreshAdmin() {
+  // Recreate the page and all active queries with a new navigation URL.
+  // This does not trigger a WooCommerce import or change operational records.
+  queryClient.clear();
+  const url = new URL(window.location.href);
+  url.searchParams.set("_sk_refresh", String(Date.now()));
+  window.location.replace(url.toString());
+}
+
 function AuthenticatedApp({ username, onLogout }: { username: string; onLogout: () => void }) {
   return (
     <SidebarProvider style={sidebarStyle as React.CSSProperties}>
@@ -95,6 +126,10 @@ function AuthenticatedApp({ username, onLogout }: { username: string; onLogout: 
           <header className="brand-topbar flex items-center justify-between gap-1 border-b px-3 py-2">
             <SidebarTrigger data-testid="button-sidebar-toggle" />
             <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" onClick={hardRefreshAdmin} title="Reload this page and fetch fresh operational data" data-testid="button-hard-refresh" className="gap-2">
+                <RefreshCw className="w-4 h-4" />
+                <span className="hidden sm:inline">Hard refresh</span>
+              </Button>
               <span className="text-sm text-muted-foreground" data-testid="text-current-user">{username}</span>
               <Button size="icon" variant="ghost" onClick={onLogout} data-testid="button-logout" title="Sign out">
                 <LogOut className="w-4 h-4" />
@@ -102,6 +137,7 @@ function AuthenticatedApp({ username, onLogout }: { username: string; onLogout: 
               <ThemeToggle />
             </div>
           </header>
+          <OperationsAssistant context="admin" />
           <main className="brand-main flex-1 overflow-auto">
             <PageRouter />
           </main>

@@ -31,6 +31,63 @@ export async function runStartupMigrations() {
         )
     `);
 
+    await client.query(`CREATE TABLE IF NOT EXISTS order_action_audit (id bigserial PRIMARY KEY, order_id integer NOT NULL, actor_id text NOT NULL, action text NOT NULL, details text NOT NULL, created_at timestamptz NOT NULL DEFAULT NOW())`);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS customer_magic_links (
+        token_hash text PRIMARY KEY, email text NOT NULL, expires_at timestamptz NOT NULL,
+        consumed_at timestamptz, created_at timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+    // Keep interest sign-ups separate from authentication links. A person can
+    // register once, and failed SMTP delivery can be retried after 30 minutes.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS customer_portal_interest (
+        email text PRIMARY KEY,
+        ip_hash text NOT NULL,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        last_attempt_at timestamptz NOT NULL DEFAULT now(),
+        customer_sent_at timestamptz,
+        owner_sent_at timestamptz
+      )
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_customer_portal_interest_ip ON customer_portal_interest (ip_hash, created_at)`);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS customer_portal_sessions (
+        token_hash text PRIMARY KEY, email text NOT NULL, expires_at timestamptz NOT NULL,
+        created_at timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+    await client.query("ALTER TABLE customer_magic_links ADD COLUMN IF NOT EXISTS test_recipient text");
+    await client.query("ALTER TABLE customer_portal_sessions ADD COLUMN IF NOT EXISTS test_recipient text");
+    await client.query(`CREATE TABLE IF NOT EXISTS customer_push_test_devices (
+      endpoint text PRIMARY KEY, customer_email text NOT NULL, test_recipient text NOT NULL,
+      registered_at timestamptz NOT NULL DEFAULT now()
+    )`);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS customer_portal_notifications (
+        id bigserial PRIMARY KEY, email text NOT NULL, event_key text NOT NULL UNIQUE,
+        delivered_to text, status text NOT NULL, created_at timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+    await client.query(`
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_delivery_instructions text
+    `);
+
+    await client.query(`CREATE TABLE IF NOT EXISTS customer_portal_alerts (
+      id bigserial PRIMARY KEY, email text NOT NULL, event_key text NOT NULL UNIQUE,
+      title text NOT NULL, body text NOT NULL, created_at timestamptz NOT NULL DEFAULT NOW()
+    )`);
+    await client.query(`CREATE TABLE IF NOT EXISTS customer_portal_alert_reads (
+      alert_id bigint NOT NULL REFERENCES customer_portal_alerts(id) ON DELETE CASCADE,
+      email text NOT NULL, read_at timestamptz NOT NULL DEFAULT NOW(),
+      PRIMARY KEY(alert_id,email)
+    )`);
+    await client.query(`CREATE TABLE IF NOT EXISTS customer_push_subscriptions (
+      endpoint text PRIMARY KEY, email text NOT NULL, p256dh text NOT NULL, auth text NOT NULL,
+      created_at timestamptz NOT NULL DEFAULT NOW(), last_success_at timestamptz
+    )`);
     // Add portal_overridden column to orders if not exists
     await client.query(`
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS portal_overridden boolean NOT NULL DEFAULT false
