@@ -4893,15 +4893,34 @@ export async function registerRoutes(
         .replace(/\{\{url\}\}/g, selectUrl);
       const emailHtml = `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">${emailBody}</div>`;
 
-      await transporter.sendMail({
-        from: fromEmail,
-        to: toEmail,
-        subject: emailSubject
-          .replace(/\{\{firstName\}\}/g, firstName)
-          .replace(/\{\{fullName\}\}/g, invite.customerName)
-          .replace(/\{\{qty\}\}/g, String(qty)),
-        html: emailHtml,
+      const attemptAt = new Date();
+      await storage.updateSubscriptionInviteEmailDelivery(id, {
+        lastAttemptAt: attemptAt,
+        lastError: null,
       });
+
+      try {
+        await transporter.sendMail({
+          from: fromEmail,
+          to: toEmail,
+          subject: emailSubject
+            .replace(/\{\{firstName\}\}/g, firstName)
+            .replace(/\{\{fullName\}\}/g, invite.customerName)
+            .replace(/\{\{qty\}\}/g, String(qty)),
+          html: emailHtml,
+        });
+        await storage.updateSubscriptionInviteEmailDelivery(id, {
+          sentAt: new Date(),
+          lastAttemptAt: attemptAt,
+          lastError: null,
+        });
+      } catch (emailErr: any) {
+        await storage.updateSubscriptionInviteEmailDelivery(id, {
+          lastAttemptAt: attemptAt,
+          lastError: (emailErr?.message || String(emailErr)).slice(0, 1000),
+        });
+        throw emailErr;
+      }
 
       res.json({ success: true, to: toEmail });
     } catch (error: any) {
