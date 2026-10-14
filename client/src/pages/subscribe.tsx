@@ -141,13 +141,18 @@ function LatestChooseMealsNotice() {
             <strong> most recent Choose Meals button</strong> in your email so you see the correct menu for this week.
           </p>
 
-          <div className="mt-3 inline-flex items-center gap-2 rounded-xl bg-emerald-700 px-3.5 py-2 text-sm font-semibold text-white shadow-sm">
-            <Mail className="h-4 w-4" />
-            Use your latest Choose Meals email
-          </div>
+          <Button
+            type="button"
+            className="mt-3 w-full sm:w-auto rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-semibold shadow-sm"
+            onClick={() => window.history.back()}
+            data-testid="button-return-to-latest-choose-meals-email"
+          >
+            <Mail className="h-4 w-4 mr-2" />
+            Go back and use my latest email
+          </Button>
 
           <p className="mt-2 text-xs text-stone-500 dark:text-stone-400">
-            If you opened an older email, please return to your inbox and open the newest one we sent you.
+            This should return you to the email or page you came from. Open the newest Simple Kitchen “Choose Meals” email and use that button.
           </p>
         </div>
       </div>
@@ -569,8 +574,10 @@ export default function SubscribePage({ params }: { params: { token: string } })
               </CardDescription>
             </div>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <div className="p-4 pb-0">
             <LatestChooseMealsNotice />
+          </div>
+          <CardContent className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="sub-email">Email Address</Label>
               <Input
@@ -599,6 +606,7 @@ export default function SubscribePage({ params }: { params: { token: string } })
     return (
       <div className="min-h-screen bg-[#f7f4ec] dark:bg-gray-950">
         <div className="max-w-2xl mx-auto px-4 sm:px-6 pt-4 pb-40">
+          <LatestChooseMealsNotice />
           <div className="text-center py-6 sm:py-8">
             <div className="mb-3"><BrandLogo size="sm" /></div>
             <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-stone-900 dark:text-white" data-testid="text-subscribe-title">Choose Your Meals</h1>
@@ -611,7 +619,6 @@ export default function SubscribePage({ params }: { params: { token: string } })
           </div>
 
           <div className="space-y-6">
-            <LatestChooseMealsNotice />
             {((data.includedOats || 0) > 0 || (data.includedSweetTreats || 0) > 0) && (
               <p className="text-xs text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/20 rounded-lg px-3 py-2">
                 Across both deliveries, {data.includedOats || 0} oats and {data.includedSweetTreats || 0} sweet treats are included at no extra charge. Additional add-ons are charged at the prices shown.
@@ -724,6 +731,7 @@ export default function SubscribePage({ params }: { params: { token: string } })
   return (
     <div className="min-h-screen bg-[#f7f4ec] dark:bg-gray-950">
       <div className="max-w-2xl mx-auto px-4 sm:px-6 pt-4 pb-36">
+        <LatestChooseMealsNotice />
         <div className="text-center py-6 sm:py-8">
           <div className="mb-3"><BrandLogo size="sm" /></div>
           <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-stone-900 dark:text-white" data-testid="text-subscribe-title">Choose Your Meals</h1>
@@ -735,10 +743,6 @@ export default function SubscribePage({ params }: { params: { token: string } })
               </span>
             )}
           </p>
-        </div>
-
-        <div className="mb-4">
-          <LatestChooseMealsNotice />
         </div>
 
         <div className="mb-4 flex items-center justify-center gap-2">
