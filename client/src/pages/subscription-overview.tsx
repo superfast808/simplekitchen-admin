@@ -83,25 +83,24 @@ type MealData = {
 };
 
 function getCurrentWeekRange(offsetWeeks: number = 0): { from: Date; to: Date } {
-  // Use UTC throughout so dates match what the backend stores (server runs in UTC).
-  const now = new Date();
-  const day = now.getUTCDay();
-  // Find the most recent or upcoming Saturday (day 6)
-  const daysUntilSat = (6 - day + 7) % 7;
-  const daysFromSat = day === 6 ? 0 : -(7 - daysUntilSat);
-  let satOffset = 0;
-  if (day >= 4 && day < 6) {
-    // Thu/Fri — upcoming Saturday
-    satOffset = daysUntilSat;
-  } else if (day === 0 || day === 1 || day === 2 || day === 3) {
-    // Sun–Wed — last Saturday
-    satOffset = daysFromSat;
-  }
-  // day === 6 → satOffset = 0 (today is Saturday)
-  const satUtcDate = now.getUTCDate() + satOffset + offsetWeeks * 7;
-  // Build UTC-anchored dates to match backend storage
-  const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), satUtcDate, 0, 0, 0, 0));
-  const to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), satUtcDate + 4, 23, 59, 59, 999));
+  // Presentation only: backend's weekOffset parameter decides which rows
+  // appear, so browser timezone cannot move subscriptions to another week.
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/London", year: "numeric", month: "2-digit",
+    day: "2-digit", weekday: "short", hour: "2-digit", hourCycle: "h23",
+  }).formatToParts(new Date());
+  const p = (key: string) => parts.find(x => x.type === key)?.value || "";
+  const weekDays: Record<string, number> = {
+    Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6,
+  };
+  const dow = weekDays[p("weekday")] ?? 0;
+  const hour = Number(p("hour"));
+  const from = new Date(Date.UTC(Number(p("year")), Number(p("month")) - 1, Number(p("day"))));
+  const daysBack = dow === 6 ? (hour < 12 ? 7 : 0) : dow === 0 ? 1 : dow + 1;
+  from.setUTCDate(from.getUTCDate() - daysBack + offsetWeeks * 7);
+  const to = new Date(from);
+  to.setUTCDate(to.getUTCDate() + 5);
+  to.setUTCHours(7, 0, 0, 0);
   return { from, to };
 }
 
