@@ -4081,8 +4081,13 @@ export async function registerRoutes(
 
   app.get("/api/subscription-invites", async (req, res) => {
     try {
-      const from = req.query.from ? new Date(req.query.from as string) : undefined;
-      const to = req.query.to ? new Date(req.query.to as string) : undefined;
+      const requestedOffset = typeof req.query.weekOffset === "string"
+        ? Number.parseInt(req.query.weekOffset, 10)
+        : null;
+      const offsetIsValid = requestedOffset !== null && Number.isInteger(requestedOffset) && Math.abs(requestedOffset) <= 52;
+      const authoritativeRange = offsetIsValid ? getWeekRange(requestedOffset) : null;
+      const from = authoritativeRange?.from ?? (req.query.from ? new Date(req.query.from as string) : undefined);
+      const to = authoritativeRange?.to ?? (req.query.to ? new Date(req.query.to as string) : undefined);
 
       // Auto-create invite records (no email) for any subscription orders this week
       // that don't have an invite yet, so admin can manage them immediately.
