@@ -126,6 +126,9 @@ export const subscriptionInvites = pgTable("subscription_invites", {
   subscriberId: integer("subscriber_id"),
   includedOats: integer("included_oats").notNull().default(0),
   includedSweetTreats: integer("included_sweet_treats").notNull().default(0),
+  inviteEmailSentAt: timestamp("invite_email_sent_at"),
+  inviteEmailLastAttemptAt: timestamp("invite_email_last_attempt_at"),
+  inviteEmailLastError: text("invite_email_last_error"),
 });
 
 export const subscriptionSelections = pgTable("subscription_selections", {
