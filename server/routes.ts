@@ -348,13 +348,23 @@ async function getCurrentWeekInfo(asOf?: Date): Promise<{ weekNumber: number; ca
   return { weekNumber, categoryName: `Week ${weekNumber}` };
 }
 
-async function getInviteWeekInfo(invite: { weekFrom: Date | string; weekTo?: Date | string | null }): Promise<{ weekNumber: number; categoryName: string }> {
+async function getInviteWeekInfo(invite: { orderId?: number | null; weekFrom: Date | string; weekTo?: Date | string | null }): Promise<{ weekNumber: number; categoryName: string }> {
+  // For Woo-origin subscription invites the originating renewal/order date is the
+  // strongest source of truth. If a historical timezone bug stamped week_from one
+  // week early, the customer link must still show the menu for the order they just
+  // renewed.
+  if (invite.orderId) {
+    const originOrder = await storage.getOrder(invite.orderId);
+    if (originOrder?.orderDate) {
+      return getCurrentWeekInfo(new Date(originOrder.orderDate));
+    }
+  }
+
   const from = new Date(invite.weekFrom);
   const to = invite.weekTo ? new Date(invite.weekTo) : null;
 
-  // Resolve the menu using a point safely INSIDE the invite's week rather than
-  // the Saturday boundary itself. This makes Friday-23:00/Saturday-00:00/BST
-  // storage variants irrelevant while preserving old links as their old week.
+  // Subscriber-only invites have no origin order, so resolve using a point safely
+  // inside their stored week instead of the DST-sensitive Saturday boundary.
   if (!Number.isNaN(from.getTime()) && to && !Number.isNaN(to.getTime()) && to > from) {
     const midpoint = new Date(from.getTime() + (to.getTime() - from.getTime()) / 2);
     return getCurrentWeekInfo(midpoint);
@@ -1367,11 +1377,23 @@ const SUBSCRIBER_SYNC_INTERVAL_MS = 30 * 60 * 1000; // every 30 minutes
 
 function startSubscriberSyncScheduler() {
   if (subscriberSyncInterval) clearInterval(subscriberSyncInterval);
-  subscriberSyncInterval = setInterval(() => {
-    runSubscriberSync().catch((err) => log(`Subscriber sync error: ${err.message}`, "sync"));
-  }, SUBSCRIBER_SYNC_INTERVAL_MS);
-  // Run once shortly after startup
-  setTimeout(() => runSubscriberSync().catch((err) => log(`Subscriber sync error: ${err.message}`, "sync")), 10000);
+
+  const reconcileSubscriptions = async () => {
+    try {
+      // Woo-renewal subscriptions and manually-managed subscribers are two
+      // independent sources. Reconcile both even when the general Woo auto-sync
+      // switch is disabled, so already-synced renewal orders cannot sit without
+      // an invite/email.
+      await autoSendSubscriptionInvites();
+      await runSubscriberSync();
+    } catch (err: any) {
+      log(`Subscription reconciliation error: ${err.message}`, "sync");
+    }
+  };
+
+  subscriberSyncInterval = setInterval(reconcileSubscriptions, SUBSCRIBER_SYNC_INTERVAL_MS);
+  // Run once shortly after startup.
+  setTimeout(reconcileSubscriptions, 10000);
 }
 
 // ── Scheduled Saturday 1pm London-time product sync ───────────────────────────
