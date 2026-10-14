@@ -5004,9 +5004,17 @@ export async function registerRoutes(
   });
 
   app.delete("/api/recurring-orders/:id", async (req, res) => {
+    if (!req.session?.userId) return res.status(401).json({ message: "Not authenticated" });
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id < 1) {
+      return res.status(400).json({ message: "Invalid recurring customer ID" });
+    }
     try {
-      await storage.deleteRecurringOrder(parseInt(req.params.id));
-      res.json({ success: true });
+      const existing = await storage.getRecurringOrder(id);
+      if (!existing) return res.status(404).json({ message: "Recurring customer template not found" });
+      // Only removes the template. Existing stamped orders remain untouched.
+      await storage.deleteRecurringOrder(id);
+      res.json({ success: true, id });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
