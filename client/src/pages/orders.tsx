@@ -2,6 +2,7 @@ import { DebugExportButton } from "@/components/debug-export-button";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { OrderActions } from "@/components/order-actions";
+import { OrderDeleteButton } from "@/components/order-delete-button";
 import { format } from "date-fns";
 import { useState, useMemo } from "react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -264,14 +265,6 @@ export default function OrdersPage() {
       queryClient.invalidateQueries({queryKey:["/api/orders"]});
     },
     onError: (error: Error) => toast({ title: "Sync failed", description: error.message, variant: "destructive" }),
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: (id: number) => apiRequest("DELETE", `/api/orders/${id}`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
-      toast({ title: "Order deleted" });
-    },
   });
 
   const moveWeekMutation = useMutation({
@@ -1042,6 +1035,14 @@ export default function OrdersPage() {
                               </>
                             );
                           })()}
+                          {order.isManual && !(order as any).isSubscriptionStamped && (
+                            <OrderDeleteButton
+                              kind="manual"
+                              orderId={order.id}
+                              customerName={order.customerName}
+                              testId={`button-delete-custom-order-${order.id}`}
+                            />
+                          )}
                           <OrderActions orderId={order.id} />
                         </div>
                       </TableCell>
