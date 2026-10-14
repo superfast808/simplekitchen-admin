@@ -551,34 +551,64 @@ function isWithinAutoSendWindow(): boolean {
 // For orders that contain both "Saturday Delivery" and "Tuesday Delivery" (dual-day orders),
 // one slot gets isTuesday=false (Saturday) and one gets isTuesday=true (Tuesday).
 // For "2 week" subscription products, one dual-day slot is returned (isDual=true).
-const SUB_PATTERN = /meal\s+subscription\s*-\s*(\d+)/i;
+// Renewal line item names vary between WooCommerce subscription products,
+// variations and checkout plugins. Detect the subscription first, then parse
+// the MEAL count without accidentally reading the "2" in "2 week".
+const SUB_PATTERN = /\bmeal\s+subscription\b|\b\d+\s*meals?\s+subscription\b/i;
 const TWO_WEEK_PATTERN = /2\s*week/i;
 const WEEKLY_SUB_PATTERN = /weekly.*meal.*subscription|meal.*subscription.*weekly/i;
+function getSubscriptionMealCount(item: { productName: string; quantity?: number }): number {
+  const name = item.productName;
+  const countMatch =
+    name.match(/[-–—:]\s*(\d+)\b/) ||
+    name.match(/\b(\d+)\s*meals?\s+subscription\b/i) ||
+    name.match(/\b(\d+)\s*meals?\b/i) ||
+    name.match(/\bmeal\s+subscription\s+(\d+)(?!\s*weeks?\b)/i);
+  const count = countMatch ? Number(countMatch[1]) : Number(item.quantity || 0);
+  return Number.isSafeInteger(count) && count > 0 ? count : 0;
+}
 function getSubscriptionSlots(order: { isTuesday: boolean; items: Array<{ productName: string; quantity?: number }> }): Array<{ qty: number; isTuesday: boolean; isDual: boolean }> {
-  const subItems = order.items.filter(i => SUB_PATTERN.test(i.productName) || (WEEKLY_SUB_PATTERN.test(i.productName)));
+  const subItems = order.items.filter(i => SUB_PATTERN.test(i.productName) || WEEKLY_SUB_PATTERN.test(i.productName));
   if (subItems.length === 0) return [];
 
   const hasSatDelivery = order.items.some(i => /saturday.*delivery|delivery.*saturday/i.test(i.productName));
   const hasTueDelivery = order.items.some(i => /tuesday.*delivery|delivery.*tuesday/i.test(i.productName));
 
   if (subItems.length > 1 && hasSatDelivery && hasTueDelivery) {
-    // Dual-day order — assign alternate days (Sat first, then Tue, then repeat)
-    return subItems.map((item, idx) => {
-      const m = item.productName.match(SUB_PATTERN);
-      const qty = m ? parseInt(m[1], 10) : (item.quantity || 0);
-      return { qty, isTuesday: idx % 2 !== 0, isDual: false };
-    }).filter(s => s.qty > 0);
+    return subItems.map((item, idx) => ({
+      qty: getSubscriptionMealCount(item),
+      isTuesday: idx % 2 !== 0,
+      isDual: false,
+    })).filter(slot => slot.qty > 0);
   }
 
-  // Single subscription (or same day repeated) — check for "2 week" dual-day flag
-  return subItems.map(item => {
-    // Try primary pattern first (e.g. "Meal Subscription - 6"),
-    // then fall back to any trailing "- N" in the name (e.g. "Meal Subscription 2 week - 6")
-    const m = item.productName.match(SUB_PATTERN) || item.productName.match(/-\s*(\d+)\s*$/);
-    const qty = m ? parseInt(m[1], 10) : (item.quantity || 0);
-    const isDual = TWO_WEEK_PATTERN.test(item.productName);
-    return { qty, isTuesday: isDual ? false : order.isTuesday, isDual };
-  }).filter(s => s.qty > 0);
+  return subItems.map(item => ({
+    qty: getSubscriptionMealCount(item),
+    isTuesday: TWO_WEEK_PATTERN.test(item.productName) ? false : order.isTuesday,
+    isDual: TWO_WEEK_PATTERN.test(item.productName),
+  })).filter(slot => slot.qty > 0);
+}
+
+// Old pending email URLs should follow a newer pending invitation for the same
+// customer AND delivery day, when an actual new-week invite exists. This keeps
+// both the GET menu and POST/Stripe submission on the same week without
+// rewriting completed historical orders or creating unrenewed subscriptions.
+async function resolveInviteForSelection(token: string) {
+  const original = await storage.getSubscriptionInviteByToken(token);
+  if (!original || original.status !== "pending") return original;
+  const currentWeek = getWeekRange(0);
+  const oldWeekEnd = new Date(original.weekTo).getTime();
+  if (!Number.isFinite(oldWeekEnd) || oldWeekEnd >= currentWeek.from.getTime() - 18 * 60 * 60 * 1000) {
+    return original;
+  }
+  const currentInvites = await storage.getSubscriptionInvites(currentWeek.from, currentWeek.to);
+  const email = original.customerEmail.trim().toLowerCase();
+  return currentInvites.find(i =>
+    i.status === "pending" &&
+    i.customerEmail.trim().toLowerCase() === email &&
+    i.isTuesday === original.isTuesday &&
+    i.isDual === original.isDual
+  ) || original;
 }
 
 type InviteEmailContext = {
@@ -4058,13 +4088,24 @@ export async function registerRoutes(
   });
 
   app.get("/api/subscription-invites", async (req, res) => {
+    if (!req.session?.userId) return res.status(401).json({ message: "Not authenticated" });
     try {
-      const from = req.query.from ? new Date(req.query.from as string) : undefined;
-      const to = req.query.to ? new Date(req.query.to as string) : undefined;
+      // The server is authoritative for Saturday→Thursday windows; never use
+      // a browser-supplied timestamp to decide which week's invites to display.
+      const hasOffset = typeof req.query.weekOffset === "string";
+      const weekOffset = hasOffset ? Number(req.query.weekOffset) : undefined;
+      if (weekOffset !== undefined && (!Number.isInteger(weekOffset) || weekOffset < -52 || weekOffset > 0)) {
+        return res.status(400).json({ message: "Invalid subscription week offset" });
+      }
+      const selectedWeek = weekOffset !== undefined ? getWeekRange(weekOffset) : null;
+      const from = selectedWeek?.from ?? (req.query.from ? new Date(req.query.from as string) : undefined);
+      const to = selectedWeek?.to ?? (req.query.to ? new Date(req.query.to as string) : undefined);
 
+      const week = getWeekRange(0);
+      // Viewing a historical week must not create new records in the current one.
+      if (weekOffset === undefined || weekOffset === 0) {
       // Auto-create invite records (no email) for any subscription orders this week
       // that don't have an invite yet, so admin can manage them immediately.
-      const week = getWeekRange(0);
       const weekOrders = await storage.getOrders(week.from, week.to);
       const weekOrdersWithItems = await Promise.all(
         weekOrders.map(async (o) => ({ ...o, items: await storage.getOrderItems(o.id) }))
@@ -4104,6 +4145,43 @@ export async function registerRoutes(
           } as any);
           existingKeys.add(key);
         }
+      }
+
+      // Manual subscribers must be visible even if Woo renewal import or SMTP
+      // has failed. Never charge or email anyone as a side effect of this GET.
+      // Match existing order-origin invites by email to avoid duplicate rows.
+      const subscribers = await storage.getSubscribers(true);
+      const present = await storage.getSubscriptionInvites(week.from, week.to);
+      const presentIds = new Set(present.map(i => i.subscriberId).filter((id): id is number => id != null));
+      const presentEmails = new Set(present.map(i => i.customerEmail.trim().toLowerCase()));
+      for (const sub of subscribers) {
+        const email = sub.customerEmail.trim().toLowerCase();
+        if (presentIds.has(sub.id) || presentEmails.has(email)) continue;
+        const pastAddress = await storage.getCustomerDeliveryAddress(sub.customerEmail, sub.customerName);
+        try {
+          await storage.createSubscriptionInvite({
+            orderId: null,
+            subscriberId: sub.id,
+            customerEmail: sub.customerEmail,
+            customerName: sub.customerName,
+            token: crypto.randomBytes(32).toString("hex"),
+            subscriptionQuantity: sub.quantity,
+            status: "pending",
+            weekFrom: getSubscriptionWeekFrom(week.from),
+            weekTo: week.to,
+            deliveryAddress: pastAddress?.deliveryAddress ?? null,
+            fulfillmentType: pastAddress?.fulfillmentType ?? "delivery",
+            isTuesday: sub.deliveryDay === "tue",
+            isDual: sub.deliveryDay === "dual",
+            includedOats: sub.includedOats,
+            includedSweetTreats: sub.includedSweetTreats,
+          } as any);
+        } catch (error: any) {
+          if (error?.code !== "23505") throw error; // concurrent fetch won unique subscriber/week index
+        }
+        presentIds.add(sub.id);
+        presentEmails.add(email);
+      }
       }
 
       const invites = await storage.getSubscriptionInvites(from, to);
@@ -4159,7 +4237,7 @@ export async function registerRoutes(
 
   app.get("/api/subscribe/:token", async (req, res) => {
     try {
-      const invite = await storage.getSubscriptionInviteByToken(req.params.token);
+      const invite = await resolveInviteForSelection(req.params.token);
       if (!invite) {
         return res.status(404).json({ message: "Invitation not found or expired" });
       }
@@ -4293,7 +4371,7 @@ export async function registerRoutes(
 
   app.post("/api/subscribe/:token", async (req, res) => {
     try {
-      const invite = await storage.getSubscriptionInviteByToken(req.params.token);
+      const invite = await resolveInviteForSelection(req.params.token);
       if (!invite) {
         return res.status(404).json({ message: "Invitation not found" });
       }
@@ -5960,7 +6038,7 @@ export async function registerRoutes(
   // ─── Stripe: create payment intent for addon charges ───────────────────────
   app.post("/api/subscribe/:token/create-payment-intent", async (req, res) => {
     try {
-      const invite = await storage.getSubscriptionInviteByToken(req.params.token);
+      const invite = await resolveInviteForSelection(req.params.token);
       if (!invite) return res.status(404).json({ message: "Invitation not found" });
 
       const { amountPence, description, items } = req.body;
@@ -5998,7 +6076,7 @@ export async function registerRoutes(
   // ─── Stripe: confirm payment completed (called after redirect) ──────────────
   app.post("/api/subscribe/:token/confirm-payment", async (req, res) => {
     try {
-      const invite = await storage.getSubscriptionInviteByToken(req.params.token);
+      const invite = await resolveInviteForSelection(req.params.token);
       if (!invite) return res.status(404).json({ message: "Invitation not found" });
 
       const { paymentIntentId } = req.body;

@@ -101,6 +101,8 @@ function getCurrentWeekRange(offsetWeeks: number = 0): { from: Date; to: Date } 
     month: "2-digit",
     day: "2-digit",
     weekday: "short",
+    hour: "2-digit",
+    hourCycle: "h23",
   }).formatToParts(now);
 
   const getPart = (type: string) => parts.find(part => part.type === type)?.value || "";
@@ -112,9 +114,11 @@ function getCurrentWeekRange(offsetWeeks: number = 0): { from: Date; to: Date } 
     Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6,
   };
   const day = weekdayIndex[weekday] ?? now.getUTCDay();
+  const hour = Number(getPart("hour"));
 
   const londonCalendarDate = new Date(Date.UTC(year, month - 1, dayOfMonth));
-  const daysBack = day === 6 ? 0 : day === 0 ? 1 : day + 1;
+  // Match the backend's Saturday-noon operational turnover.
+  const daysBack = day === 6 ? (hour < 12 ? 7 : 0) : day === 0 ? 1 : day + 1;
   londonCalendarDate.setUTCDate(
     londonCalendarDate.getUTCDate() - daysBack + offsetWeeks * 7
   );
@@ -152,12 +156,14 @@ export default function SubscriptionOverviewPage() {
   const weekRange = getCurrentWeekRange(weekOffset);
   const isCurrentWeek = weekOffset === 0;
 
-  const { data: invites = [], isLoading } = useQuery<Invite[]>({
-    queryKey: ["/api/subscription-invites", weekRange.from.toISOString(), weekRange.to.toISOString()],
+  const { data: invites = [], isLoading, isError: invitesFailed, error: invitesError, refetch: retryInvites } = useQuery<Invite[]>({
+    queryKey: ["/api/subscription-invites", weekOffset],
     queryFn: async () => {
-      const url = `/api/subscription-invites?from=${weekRange.from.toISOString()}&to=${weekRange.to.toISOString()}`;
-      const res = await fetch(url, { credentials: "include" });
-      if (!res.ok) throw new Error("Failed to fetch");
+      const res = await fetch(`/api/subscription-invites?weekOffset=${weekOffset}`, { credentials: "include" });
+      if (!res.ok) {
+        const details = await res.json().catch(() => null);
+        throw new Error(details?.message || `Could not load subscriptions (HTTP ${res.status})`);
+      }
       return res.json();
     },
   });
@@ -725,6 +731,12 @@ export default function SubscriptionOverviewPage() {
           {isLoading ? (
             <div className="p-6 space-y-3">
               {[1, 2, 3].map(i => <Skeleton key={i} className="h-12 w-full" />)}
+            </div>
+          ) : invitesFailed ? (
+            <div className="p-8 text-center space-y-3">
+              <p className="font-semibold text-destructive">Could not load subscription invitations</p>
+              <p className="text-sm text-muted-foreground">{invitesError instanceof Error ? invitesError.message : "Please check the server logs."}</p>
+              <Button variant="outline" onClick={() => retryInvites()}>Retry loading</Button>
             </div>
           ) : invites.length === 0 ? (
             <div className="p-12 text-center text-muted-foreground space-y-3">
