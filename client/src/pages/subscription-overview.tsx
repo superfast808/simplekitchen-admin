@@ -47,6 +47,10 @@ type Invite = {
   isTuesday?: boolean;
   isDual?: boolean;
   subscriberId?: number | null;
+  inviteEmailSentAt?: string | null;
+  inviteEmailLastAttemptAt?: string | null;
+  inviteEmailLastError?: string | null;
+  inviteEmailLegacy?: boolean;
 };
 
 type Subscriber = {
@@ -146,12 +150,14 @@ export default function SubscriptionOverviewPage() {
     onSuccess: async (res) => {
       const data = await res.json();
       let desc = "";
-      if (data.sent > 0) desc = `${data.sent} email${data.sent !== 1 ? "s" : ""} sent successfully.`;
+      if (data.sent > 0) desc = `${data.sent} email${data.sent !== 1 ? "s" : ""} accepted by SMTP.`;
+      if (data.tested > 0) desc += ` ${data.tested} test email${data.tested !== 1 ? "s" : ""} sent to override address; customers not marked emailed.`;
+      if (data.failed > 0) desc += ` ${data.failed} failed.`;
       if (data.skipped > 0) desc += `${desc ? " " : ""}${data.skipped} already invited this week (skipped).`;
       if (data.sent === 0 && data.skipped === 0 && data.message) desc = data.message;
       if (data.errors?.length) desc += ` Errors: ${data.errors.join(", ")}`;
       toast({
-        title: data.sent > 0 ? "Emails sent" : (data.skipped > 0 ? "Already sent" : "No emails sent"),
+        title: data.sent > 0 || data.tested > 0 ? "Email sending complete" : (data.skipped > 0 ? "No eligible unsent emails" : "No emails sent"),
         description: desc || "No subscription customers found this week.",
       });
       queryClient.invalidateQueries({ queryKey: ["/api/subscription-invites"] });
@@ -412,6 +418,11 @@ export default function SubscriptionOverviewPage() {
 
   const completed = invites.filter(i => i.status === "completed");
   const pending = invites.filter(i => i.status === "pending");
+  const smtpAccepted = invites.filter(i => i.inviteEmailSentAt && !i.inviteEmailLegacy).length;
+  const legacyCount = invites.filter(i => i.inviteEmailLegacy).length;
+  const failedEmails = invites.filter(i => i.status === "pending" && i.inviteEmailLastError).length;
+  const awaitingEmails = invites.filter(i => i.status === "pending" && !i.inviteEmailLegacy &&
+    !i.inviteEmailSentAt && !i.inviteEmailLastError).length;
 
   const weekLabel = isCurrentWeek
     ? `This week (${format(weekRange.from, "d MMM")} – ${format(weekRange.to, "d MMM")})`
@@ -660,6 +671,39 @@ export default function SubscriptionOverviewPage() {
         </Button>
       </div>
 
+      {!isLoading && !invitesFailed && (
+        <Card data-testid="subscription-email-health">
+          <CardContent className="p-4 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="text-sm font-semibold">Subscription health · {weekLabel}</div>
+              <Button type="button" variant="ghost" size="sm" onClick={() => retryInvites()}>
+                <RefreshCw className="h-3.5 w-3.5 mr-1" /> Refresh
+              </Button>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {[
+                ["Invitations", invites.length],
+                ["Meals chosen", completed.length],
+                ["SMTP accepted", smtpAccepted],
+                ["Awaiting email", awaitingEmails],
+                ["Email failed", failedEmails],
+                ["Historical / unverified", legacyCount],
+              ].map(([label, amount]) => (
+                <div key={label} className="rounded-lg border bg-muted/30 p-3 text-center">
+                  <div className="text-xl font-bold tabular-nums">{amount}</div>
+                  <div className="text-xs text-muted-foreground">{label}</div>
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              SMTP acceptance means the mail server accepted the email, not that it reached the inbox.
+              Historical invitations predate reliable tracking, so they are not automatically resent.
+              Check individual customers before choosing Resend.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
       {isCurrentWeek && showSendPanel && (
         <Card data-testid="card-send-invites">
           <CardHeader>
@@ -770,7 +814,20 @@ export default function SubscriptionOverviewPage() {
                           )}
                         </div>
                       </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">{invite.customerEmail}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        <div>{invite.customerEmail}</div>
+                        <div className="mt-1">
+                          {invite.inviteEmailLegacy ? (
+                            <Badge variant="outline">Historical · unverified</Badge>
+                          ) : invite.inviteEmailLastError ? (
+                            <Badge variant="destructive" title={invite.inviteEmailLastError}>Email failed</Badge>
+                          ) : invite.inviteEmailSentAt ? (
+                            <Badge className="bg-emerald-100 text-emerald-900">SMTP accepted</Badge>
+                          ) : (
+                            <Badge variant="secondary">Awaiting email</Badge>
+                          )}
+                        </div>
+                      </TableCell>
                       <TableCell className="text-center">
                         <Badge variant="outline" className="text-xs">
                           {isComplete ? `${totalSelected}/` : ""}{invite.subscriptionQuantity}
