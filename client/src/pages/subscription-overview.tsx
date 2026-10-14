@@ -805,9 +805,30 @@ export default function SubscriptionOverviewPage() {
                             ))}
                           </div>
                         ) : (
-                          <span className="text-xs text-muted-foreground italic">
-                            Sent {format(new Date(invite.createdAt), "EEE d MMM, HH:mm")}
-                          </span>
+                          <div className="flex flex-col gap-1">
+                            {invite.inviteEmailLastError ? (
+                              <>
+                                <span className="text-xs font-medium text-red-600 dark:text-red-400">
+                                  Email failed
+                                </span>
+                                <span className="text-[11px] text-muted-foreground max-w-[280px] truncate" title={invite.inviteEmailLastError}>
+                                  {invite.inviteEmailLastError}
+                                </span>
+                              </>
+                            ) : invite.inviteEmailSentAt && invite.inviteEmailLastAttemptAt ? (
+                              <span className="text-xs text-emerald-700 dark:text-emerald-400">
+                                Email sent {format(new Date(invite.inviteEmailSentAt), "EEE d MMM, HH:mm")}
+                              </span>
+                            ) : invite.inviteEmailSentAt ? (
+                              <span className="text-xs text-amber-700 dark:text-amber-400">
+                                Legacy invite — email delivery unverified
+                              </span>
+                            ) : (
+                              <span className="text-xs text-amber-700 dark:text-amber-400">
+                                Email not sent
+                              </span>
+                            )}
+                          </div>
                         )}
                       </TableCell>
                       <TableCell className="text-center">
