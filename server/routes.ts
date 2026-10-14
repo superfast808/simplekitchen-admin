@@ -279,21 +279,64 @@ async function geocodeUkAddress(rawAddress: string): Promise<GeocodeResult> {
   return { lat: null, lng: null, displayName: null, postcode, source: null };
 }
 
-// Returns the current week number (1-6) based on week1ReferenceDate setting.
-// The week advances every Saturday at noon (every 7 days from the reference date).
+function getLondonCalendarParts(date: Date): { year: number; month: number; day: number; weekday: number; hour: number } {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/London",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    weekday: "short",
+    hour: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+
+  const get = (type: string) => parts.find(part => part.type === type)?.value || "";
+  const weekdayIndex: Record<string, number> = {
+    Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6,
+  };
+
+  return {
+    year: Number(get("year")),
+    month: Number(get("month")),
+    day: Number(get("day")),
+    weekday: weekdayIndex[get("weekday")] ?? date.getUTCDay(),
+    hour: Number(get("hour")),
+  };
+}
+
+function londonOperationalSaturday(date: Date): Date {
+  const p = getLondonCalendarParts(date);
+  const calendar = new Date(Date.UTC(p.year, p.month - 1, p.day));
+
+  // The commercial week turns over at Saturday noon. Before noon on Saturday,
+  // remain on the previous operational week; from noon onward Saturday is day 0.
+  const daysBack = p.weekday === 6
+    ? (p.hour < 12 ? 7 : 0)
+    : (p.weekday === 0 ? 1 : p.weekday + 1);
+
+  calendar.setUTCDate(calendar.getUTCDate() - daysBack);
+  calendar.setUTCHours(0, 0, 0, 0);
+  return calendar;
+}
+
+// Returns the rotating week number using London CALENDAR dates, never elapsed
+// milliseconds. This removes BST/GMT, server timezone and traveller/browser
+// timezone from the rotation calculation.
 async function getCurrentWeekInfo(asOf?: Date): Promise<{ weekNumber: number; categoryName: string }> {
   const refDateStr = await storage.getSetting("week1ReferenceDate");
   if (!refDateStr) return { weekNumber: 1, categoryName: "Week 1" };
+
   const refDate = new Date(refDateStr);
-  const now = asOf ?? new Date();
-  // The week boundary is at noon on each Saturday (matching the WooCommerce order-window open
-  // time stored in week1ReferenceDate). Invite weekFrom and order-week 'from' dates are stored
-  // as Saturday midnight (00:00 UTC), which is 12 h before the boundary and would otherwise
-  // land in the previous week. Shift by +12 h so midnight Saturday aligns with the correct week.
-  const normalized = new Date(now.getTime() + 12 * 60 * 60 * 1000);
-  const diffMs = normalized.getTime() - refDate.getTime();
-  if (diffMs < 0) return { weekNumber: 1, categoryName: "Week 1" };
-  const diffWeeks = Math.floor(diffMs / (7 * 24 * 60 * 60 * 1000));
+  if (Number.isNaN(refDate.getTime())) return { weekNumber: 1, categoryName: "Week 1" };
+
+  const refSaturday = londonOperationalSaturday(refDate);
+  const targetSaturday = londonOperationalSaturday(asOf ?? new Date());
+  const diffDays = Math.round(
+    (targetSaturday.getTime() - refSaturday.getTime()) / (24 * 60 * 60 * 1000)
+  );
+
+  if (diffDays < 0) return { weekNumber: 1, categoryName: "Week 1" };
+  const diffWeeks = Math.floor(diffDays / 7);
   const weekNumber = (diffWeeks % 6) + 1;
   return { weekNumber, categoryName: `Week ${weekNumber}` };
 }
@@ -446,26 +489,16 @@ let capturedBaseUrl = "";
 // were invisible to smart-stamp-all, causing it to fall back to stale templates
 // and stamp products from the wrong week's menu.
 function getWeekRange(offset = 0): { from: Date; to: Date } {
-  const now = new Date();
-  const ukNow = new Date(now.toLocaleString("en-US", { timeZone: "Europe/London" }));
-  const dayOfWeek = ukNow.getDay();
-  let saturdayDate: Date;
-  if (dayOfWeek === 6) {
-    saturdayDate = new Date(ukNow);
-  } else {
-    const daysBack = dayOfWeek === 0 ? 1 : dayOfWeek + 1;
-    saturdayDate = new Date(ukNow);
-    saturdayDate.setDate(ukNow.getDate() - daysBack);
-  }
+  const from = londonOperationalSaturday(new Date());
   if (offset !== 0) {
-    saturdayDate.setDate(saturdayDate.getDate() + offset * 7);
+    from.setUTCDate(from.getUTCDate() + offset * 7);
   }
-  const from = new Date(saturdayDate);
-  from.setHours(0, 0, 0, 0);
-  // Thursday 07:00 UK = Saturday + 5 days + 7 hours
-  const to = new Date(saturdayDate);
-  to.setDate(to.getDate() + 5);
-  to.setHours(7, 0, 0, 0);
+
+  // Persist/query the operational window in one stable UTC representation.
+  // London calendar logic above decides the correct Saturday; DST cannot move it.
+  const to = new Date(from);
+  to.setUTCDate(to.getUTCDate() + 5);
+  to.setUTCHours(7, 0, 0, 0);
   return { from, to };
 }
 
