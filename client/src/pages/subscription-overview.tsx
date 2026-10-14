@@ -174,7 +174,8 @@ export default function SubscriptionOverviewPage() {
     },
     onSuccess: async (res) => {
       const data = await res.json();
-      toast({ title: "Email resent", description: `Resent to ${data.to}` });
+      toast({ title: "Invitation accepted by SMTP", description: `Sent to ${data.to}` });
+      queryClient.invalidateQueries({ queryKey: ["/api/subscription-invites"] });
       setResendingId(null);
     },
     onError: (err: Error) => {
