@@ -304,14 +304,15 @@ function getLondonCalendarParts(date: Date): { year: number; month: number; day:
   };
 }
 
-function londonOperationalSaturday(date: Date): Date {
+function londonWeekSaturday(date: Date, respectNoonBoundary = false): Date {
   const p = getLondonCalendarParts(date);
   const calendar = new Date(Date.UTC(p.year, p.month - 1, p.day));
 
-  // The commercial week turns over at Saturday noon. Before noon on Saturday,
-  // remain on the previous operational week; from noon onward Saturday is day 0.
+  // For today's operational window we retain the Saturday-noon turnover. For an
+  // invite/reference timestamp, however, ANY time on Saturday belongs to that
+  // Saturday. That is vital for legacy invite rows stored at 00:00/01:00/14:00.
   const daysBack = p.weekday === 6
-    ? (p.hour < 12 ? 7 : 0)
+    ? (respectNoonBoundary && p.hour < 12 ? 7 : 0)
     : (p.weekday === 0 ? 1 : p.weekday + 1);
 
   calendar.setUTCDate(calendar.getUTCDate() - daysBack);
@@ -320,8 +321,8 @@ function londonOperationalSaturday(date: Date): Date {
 }
 
 // Returns the rotating week number using London CALENDAR dates, never elapsed
-// milliseconds. This removes BST/GMT, server timezone and traveller/browser
-// timezone from the rotation calculation.
+// milliseconds. Invite timestamps are treated as week anchors rather than clock
+// times, so legacy 23:00/00:00/14:00 storage variants cannot select Week N-1.
 async function getCurrentWeekInfo(asOf?: Date): Promise<{ weekNumber: number; categoryName: string }> {
   const refDateStr = await storage.getSetting("week1ReferenceDate");
   if (!refDateStr) return { weekNumber: 1, categoryName: "Week 1" };
@@ -329,8 +330,14 @@ async function getCurrentWeekInfo(asOf?: Date): Promise<{ weekNumber: number; ca
   const refDate = new Date(refDateStr);
   if (Number.isNaN(refDate.getTime())) return { weekNumber: 1, categoryName: "Week 1" };
 
-  const refSaturday = londonOperationalSaturday(refDate);
-  const targetSaturday = londonOperationalSaturday(asOf ?? new Date());
+  // The reference setting represents the Week 1 Saturday regardless of what
+  // clock time/date-input timezone was used when it was saved.
+  const refSaturday = londonWeekSaturday(refDate, false);
+
+  // Explicit asOf values are invite/week anchors: Saturday is always that week.
+  // Only the live "what week is it now?" call observes the Saturday-noon cutoff.
+  const targetSaturday = londonWeekSaturday(asOf ?? new Date(), asOf == null);
+
   const diffDays = Math.round(
     (targetSaturday.getTime() - refSaturday.getTime()) / (24 * 60 * 60 * 1000)
   );
@@ -489,7 +496,7 @@ let capturedBaseUrl = "";
 // were invisible to smart-stamp-all, causing it to fall back to stale templates
 // and stamp products from the wrong week's menu.
 function getWeekRange(offset = 0): { from: Date; to: Date } {
-  const from = londonOperationalSaturday(new Date());
+  const from = londonWeekSaturday(new Date(), true);
   if (offset !== 0) {
     from.setUTCDate(from.getUTCDate() + offset * 7);
   }
