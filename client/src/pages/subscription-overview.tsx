@@ -152,12 +152,22 @@ export default function SubscriptionOverviewPage() {
   const weekRange = getCurrentWeekRange(weekOffset);
   const isCurrentWeek = weekOffset === 0;
 
-  const { data: invites = [], isLoading } = useQuery<Invite[]>({
-    queryKey: ["/api/subscription-invites", weekRange.from.toISOString(), weekRange.to.toISOString()],
+  const { data: invites = [], isLoading, isError: invitesError, error: invitesQueryError } = useQuery<Invite[]>({
+    queryKey: ["/api/subscription-invites", "weekOffset", weekOffset],
     queryFn: async () => {
-      const url = `/api/subscription-invites?from=${weekRange.from.toISOString()}&to=${weekRange.to.toISOString()}`;
+      // The backend owns the subscription week boundary. Passing only the offset
+      // prevents browser/server timezone differences from making a populated week
+      // look empty in the admin.
+      const url = `/api/subscription-invites?weekOffset=${weekOffset}`;
       const res = await fetch(url, { credentials: "include" });
-      if (!res.ok) throw new Error("Failed to fetch");
+      if (!res.ok) {
+        let message = `Failed to load subscription invites (${res.status})`;
+        try {
+          const body = await res.json();
+          if (body?.message) message = body.message;
+        } catch {}
+        throw new Error(message);
+      }
       return res.json();
     },
   });
@@ -725,6 +735,20 @@ export default function SubscriptionOverviewPage() {
           {isLoading ? (
             <div className="p-6 space-y-3">
               {[1, 2, 3].map(i => <Skeleton key={i} className="h-12 w-full" />)}
+            </div>
+          ) : invitesError ? (
+            <div className="p-8 text-center space-y-3">
+              <p className="font-semibold text-red-600 dark:text-red-400">Could not load subscription invites</p>
+              <p className="text-sm text-muted-foreground">
+                {invitesQueryError instanceof Error ? invitesQueryError.message : "The server returned an error."}
+              </p>
+              <Button
+                variant="outline"
+                onClick={() => queryClient.invalidateQueries({ queryKey: ["/api/subscription-invites"] })}
+              >
+                <RefreshCw className="w-4 h-4 mr-2" />
+                Try again
+              </Button>
             </div>
           ) : invites.length === 0 ? (
             <div className="p-12 text-center text-muted-foreground space-y-3">
