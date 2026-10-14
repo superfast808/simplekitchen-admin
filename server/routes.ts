@@ -627,6 +627,12 @@ async function runSubscriberSync(): Promise<void> {
       });
     }
 
+    // Keep payment-link generation and payment reminders unchanged.
+    // They use the same SMTP/base URL configuration, but are not invite emails.
+    const transporter = mail?.transporter;
+    const fromEmail = mail?.fromEmail;
+    const baseUrl = mail?.baseUrl || await getPortalBaseUrl();
+
     // ── Auto-payment: send Stripe link if due and not recently sent ────────
     // nextPaymentDueAt is only advanced by the Stripe webhook (checkout.session.completed).
     // We track lastPaymentSentAt to avoid re-sending too frequently while a session is open.
