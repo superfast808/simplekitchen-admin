@@ -102,6 +102,30 @@ export async function runStartupMigrations() {
       ALTER TABLE subscription_invites ADD COLUMN IF NOT EXISTS subscriber_id INTEGER
     `);
 
+    // Track invite email delivery separately from invite creation. Previously an
+    // SMTP failure after creating the invite meant every later sync saw the invite
+    // and skipped it forever.
+    await client.query(`
+      ALTER TABLE subscription_invites ADD COLUMN IF NOT EXISTS invite_email_sent_at TIMESTAMP
+    `);
+    await client.query(`
+      ALTER TABLE subscription_invites ADD COLUMN IF NOT EXISTS invite_email_last_attempt_at TIMESTAMP
+    `);
+    await client.query(`
+      ALTER TABLE subscription_invites ADD COLUMN IF NOT EXISTS invite_email_last_error TEXT
+    `);
+
+    // Existing invites pre-date delivery tracking. Treat them as already sent so a
+    // deployment can never mass-resend old/current invitations. New invites start
+    // NULL and are retried safely until SMTP accepts them.
+    await client.query(`
+      UPDATE subscription_invites
+      SET invite_email_sent_at = created_at
+      WHERE invite_email_sent_at IS NULL
+        AND invite_email_last_attempt_at IS NULL
+        AND invite_email_last_error IS NULL
+    `);
+
     // Unique partial index: one invite per subscriber per week (NULL subscriber_id rows excluded)
     await client.query(`
       CREATE UNIQUE INDEX IF NOT EXISTS idx_subscription_invites_subscriber_week
