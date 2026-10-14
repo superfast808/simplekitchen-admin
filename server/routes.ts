@@ -2138,9 +2138,100 @@ export async function registerRoutes(
     }
   });
 
-  // Hard-delete is intentionally disabled; financial and fulfilment records must be retained.
-  app.delete("/api/orders/:id", (req, res) => {
-    res.status(403).json({ message: "Permanent deletion is disabled. Use Cancel or Refund & Cancel instead." });
+  // An admin can remove a locally-created, unpaid manual/stamped order only.
+  // Never hard-delete WooCommerce financial records, subscription selections,
+  // addon payments or dispatch activity.
+  app.delete("/api/orders/:id", async (req, res) => {
+    if (!req.session?.userId) return res.status(401).json({ message: "Not authenticated" });
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id < 1 || req.query.confirm !== String(id)) {
+      return res.status(400).json({ message: "Confirm the exact order number before deleting" });
+    }
+    const client = await pool.connect();
+    let transactionOpen = false;
+    try {
+      await client.query("BEGIN");
+      transactionOpen = true;
+      const found = await client.query(
+        "SELECT id, customer_name, order_date, status, is_manual, woo_id, woo_paid_total, cash_amount, payment_method FROM orders WHERE id=$1 FOR UPDATE",
+        [id]
+      );
+      if (found.rowCount === 0) {
+        await client.query("ROLLBACK");
+        transactionOpen = false;
+        return res.status(404).json({ message: "Order not found or already removed" });
+      }
+      const order = found.rows[0];
+      if (!order.is_manual || order.woo_id != null) {
+        await client.query("ROLLBACK");
+        transactionOpen = false;
+        return res.status(403).json({ message: "Website/WooCommerce orders cannot be deleted here. Use Cancel or Refund & Cancel instead." });
+      }
+      const linked = await client.query(`
+        SELECT
+          EXISTS (SELECT 1 FROM subscription_invites
+            WHERE order_id=$1 OR selections_order_id=$1 OR tuesday_selections_order_id=$1) AS subscription,
+          EXISTS (SELECT 1 FROM addon_links WHERE order_id=$1) AS addon,
+          EXISTS (SELECT 1 FROM dispatch_assignments WHERE order_id=$1) AS dispatch,
+          EXISTS (SELECT 1 FROM dispatch_events WHERE order_id=$1) AS dispatch_event,
+          EXISTS (SELECT 1 FROM dispatch_delivery_proofs WHERE order_id=$1) AS delivery_proof
+      `, [id]);
+      const refs = linked.rows[0];
+      if (refs.subscription || refs.addon || refs.dispatch || refs.dispatch_event || refs.delivery_proof) {
+        await client.query("ROLLBACK");
+        transactionOpen = false;
+        return res.status(409).json({
+          message: refs.subscription
+            ? "This stamped order belongs to a subscription. Manage it from Subscriptions to avoid breaking meal selections."
+            : refs.addon
+              ? "This order has an add-on payment link and cannot be permanently removed."
+              : "This order has dispatch or delivery history and cannot be permanently removed.",
+        });
+      }
+      if (Number(order.woo_paid_total || 0) > 0 ||
+          Number(order.cash_amount || 0) > 0 ||
+          ["completed", "delivered", "refunded"].includes(String(order.status).toLowerCase())) {
+        await client.query("ROLLBACK");
+        transactionOpen = false;
+        return res.status(409).json({
+          message: "This order has recorded payment or completion history. Use Cancel to retain its audit trail.",
+        });
+      }
+      // Keep a durable record of who removed the order without retaining an
+      // operational order that would affect kitchen totals, routes and labels.
+      const items = await client.query(
+        "SELECT product_name, quantity FROM order_items WHERE order_id=$1 ORDER BY id",
+        [id]
+      );
+      await client.query(
+        "INSERT INTO order_action_audit (order_id, actor_id, action, details) VALUES ($1,$2,$3,$4)",
+        [id, String(req.session.userId), "delete_manual_order",
+          JSON.stringify({
+            customerName: order.customer_name,
+            orderDate: order.order_date,
+            productSummary: items.rows,
+          })]
+      );
+      await client.query("DELETE FROM order_items WHERE order_id=$1", [id]);
+      const deleted = await client.query(
+        "DELETE FROM orders WHERE id=$1 AND is_manual=TRUE AND woo_id IS NULL RETURNING id",
+        [id]
+      );
+      if (deleted.rowCount !== 1) throw new Error("Manual order changed during deletion");
+      await client.query("COMMIT");
+      transactionOpen = false;
+      log(`Manual order #${id} removed by admin ${req.session.userId}`, "orders");
+      res.json({ success: true, id, deleted: true });
+    } catch (error: any) {
+      if (transactionOpen) await client.query("ROLLBACK").catch(() => {});
+      if (error?.code === "23503") {
+        return res.status(409).json({ message: "Another part of the system references this order. It cannot be safely deleted." });
+      }
+      log(`Manual order #${id} deletion failed: ${error?.message || error}`, "orders");
+      res.status(500).json({ message: "Could not delete manual order. Check server logs." });
+    } finally {
+      client.release();
+    }
   });
 
   app.get("/api/order-items", async (req, res) => {
