@@ -159,6 +159,27 @@ export async function runStartupMigrations() {
       ALTER TABLE subscription_invites ADD COLUMN IF NOT EXISTS subscriber_id INTEGER
     `);
 
+
+    // Run exactly once for historical rows. An old invite is unverified,
+    // NOT evidence of SMTP acceptance, and must not be mass-resent on deploy.
+    const trackingWasInstalled = await client.query(`
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND table_name = 'subscription_invites'
+        AND column_name = 'invite_email_legacy'
+    `);
+    await client.query(`ALTER TABLE subscription_invites ADD COLUMN IF NOT EXISTS invite_email_sent_at TIMESTAMP`);
+    await client.query(`ALTER TABLE subscription_invites ADD COLUMN IF NOT EXISTS invite_email_last_attempt_at TIMESTAMP`);
+    await client.query(`ALTER TABLE subscription_invites ADD COLUMN IF NOT EXISTS invite_email_last_error TEXT`);
+    await client.query(`ALTER TABLE subscription_invites ADD COLUMN IF NOT EXISTS invite_email_legacy BOOLEAN NOT NULL DEFAULT FALSE`);
+    if (trackingWasInstalled.rowCount === 0) {
+      await client.query(`
+        UPDATE subscription_invites
+        SET invite_email_legacy = TRUE
+        WHERE invite_email_last_attempt_at IS NULL
+      `);
+    }
+
     // Unique partial index: one invite per subscriber per week (NULL subscriber_id rows excluded)
     await client.query(`
       CREATE UNIQUE INDEX IF NOT EXISTS idx_subscription_invites_subscriber_week

@@ -66,6 +66,10 @@ export interface IStorage {
   createSubscriptionInvite(invite: InsertSubscriptionInvite): Promise<SubscriptionInvite>;
   getSubscriptionInviteByToken(token: string): Promise<SubscriptionInvite | undefined>;
   getSubscriptionInvites(from?: Date, to?: Date): Promise<SubscriptionInvite[]>;
+  claimSubscriptionInviteEmail(id: number, force?: boolean): Promise<boolean>;
+  updateSubscriptionInviteEmailDelivery(id: number, data: {
+    sentAt?: Date; lastAttemptAt?: Date; lastError?: string | null; legacy?: boolean;
+  }): Promise<void>;
   updateSubscriptionInviteStatus(id: number, status: string): Promise<void>;
   updateSubscriptionInviteQuantity(id: number, quantity: number): Promise<void>;
   setSubscriptionInviteSelectionsOrder(id: number, orderId: number): Promise<void>;
@@ -381,6 +385,30 @@ export class DatabaseStorage implements IStorage {
       if (r.tueId) ids.add(r.tueId as number);
     }
     return ids;
+  }
+
+  async claimSubscriptionInviteEmail(id: number, force = false): Promise<boolean> {
+    // Claim is atomic across workers: failed new invites retry at most every
+    // 20 minutes. Explicit one-person resends can override already-sent state.
+    const allowed = force
+      ? sql`(invite_email_last_attempt_at IS NULL OR invite_email_last_attempt_at < NOW() - INTERVAL '60 seconds')`
+      : sql`(invite_email_sent_at IS NULL AND invite_email_legacy = FALSE AND (invite_email_last_attempt_at IS NULL OR invite_email_last_attempt_at < NOW() - INTERVAL '20 minutes'))`;
+    const rows = await db.update(subscriptionInvites)
+      .set({ inviteEmailLastAttemptAt: new Date(), inviteEmailLastError: null })
+      .where(and(eq(subscriptionInvites.id, id), eq(subscriptionInvites.status, "pending"), allowed))
+      .returning({ id: subscriptionInvites.id });
+    return rows.length > 0;
+  }
+
+  async updateSubscriptionInviteEmailDelivery(id: number, data: {
+    sentAt?: Date; lastAttemptAt?: Date; lastError?: string | null; legacy?: boolean;
+  }): Promise<void> {
+    const update: Partial<typeof subscriptionInvites.$inferInsert> = {};
+    if (data.sentAt !== undefined) update.inviteEmailSentAt = data.sentAt;
+    if (data.lastAttemptAt !== undefined) update.inviteEmailLastAttemptAt = data.lastAttemptAt;
+    if (data.lastError !== undefined) update.inviteEmailLastError = data.lastError;
+    if (data.legacy !== undefined) update.inviteEmailLegacy = data.legacy;
+    await db.update(subscriptionInvites).set(update).where(eq(subscriptionInvites.id, id));
   }
 
   async updateSubscriptionInviteStatus(id: number, status: string): Promise<void> {
