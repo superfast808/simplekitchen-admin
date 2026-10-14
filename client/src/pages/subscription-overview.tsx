@@ -47,6 +47,9 @@ type Invite = {
   isTuesday?: boolean;
   isDual?: boolean;
   subscriberId?: number | null;
+  inviteEmailSentAt?: string | null;
+  inviteEmailLastAttemptAt?: string | null;
+  inviteEmailLastError?: string | null;
 };
 
 type Subscriber = {
@@ -87,25 +90,44 @@ type MealData = {
 };
 
 function getCurrentWeekRange(offsetWeeks: number = 0): { from: Date; to: Date } {
-  // Use UTC throughout so dates match what the backend stores (server runs in UTC).
+  // Use the Simple Kitchen operating timezone, not the browser/device timezone.
+  // The old client also jumped to *next* Saturday on Thu/Fri while the backend
+  // still used the previous Saturday, which could make an entire invite list
+  // appear empty. Keep one Saturday→Thursday window throughout the week.
   const now = new Date();
-  const day = now.getUTCDay();
-  // Find the most recent or upcoming Saturday (day 6)
-  const daysUntilSat = (6 - day + 7) % 7;
-  const daysFromSat = day === 6 ? 0 : -(7 - daysUntilSat);
-  let satOffset = 0;
-  if (day >= 4 && day < 6) {
-    // Thu/Fri — upcoming Saturday
-    satOffset = daysUntilSat;
-  } else if (day === 0 || day === 1 || day === 2 || day === 3) {
-    // Sun–Wed — last Saturday
-    satOffset = daysFromSat;
-  }
-  // day === 6 → satOffset = 0 (today is Saturday)
-  const satUtcDate = now.getUTCDate() + satOffset + offsetWeeks * 7;
-  // Build UTC-anchored dates to match backend storage
-  const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), satUtcDate, 0, 0, 0, 0));
-  const to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), satUtcDate + 4, 23, 59, 59, 999));
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/London",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    weekday: "short",
+  }).formatToParts(now);
+
+  const getPart = (type: string) => parts.find(part => part.type === type)?.value || "";
+  const year = Number(getPart("year"));
+  const month = Number(getPart("month"));
+  const dayOfMonth = Number(getPart("day"));
+  const weekday = getPart("weekday");
+  const weekdayIndex: Record<string, number> = {
+    Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6,
+  };
+  const day = weekdayIndex[weekday] ?? now.getUTCDay();
+
+  const londonCalendarDate = new Date(Date.UTC(year, month - 1, dayOfMonth));
+  const daysBack = day === 6 ? 0 : day === 0 ? 1 : day + 1;
+  londonCalendarDate.setUTCDate(
+    londonCalendarDate.getUTCDate() - daysBack + offsetWeeks * 7
+  );
+
+  const from = new Date(londonCalendarDate);
+  from.setUTCHours(0, 0, 0, 0);
+
+  // Mirror the backend operational week: Saturday 00:00 through Thursday 07:00.
+  // The API itself now matches by week overlap, so the BST/GMT hour cannot hide rows.
+  const to = new Date(from);
+  to.setUTCDate(to.getUTCDate() + 5);
+  to.setUTCHours(7, 0, 0, 0);
+
   return { from, to };
 }
 
