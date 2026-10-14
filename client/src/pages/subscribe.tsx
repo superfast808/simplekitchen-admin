@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { UtensilsCrossed, ChefHat, Check, Minus, Plus, ArrowRight, PartyPopper, CalendarDays } from "lucide-react";
+import { UtensilsCrossed, ChefHat, Check, Minus, Plus, ArrowRight, PartyPopper, CalendarDays, AlertTriangle, Mail } from "lucide-react";
 
 type AvailableMeal = {
   name: string;
@@ -115,6 +115,42 @@ function BrandLogo({ size = "lg" }: { size?: "lg" | "sm" }) {
         alt="Simple Kitchen Prep"
         className="w-full h-full object-contain rounded-2xl"
       />
+    </div>
+  );
+}
+
+
+function LatestChooseMealsNotice() {
+  return (
+    <div
+      role="status"
+      className="rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 via-orange-50 to-white px-4 py-4 shadow-sm dark:border-amber-900/60 dark:from-amber-950/30 dark:via-orange-950/20 dark:to-gray-900"
+      data-testid="notice-latest-choose-meals-link"
+    >
+      <div className="flex items-start gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-100 ring-1 ring-amber-200 dark:bg-amber-900/40 dark:ring-amber-800">
+          <AlertTriangle className="h-5 w-5 text-amber-700 dark:text-amber-300" />
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold text-stone-900 dark:text-white">
+            A quick note before you choose
+          </p>
+          <p className="mt-1 text-sm leading-relaxed text-stone-700 dark:text-stone-300">
+            We had a small system issue with some meal-selection links. Please use the
+            <strong> most recent Choose Meals button</strong> in your email so you see the correct menu for this week.
+          </p>
+
+          <div className="mt-3 inline-flex items-center gap-2 rounded-xl bg-emerald-700 px-3.5 py-2 text-sm font-semibold text-white shadow-sm">
+            <Mail className="h-4 w-4" />
+            Use your latest Choose Meals email
+          </div>
+
+          <p className="mt-2 text-xs text-stone-500 dark:text-stone-400">
+            If you opened an older email, please return to your inbox and open the newest one we sent you.
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
@@ -534,6 +570,7 @@ export default function SubscribePage({ params }: { params: { token: string } })
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
+            <LatestChooseMealsNotice />
             <div className="space-y-2">
               <Label htmlFor="sub-email">Email Address</Label>
               <Input
@@ -574,6 +611,7 @@ export default function SubscribePage({ params }: { params: { token: string } })
           </div>
 
           <div className="space-y-6">
+            <LatestChooseMealsNotice />
             {((data.includedOats || 0) > 0 || (data.includedSweetTreats || 0) > 0) && (
               <p className="text-xs text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/20 rounded-lg px-3 py-2">
                 Across both deliveries, {data.includedOats || 0} oats and {data.includedSweetTreats || 0} sweet treats are included at no extra charge. Additional add-ons are charged at the prices shown.
@@ -697,6 +735,10 @@ export default function SubscribePage({ params }: { params: { token: string } })
               </span>
             )}
           </p>
+        </div>
+
+        <div className="mb-4">
+          <LatestChooseMealsNotice />
         </div>
 
         <div className="mb-4 flex items-center justify-center gap-2">
