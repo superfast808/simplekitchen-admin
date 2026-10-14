@@ -68,6 +68,7 @@ export interface IStorage {
   getSubscriptionInvites(from?: Date, to?: Date): Promise<SubscriptionInvite[]>;
   updateSubscriptionInviteStatus(id: number, status: string): Promise<void>;
   updateSubscriptionInviteQuantity(id: number, quantity: number): Promise<void>;
+  updateSubscriptionInviteEmailDelivery(id: number, data: { sentAt?: Date | null; lastAttemptAt?: Date | null; lastError?: string | null }): Promise<void>;
   setSubscriptionInviteSelectionsOrder(id: number, orderId: number): Promise<void>;
   setSubscriptionInviteTuesdayOrder(id: number, orderId: number): Promise<void>;
   getSubscriptionInviteById(id: number): Promise<SubscriptionInvite | undefined>;
@@ -369,16 +370,21 @@ export class DatabaseStorage implements IStorage {
 
   async getSubscriptionInvites(from?: Date, to?: Date): Promise<SubscriptionInvite[]> {
     const conditions = [];
-    // Subscription week anchors historically straddled midnight because London
-    // midnight during BST can be persisted as 23:00 Friday in timestamp-without-
-    // time-zone columns. Allow a 12-hour tolerance on the lower bound so legacy
-    // invites still belong to the intended Saturday week. New invites are stored
-    // at a safe Saturday-afternoon anchor.
+
+    // Match invitations by week overlap, not by an exact Saturday timestamp.
+    // Historical rows have existed at Friday 23:00, Saturday 00:00 and Saturday
+    // afternoon due to BST/UTC handling. week_to is the authoritative other edge,
+    // so overlap matching makes all of those representations belong to the same
+    // operational week without depending on a fragile timezone anchor.
     if (from) {
-      const tolerantFrom = new Date(from.getTime() - 12 * 60 * 60 * 1000);
-      conditions.push(gte(subscriptionInvites.weekFrom, tolerantFrom));
+      const tolerantFrom = new Date(from.getTime() - 18 * 60 * 60 * 1000);
+      conditions.push(gte(subscriptionInvites.weekTo, tolerantFrom));
     }
-    if (to) conditions.push(lte(subscriptionInvites.weekFrom, to));
+    if (to) {
+      const tolerantTo = new Date(to.getTime() + 18 * 60 * 60 * 1000);
+      conditions.push(lte(subscriptionInvites.weekFrom, tolerantTo));
+    }
+
     return db.select().from(subscriptionInvites)
       .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(subscriptionInvites.customerName);
@@ -403,6 +409,18 @@ export class DatabaseStorage implements IStorage {
 
   async updateSubscriptionInviteQuantity(id: number, quantity: number): Promise<void> {
     await db.update(subscriptionInvites).set({ subscriptionQuantity: quantity }).where(eq(subscriptionInvites.id, id));
+  }
+
+  async updateSubscriptionInviteEmailDelivery(
+    id: number,
+    data: { sentAt?: Date | null; lastAttemptAt?: Date | null; lastError?: string | null }
+  ): Promise<void> {
+    const update: Record<string, any> = {};
+    if ("sentAt" in data) update.inviteEmailSentAt = data.sentAt ?? null;
+    if ("lastAttemptAt" in data) update.inviteEmailLastAttemptAt = data.lastAttemptAt ?? null;
+    if ("lastError" in data) update.inviteEmailLastError = data.lastError ?? null;
+    if (Object.keys(update).length === 0) return;
+    await db.update(subscriptionInvites).set(update as any).where(eq(subscriptionInvites.id, id));
   }
 
   async setSubscriptionInviteSelectionsOrder(id: number, orderId: number): Promise<void> {
