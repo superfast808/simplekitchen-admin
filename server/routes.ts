@@ -1,4 +1,5 @@
 import { registerOperationsAssistant } from "./operations-ai";
+import { sendTrackedSubscriptionInvite, type SubscriptionMailContext } from "./subscription-mail";
 import { registerDispatch, setupDispatchTables } from "./dispatch";
 import express from "express";
 import type { Express } from "express";
@@ -500,101 +501,63 @@ async function resolveInviteForSelection(token: string) {
   ) || old;
 }
 
+// All invitation send paths share a single SMTP configuration and renderer.
+async function getSubscriptionMailContext(): Promise<SubscriptionMailContext | null> {
+  const transporter = await getSmtpTransporter();
+  const fromEmail = await getSmtpFromEmail();
+  if (!transporter || !fromEmail) return null;
+  const settings = await getSettingsMap();
+  return {
+    transporter, fromEmail, baseUrl: await getPortalBaseUrl(),
+    subject: settings.subscription_email_subject || DEFAULT_EMAIL_SUBJECT,
+    body: settings.subscription_email_body || DEFAULT_EMAIL_BODY,
+  };
+}
+
 // Attempt to auto-send subscription invite emails for any subscription order
 // in the current week that hasn't already been invited.
 async function autoSendSubscriptionInvites(): Promise<void> {
-  // Never send real emails from the development environment — tokens only exist
-  // in the local DB and customers would receive broken links to production.
-  if (process.env.NODE_ENV !== "production") return;
-  if (!isWithinAutoSendWindow()) return;
-
+  if (process.env.NODE_ENV !== "production" || !isWithinAutoSendWindow()) return;
   try {
-    const transporter = await getSmtpTransporter();
-    if (!transporter) return;
-
-    const baseUrl = await getPortalBaseUrl();
-    const fromEmail = await getSmtpFromEmail();
-
+    const mail = await getSubscriptionMailContext();
+    if (!mail) return;
     const week = getWeekRange(0);
-    const ordersList = await storage.getOrders(week.from, week.to);
-    const ordersWithItems = await Promise.all(
-      ordersList.map(async (order) => ({ ...order, items: await storage.getOrderItems(order.id) }))
-    );
-
-    const subOrders = ordersWithItems.filter(o => o.items.some(i => isSubscriptionProductName(i.productName)));
-    if (subOrders.length === 0) return;
-
-    const existingInvites = await storage.getSubscriptionInvites(week.from, week.to);
-    const alreadyInvitedKeys = new Set(existingInvites.map(i => (i as any).isDual ? `${i.orderId}-dual` : `${i.orderId}-${i.isTuesday}`));
-
-    const settingsMap = await getSettingsMap();
-    const emailSubject = settingsMap.subscription_email_subject || DEFAULT_EMAIL_SUBJECT;
-    const emailBodyTemplate = settingsMap.subscription_email_body || DEFAULT_EMAIL_BODY;
-
-    for (const order of subOrders) {
-      const slots = getSubscriptionSlots(order);
-      for (const slot of slots) {
-        const key = slot.isDual ? `${order.id}-dual` : `${order.id}-${slot.isTuesday}`;
-        if (alreadyInvitedKeys.has(key)) continue;
-
-        const token = crypto.randomBytes(32).toString("hex");
-        let inviteAddress = order.deliveryAddress || null;
-        let inviteFulfillment = order.fulfillmentType || "delivery";
-        if (!inviteAddress) {
-          const pastAddr = await storage.getCustomerDeliveryAddress(order.customerEmail || "", order.customerName);
-          if (pastAddr?.deliveryAddress) {
-            inviteAddress = pastAddr.deliveryAddress;
-            inviteFulfillment = pastAddr.fulfillmentType || "delivery";
-          }
-        }
-
-        await storage.createSubscriptionInvite({
-          orderId: order.id,
-          customerEmail: order.customerEmail || "",
-          customerName: order.customerName,
-          token,
-          subscriptionQuantity: slot.qty,
-          status: "pending",
-          weekFrom: getSubscriptionWeekFrom(week.from),
-          weekTo: week.to,
-          deliveryAddress: inviteAddress,
-          fulfillmentType: inviteFulfillment,
-          isTuesday: slot.isTuesday,
-          isDual: slot.isDual,
+    const existing = await storage.getSubscriptionInvites(week.from, week.to);
+    for (const invite of existing.filter(i =>
+      i.orderId != null && i.status === "pending" &&
+      !i.inviteEmailLegacy && !i.inviteEmailSentAt)) {
+      await sendTrackedSubscriptionInvite(invite, mail, {
+        dayLabel: invite.isDual ? " (Sat + Tue)" : (invite.isTuesday ? " (Tuesday)" : " (Saturday)"),
+      });
+    }
+    const orders = await storage.getOrders(week.from, week.to);
+    const withItems = await Promise.all(orders.map(async o => ({
+      ...o, items: await storage.getOrderItems(o.id),
+    })));
+    const keys = new Set(existing.filter(i => i.orderId != null)
+      .map(i => i.orderId + "-" + (i.isDual ? "dual" : String(i.isTuesday))));
+    for (const order of withItems.filter(o => o.items.some(i => isSubscriptionProductName(i.productName)))) {
+      for (const slot of getSubscriptionSlots(order)) {
+        const key = order.id + "-" + (slot.isDual ? "dual" : String(slot.isTuesday));
+        if (keys.has(key)) continue;
+        const oldAddress = await storage.getCustomerDeliveryAddress(order.customerEmail || "", order.customerName);
+        const invite = await storage.createSubscriptionInvite({
+          orderId: order.id, customerEmail: order.customerEmail || "",
+          customerName: order.customerName, token: crypto.randomBytes(32).toString("hex"),
+          subscriptionQuantity: slot.qty, status: "pending",
+          weekFrom: getSubscriptionWeekFrom(week.from), weekTo: week.to,
+          deliveryAddress: order.deliveryAddress || oldAddress?.deliveryAddress || null,
+          fulfillmentType: order.fulfillmentType || oldAddress?.fulfillmentType || "delivery",
+          isTuesday: slot.isTuesday, isDual: slot.isDual,
         } as any);
-        alreadyInvitedKeys.add(key);
-
-        const toEmail = order.customerEmail;
-        if (!toEmail) continue;
-
-        const selectUrl = `${baseUrl}/subscribe/${token}`;
-        const firstName = order.customerName.split(" ")[0];
-        const dayLabel = slot.isDual ? " (Sat + Tue)" : (slot.isTuesday ? " (Tuesday)" : " (Saturday)");
-        const emailBody = emailBodyTemplate
-          .replace(/\{\{firstName\}\}/g, firstName)
-          .replace(/\{\{fullName\}\}/g, order.customerName)
-          .replace(/\{\{qty\}\}/g, String(slot.qty))
-          .replace(/\{\{url\}\}/g, selectUrl);
-        const emailHtml = `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">${emailBody}</div>`;
-
-        try {
-          await transporter.sendMail({
-            from: fromEmail,
-            to: toEmail,
-            subject: (emailSubject
-              .replace(/\{\{firstName\}\}/g, firstName)
-              .replace(/\{\{fullName\}\}/g, order.customerName)
-              .replace(/\{\{qty\}\}/g, String(slot.qty))) + (slots.length > 1 || slot.isDual ? dayLabel : ""),
-            html: emailHtml,
-          });
-          log(`Auto-sent subscription invite to ${order.customerName} (${toEmail})${slot.isDual ? " (dual Sat+Tue)" : (slots.length > 1 ? dayLabel : "")}`, "sync");
-        } catch (emailErr: any) {
-          log(`Auto-send subscription email failed for ${order.customerName}: ${(emailErr as Error).message}`, "sync");
-        }
+        keys.add(key);
+        await sendTrackedSubscriptionInvite(invite, mail, {
+          dayLabel: slot.isDual ? " (Sat + Tue)" : (slot.isTuesday ? " (Tuesday)" : " (Saturday)"),
+        });
       }
     }
-  } catch (err: any) {
-    log(`autoSendSubscriptionInvites error: ${err.message}`, "sync");
+  } catch (error: any) {
+    log("autoSendSubscriptionInvites error: " + String(error?.message || error), "sync");
   }
 }
 
@@ -621,76 +584,47 @@ async function runSubscriberSync(): Promise<void> {
         .map(i => (i as any).subscriberId as number)
     );
 
-    const transporter = await getSmtpTransporter();
-    const fromEmail = await getSmtpFromEmail();
-    const baseUrl = await getPortalBaseUrl();
-    const settingsMap = await getSettingsMap();
-    const emailSubject = settingsMap.subscription_email_subject || DEFAULT_EMAIL_SUBJECT;
-    const emailBodyTemplate = settingsMap.subscription_email_body || DEFAULT_EMAIL_BODY;
+    const mail = await getSubscriptionMailContext();
+
+    // Existing genuinely new pending invitations must be retried after an
+    // SMTP failure. Legacy pre-tracking rows are deliberately never auto-sent.
+    if (mail) {
+      for (const invite of existingInvites.filter(i =>
+        i.subscriberId != null && i.status === "pending" &&
+        !i.inviteEmailLegacy && !i.inviteEmailSentAt)) {
+        await sendTrackedSubscriptionInvite(invite, mail, {
+          dayLabel: invite.isDual ? " (Sat + Tue)" : (invite.isTuesday ? " (Tuesday)" : " (Saturday)"),
+        });
+      }
+    }
 
     // ── Auto-invite: create invite for each subscriber missing one this week ──
     for (const sub of activeSubscribers) {
       if (invitedSubscriberIds.has(sub.id)) continue;
-
       const isTuesdaySub = sub.deliveryDay === "tue";
       const isDualSub = sub.deliveryDay === "dual";
-      const token = crypto.randomBytes(32).toString("hex");
-      const pastAddr = await storage.getCustomerDeliveryAddress(sub.customerEmail, sub.customerName);
-      const inviteAddress = pastAddr?.deliveryAddress || null;
-      const inviteFulfillment = pastAddr?.fulfillmentType || "delivery";
-
+      const oldAddress = await storage.getCustomerDeliveryAddress(sub.customerEmail, sub.customerName);
+      let invite: any;
       try {
-        await storage.createSubscriptionInvite({
-          orderId: null,
-          customerEmail: sub.customerEmail,
-          customerName: sub.customerName,
-          token,
-          subscriptionQuantity: sub.quantity,
-          status: "pending",
-          weekFrom: getSubscriptionWeekFrom(week.from),
-          weekTo: week.to,
-          deliveryAddress: inviteAddress,
-          fulfillmentType: inviteFulfillment,
-          isTuesday: isTuesdaySub,
-          isDual: isDualSub,
-          subscriberId: sub.id,
-          includedOats: (sub as any).includedOats || 0,
-          includedSweetTreats: (sub as any).includedSweetTreats || 0,
+        invite = await storage.createSubscriptionInvite({
+          orderId: null, customerEmail: sub.customerEmail,
+          customerName: sub.customerName, token: crypto.randomBytes(32).toString("hex"),
+          subscriptionQuantity: sub.quantity, status: "pending",
+          weekFrom: getSubscriptionWeekFrom(week.from), weekTo: week.to,
+          deliveryAddress: oldAddress?.deliveryAddress || null,
+          fulfillmentType: oldAddress?.fulfillmentType || "delivery",
+          isTuesday: isTuesdaySub, isDual: isDualSub, subscriberId: sub.id,
+          includedOats: sub.includedOats || 0,
+          includedSweetTreats: sub.includedSweetTreats || 0,
         } as any);
-      } catch (inviteErr: any) {
-        // Unique index on (subscriber_id, week_from) — invite already exists, skip
-        if (inviteErr?.code === "23505") {
-          invitedSubscriberIds.add(sub.id);
-          continue;
-        }
-        throw inviteErr;
+      } catch (error: any) {
+        if (error?.code === "23505") { invitedSubscriberIds.add(sub.id); continue; }
+        throw error;
       }
       invitedSubscriberIds.add(sub.id);
-
-      if (transporter && fromEmail) {
-        const selectUrl = `${baseUrl}/subscribe/${token}`;
-        const firstName = sub.customerName.split(" ")[0];
-        const dayLabel = isDualSub ? " (Sat + Tue)" : (isTuesdaySub ? " (Tuesday)" : " (Saturday)");
-        const emailBody = emailBodyTemplate
-          .replace(/\{\{firstName\}\}/g, firstName)
-          .replace(/\{\{fullName\}\}/g, sub.customerName)
-          .replace(/\{\{qty\}\}/g, String(sub.quantity))
-          .replace(/\{\{url\}\}/g, selectUrl);
-        try {
-          await transporter.sendMail({
-            from: fromEmail,
-            to: sub.customerEmail,
-            subject: emailSubject
-              .replace(/\{\{firstName\}\}/g, firstName)
-              .replace(/\{\{fullName\}\}/g, sub.customerName)
-              .replace(/\{\{qty\}\}/g, String(sub.quantity)) + dayLabel,
-            html: `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">${emailBody}</div>`,
-          });
-          log(`Subscriber invite sent to ${sub.customerName} (${sub.customerEmail})`, "sync");
-        } catch (emailErr: any) {
-          log(`Subscriber invite email failed for ${sub.customerName}: ${(emailErr as Error).message}`, "sync");
-        }
-      }
+      if (mail) await sendTrackedSubscriptionInvite(invite, mail, {
+        dayLabel: isDualSub ? " (Sat + Tue)" : (isTuesdaySub ? " (Tuesday)" : " (Saturday)"),
+      });
     }
 
     // ── Auto-payment: send Stripe link if due and not recently sent ────────
@@ -3353,111 +3287,65 @@ export async function registerRoutes(
   });
 
   app.post("/api/subscription-invites/send", async (req, res) => {
+    if (!req.session?.userId) return res.status(401).json({ message: "Not authenticated" });
     try {
-      const transporter = await getSmtpTransporter();
-      if (!transporter) {
-        return res.status(500).json({ message: "SMTP not configured" });
-      }
-      const fromEmail = await getSmtpFromEmail();
-      const baseUrl = await getPortalBaseUrl();
-      const { overrideEmail } = req.body;
+      const mail = await getSubscriptionMailContext();
+      if (!mail) return res.status(503).json({ message: "SMTP not configured" });
+      const overrideEmail = typeof req.body?.overrideEmail === "string" ? req.body.overrideEmail.trim() : "";
       const week = getWeekRange(0);
-
-      const ordersList = await storage.getOrders(week.from, week.to);
-      const ordersWithItems = await Promise.all(
-        ordersList.map(async (order) => {
-          const items = await storage.getOrderItems(order.id);
-          return { ...order, items };
-        })
-      );
-
-      const subOrders = ordersWithItems.filter(o => o.items.some(i => isSubscriptionProductName(i.productName)));
-
-      if (subOrders.length === 0) {
-        return res.json({ sent: 0, message: "No subscription orders found this week" });
-      }
-
-      const existingInvites = await storage.getSubscriptionInvites(week.from, week.to);
-      const alreadyInvitedKeys = new Set(existingInvites.map(i => (i as any).isDual ? `${i.orderId}-dual` : `${i.orderId}-${i.isTuesday}`));
-
-      let sent = 0;
-      let skipped = 0;
+      const existing = await storage.getSubscriptionInvites(week.from, week.to);
+      const byOrder = new Map(existing.filter(i => i.orderId != null).map(i => [
+        i.orderId + "-" + (i.isDual ? "dual" : String(i.isTuesday)), i,
+      ] as const));
+      const handled = new Set<number>();
+      const counts = { sent: 0, skipped: 0, failed: 0, tested: 0, total: 0 };
       const errors: string[] = [];
-      const settingsMap = await getSettingsMap();
-      const emailSubject = settingsMap.subscription_email_subject || DEFAULT_EMAIL_SUBJECT;
-      const emailBodyTemplate = settingsMap.subscription_email_body || DEFAULT_EMAIL_BODY;
-
-      for (const order of subOrders) {
-        const slots = getSubscriptionSlots(order);
-        for (const slot of slots) {
-          const key = slot.isDual ? `${order.id}-dual` : `${order.id}-${slot.isTuesday}`;
-          if (alreadyInvitedKeys.has(key)) {
-            skipped++;
-            continue;
+      const send = async (invite: any, dayLabel: string) => {
+        handled.add(invite.id);
+        counts.total++;
+        // Bulk sending must NEVER automatically resend legacy invitations.
+        if (invite.inviteEmailLegacy || invite.status !== "pending") {
+          counts.skipped++;
+          return;
+        }
+        const result = await sendTrackedSubscriptionInvite(invite, mail, { dayLabel, overrideEmail });
+        if (result === "sent") {
+          if (overrideEmail) counts.tested++; else counts.sent++;
+        } else if (result === "skipped") counts.skipped++;
+        else { counts.failed++; errors.push("Could not email " + invite.customerName); }
+      };
+      const orders = await storage.getOrders(week.from, week.to);
+      const withItems = await Promise.all(orders.map(async o => ({
+        ...o, items: await storage.getOrderItems(o.id),
+      })));
+      for (const order of withItems.filter(o => o.items.some(i => isSubscriptionProductName(i.productName)))) {
+        for (const slot of getSubscriptionSlots(order)) {
+          const key = order.id + "-" + (slot.isDual ? "dual" : String(slot.isTuesday));
+          let invite = byOrder.get(key);
+          if (!invite) {
+            const past = await storage.getCustomerDeliveryAddress(order.customerEmail || "", order.customerName);
+            invite = await storage.createSubscriptionInvite({
+              orderId: order.id, customerEmail: order.customerEmail || "",
+              customerName: order.customerName, token: crypto.randomBytes(32).toString("hex"),
+              subscriptionQuantity: slot.qty, status: "pending",
+              weekFrom: getSubscriptionWeekFrom(week.from), weekTo: week.to,
+              deliveryAddress: order.deliveryAddress || past?.deliveryAddress || null,
+              fulfillmentType: order.fulfillmentType || past?.fulfillmentType || "delivery",
+              isTuesday: slot.isTuesday, isDual: slot.isDual,
+            } as any);
+            byOrder.set(key, invite);
           }
-
-          const token = crypto.randomBytes(32).toString("hex");
-          let inviteAddress = order.deliveryAddress || null;
-          let inviteFulfillment = order.fulfillmentType || "delivery";
-          if (!inviteAddress) {
-            const pastAddr = await storage.getCustomerDeliveryAddress(order.customerEmail || "", order.customerName);
-            if (pastAddr?.deliveryAddress) {
-              inviteAddress = pastAddr.deliveryAddress;
-              inviteFulfillment = pastAddr.fulfillmentType || "delivery";
-            }
-          }
-          await storage.createSubscriptionInvite({
-            orderId: order.id,
-            customerEmail: order.customerEmail || "",
-            customerName: order.customerName,
-            token,
-            subscriptionQuantity: slot.qty,
-            status: "pending",
-            weekFrom: getSubscriptionWeekFrom(week.from),
-            weekTo: week.to,
-            deliveryAddress: inviteAddress,
-            fulfillmentType: inviteFulfillment,
-            isTuesday: slot.isTuesday,
-            isDual: slot.isDual,
-          } as any);
-          alreadyInvitedKeys.add(key);
-
-          const toEmail = overrideEmail || order.customerEmail;
-          if (!toEmail) {
-            errors.push(`No email for ${order.customerName}`);
-            continue;
-          }
-
-          const selectUrl = `${baseUrl}/subscribe/${token}`;
-          const firstName = order.customerName.split(" ")[0];
-          const dayLabel = slot.isDual ? " (Sat + Tue)" : (slot.isTuesday ? " (Tuesday)" : " (Saturday)");
-          const emailBody = emailBodyTemplate
-            .replace(/\{\{firstName\}\}/g, firstName)
-            .replace(/\{\{fullName\}\}/g, order.customerName)
-            .replace(/\{\{qty\}\}/g, String(slot.qty))
-            .replace(/\{\{url\}\}/g, selectUrl);
-          const emailHtml = `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">${emailBody}</div>`;
-
-          try {
-            await transporter.sendMail({
-              from: fromEmail,
-              to: toEmail,
-              subject: (emailSubject
-                .replace(/\{\{firstName\}\}/g, firstName)
-                .replace(/\{\{fullName\}\}/g, order.customerName)
-                .replace(/\{\{qty\}\}/g, String(slot.qty))) + (slots.length > 1 || slot.isDual ? dayLabel : ""),
-              html: emailHtml,
-            });
-            sent++;
-          } catch (emailErr: any) {
-            errors.push(`Failed to email ${order.customerName}: ${(emailErr as Error).message}`);
-          }
+          await send(invite, slot.isDual ? " (Sat + Tue)" : (slot.isTuesday ? " (Tuesday)" : " (Saturday)"));
         }
       }
-
-      res.json({ sent, total: subOrders.length, skipped, errors });
+      // Registered subscribers may exist without a matching Woo renewal.
+      for (const invite of await storage.getSubscriptionInvites(week.from, week.to)) {
+        if (handled.has(invite.id) || invite.orderId != null) continue;
+        await send(invite, invite.isDual ? " (Sat + Tue)" : (invite.isTuesday ? " (Tuesday)" : " (Saturday)"));
+      }
+      res.json({ ...counts, errors, overrideTest: !!overrideEmail });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: String(error?.message || error) });
     }
   });
 
@@ -4596,48 +4484,20 @@ export async function registerRoutes(
   });
 
   app.post("/api/subscription-invites/:id/resend", async (req, res) => {
+    if (!req.session?.userId) return res.status(401).json({ message: "Not authenticated" });
     try {
-      const id = parseInt(req.params.id);
-      const invite = await storage.getSubscriptionInviteById(id);
+      const invite = await storage.getSubscriptionInviteById(Number(req.params.id));
       if (!invite) return res.status(404).json({ message: "Invite not found" });
-
-      const transporter = await getSmtpTransporter();
-      if (!transporter) return res.status(500).json({ message: "SMTP not configured" });
-
-      const baseUrl = await getPortalBaseUrl();
-      const fromEmail = await getSmtpFromEmail();
-      const settingsMap = await getSettingsMap();
-      const emailSubject = settingsMap.subscription_email_subject || DEFAULT_EMAIL_SUBJECT;
-      const emailBodyTemplate = settingsMap.subscription_email_body || DEFAULT_EMAIL_BODY;
-
-      const { overrideEmail } = req.body;
-      const toEmail = overrideEmail?.trim() || invite.customerEmail;
-      if (!toEmail) return res.status(400).json({ message: "No email address for this invite" });
-
-      const selectUrl = `${baseUrl}/subscribe/${invite.token}`;
-      const firstName = invite.customerName.split(" ")[0];
-      const qty = invite.subscriptionQuantity;
-
-      const emailBody = emailBodyTemplate
-        .replace(/\{\{firstName\}\}/g, firstName)
-        .replace(/\{\{fullName\}\}/g, invite.customerName)
-        .replace(/\{\{qty\}\}/g, String(qty))
-        .replace(/\{\{url\}\}/g, selectUrl);
-      const emailHtml = `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">${emailBody}</div>`;
-
-      await transporter.sendMail({
-        from: fromEmail,
-        to: toEmail,
-        subject: emailSubject
-          .replace(/\{\{firstName\}\}/g, firstName)
-          .replace(/\{\{fullName\}\}/g, invite.customerName)
-          .replace(/\{\{qty\}\}/g, String(qty)),
-        html: emailHtml,
-      });
-
-      res.json({ success: true, to: toEmail });
+      if (invite.status !== "pending") return res.status(409).json({ message: "Choices already submitted" });
+      const mail = await getSubscriptionMailContext();
+      if (!mail) return res.status(503).json({ message: "SMTP not configured" });
+      const overrideEmail = typeof req.body?.overrideEmail === "string" ? req.body.overrideEmail.trim() : "";
+      const result = await sendTrackedSubscriptionInvite(invite, mail, { force: true, overrideEmail });
+      if (result === "skipped") return res.status(429).json({ message: "Already sending. Wait a minute before retrying." });
+      if (result === "failed") return res.status(502).json({ message: "SMTP did not accept invitation. Check delivery status." });
+      res.json({ success: true, to: overrideEmail || invite.customerEmail, overrideTest: !!overrideEmail });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: String(error?.message || error) });
     }
   });
 
