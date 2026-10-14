@@ -348,6 +348,21 @@ async function getCurrentWeekInfo(asOf?: Date): Promise<{ weekNumber: number; ca
   return { weekNumber, categoryName: `Week ${weekNumber}` };
 }
 
+async function getInviteWeekInfo(invite: { weekFrom: Date | string; weekTo?: Date | string | null }): Promise<{ weekNumber: number; categoryName: string }> {
+  const from = new Date(invite.weekFrom);
+  const to = invite.weekTo ? new Date(invite.weekTo) : null;
+
+  // Resolve the menu using a point safely INSIDE the invite's week rather than
+  // the Saturday boundary itself. This makes Friday-23:00/Saturday-00:00/BST
+  // storage variants irrelevant while preserving old links as their old week.
+  if (!Number.isNaN(from.getTime()) && to && !Number.isNaN(to.getTime()) && to > from) {
+    const midpoint = new Date(from.getTime() + (to.getTime() - from.getTime()) / 2);
+    return getCurrentWeekInfo(midpoint);
+  }
+
+  return getCurrentWeekInfo(Number.isNaN(from.getTime()) ? undefined : from);
+}
+
 function applyAddDeliveryUpgrades(ordersWithItems: Array<{ customerEmail: string | null; customerName: string; fulfillmentType: string | null; items: Array<{ productName: string }> }>): void {
   const deliveryEmails = new Set<string>();
   const deliveryNames = new Set<string>();
@@ -4096,7 +4111,7 @@ export async function registerRoutes(
       const result = await Promise.all(
         invites.map(async (invite) => {
           const selections = await storage.getSubscriptionSelections(invite.id);
-          const { categoryName } = await getCurrentWeekInfo(invite.weekFrom);
+          const { categoryName } = await getInviteWeekInfo(invite);
           const prices = new Map(allProducts.map(p => [p.name.toLowerCase(), parseFloat(p.price || "0")]));
           const weekProducts = allProducts.filter(p =>
             (p.category || "").trim().toLowerCase() === categoryName.toLowerCase());
@@ -4151,8 +4166,7 @@ export async function registerRoutes(
 
       // Use the invite's weekFrom to determine which week's products to show —
       // so a late click never shows the next week's menu.
-      const inviteWeekDate = invite.weekFrom ? new Date(invite.weekFrom) : undefined;
-      const { weekNumber, categoryName } = await getCurrentWeekInfo(inviteWeekDate);
+      const { weekNumber, categoryName } = await getInviteWeekInfo(invite);
       let allProducts = await storage.getProducts();
       let weekProducts = allProducts.filter(p => (p.category || "").trim().toLowerCase() === categoryName.toLowerCase());
       if (weekProducts.length === 0) {
@@ -4300,7 +4314,7 @@ export async function registerRoutes(
       for (const p of allProductsList) {
         productPriceMap[p.name] = p.price || "0";
       }
-      const { categoryName: selectionCategory } = await getCurrentWeekInfo(invite.weekFrom);
+      const { categoryName: selectionCategory } = await getInviteWeekInfo(invite);
       const currentWeekProducts = allProductsList.filter(p =>
         (p.category || "").trim().toLowerCase() === selectionCategory.toLowerCase());
       const isUpgradeName = (name: string) =>
@@ -4577,8 +4591,7 @@ export async function registerRoutes(
       if (!invite) return res.status(404).json({ message: "Invite not found" });
 
       // Anchor product pool to the invite's own week, not today
-      const inviteWeekDate = invite.weekFrom ? new Date(invite.weekFrom) : undefined;
-      const { weekNumber, categoryName } = await getCurrentWeekInfo(inviteWeekDate);
+      const { weekNumber, categoryName } = await getInviteWeekInfo(invite);
       let allProducts = await storage.getProducts();
       let weekProducts = allProducts.filter(p => (p.category || "").trim().toLowerCase() === categoryName.toLowerCase());
       if (weekProducts.length === 0) {
@@ -4693,7 +4706,7 @@ export async function registerRoutes(
         ? subscriptionQuantity
         : invite.subscriptionQuantity;
       const allProducts = await storage.getProducts();
-      const { categoryName: inviteCategory } = await getCurrentWeekInfo(invite.weekFrom);
+      const { categoryName: inviteCategory } = await getInviteWeekInfo(invite);
       const weekProducts = allProducts.filter(p => (p.category || "").trim().toLowerCase() === inviteCategory.toLowerCase());
       const satNames = new Set(weekProducts.filter(p => [7.75, 9.75].includes(parseFloat(p.price || "0"))
         && !/subscription|add\s+delivery|gift\s*card|voucher/i.test(p.name)).map(p => p.name));
