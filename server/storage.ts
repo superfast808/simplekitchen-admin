@@ -360,10 +360,11 @@ export class DatabaseStorage implements IStorage {
 
   async getSubscriptionInvites(from?: Date, to?: Date): Promise<SubscriptionInvite[]> {
     const conditions = [];
-    // Filter by weekFrom for both bounds so the query is immune to server-side
-    // week_to boundary changes (e.g. Thu 07:00 UK vs Wed 23:59 UTC mismatches).
-    if (from) conditions.push(gte(subscriptionInvites.weekFrom, from));
-    if (to) conditions.push(lte(subscriptionInvites.weekFrom, to));
+    // Legacy BST rows may be anchored at Friday 23:00, Saturday 00:00,
+    // or Saturday afternoon. Match operational week overlap instead of
+    // requiring exact Saturday-midnight equality.
+    if (from) conditions.push(gte(subscriptionInvites.weekTo, new Date(from.getTime() - 18 * 3600000)));
+    if (to) conditions.push(lte(subscriptionInvites.weekFrom, new Date(to.getTime() + 18 * 3600000)));
     return db.select().from(subscriptionInvites)
       .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(subscriptionInvites.customerName);

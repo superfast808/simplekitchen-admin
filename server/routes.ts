@@ -238,23 +238,53 @@ async function geocodeUkAddress(rawAddress: string): Promise<GeocodeResult> {
   return { lat: null, lng: null, displayName: null, postcode, source: null };
 }
 
-// Returns the current week number (1-6) based on week1ReferenceDate setting.
-// The week advances every Saturday at noon (every 7 days from the reference date).
+// Calendar arithmetic, never DST-sensitive elapsed-week milliseconds.
+function londonCalendarParts(date: Date): { y: number; m: number; d: number; weekday: number; hour: number } {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/London", year: "numeric", month: "2-digit", day: "2-digit",
+    weekday: "short", hour: "2-digit", hourCycle: "h23",
+  }).formatToParts(date);
+  const part = (type: string) => parts.find(p => p.type === type)?.value || "";
+  const weekdays: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  return {
+    y: Number(part("year")), m: Number(part("month")), d: Number(part("day")),
+    weekday: weekdays[part("weekday")] ?? date.getUTCDay(),
+    hour: Number(part("hour")),
+  };
+}
+
+function londonSaturday(date: Date, live = false): Date {
+  const p = londonCalendarParts(date);
+  const Saturday = new Date(Date.UTC(p.y, p.m - 1, p.d));
+  const back = p.weekday === 6 ? (live && p.hour < 12 ? 7 : 0)
+    : p.weekday === 0 ? 1 : p.weekday + 1;
+  Saturday.setUTCDate(Saturday.getUTCDate() - back);
+  return Saturday;
+}
+
+// Week 1 reference and invite timestamps are anchored by their London
+// calendar Saturday, regardless of BST, server TZ or PostgreSQL storage hour.
 async function getCurrentWeekInfo(asOf?: Date): Promise<{ weekNumber: number; categoryName: string }> {
-  const refDateStr = await storage.getSetting("week1ReferenceDate");
-  if (!refDateStr) return { weekNumber: 1, categoryName: "Week 1" };
-  const refDate = new Date(refDateStr);
-  const now = asOf ?? new Date();
-  // The week boundary is at noon on each Saturday (matching the WooCommerce order-window open
-  // time stored in week1ReferenceDate). Invite weekFrom and order-week 'from' dates are stored
-  // as Saturday midnight (00:00 UTC), which is 12 h before the boundary and would otherwise
-  // land in the previous week. Shift by +12 h so midnight Saturday aligns with the correct week.
-  const normalized = new Date(now.getTime() + 12 * 60 * 60 * 1000);
-  const diffMs = normalized.getTime() - refDate.getTime();
-  if (diffMs < 0) return { weekNumber: 1, categoryName: "Week 1" };
-  const diffWeeks = Math.floor(diffMs / (7 * 24 * 60 * 60 * 1000));
-  const weekNumber = (diffWeeks % 6) + 1;
+  const refStr = await storage.getSetting("week1ReferenceDate");
+  if (!refStr) return { weekNumber: 1, categoryName: "Week 1" };
+  const ref = new Date(refStr);
+  if (Number.isNaN(ref.getTime())) return { weekNumber: 1, categoryName: "Week 1" };
+  const first = londonSaturday(ref);
+  const target = londonSaturday(asOf ?? new Date(), asOf == null);
+  const days = Math.round((target.getTime() - first.getTime()) / 86400000);
+  const weekNumber = days < 0 ? 1 : (Math.floor(days / 7) % 6) + 1;
   return { weekNumber, categoryName: `Week ${weekNumber}` };
+}
+
+// An existing email URL always uses the target invite's week. The midpoint
+// corrects legacy Friday-23:00 / Saturday-00:00 / 14:00 anchors.
+async function getInviteWeekInfo(invite: { weekFrom: Date | string; weekTo?: Date | string | null }) {
+  const from = new Date(invite.weekFrom);
+  const to = invite.weekTo ? new Date(invite.weekTo) : null;
+  if (!Number.isNaN(from.getTime()) && to && !Number.isNaN(to.getTime()) && to > from) {
+    return getCurrentWeekInfo(new Date(from.getTime() + (to.getTime() - from.getTime()) / 2));
+  }
+  return getCurrentWeekInfo(from);
 }
 
 function applyAddDeliveryUpgrades(ordersWithItems: Array<{ customerEmail: string | null; customerName: string; fulfillmentType: string | null; items: Array<{ productName: string }> }>): void {
@@ -382,28 +412,21 @@ let capturedBaseUrl = "";
 // Previously ended Wednesday 23:59, which created a Thu–Fri gap where orders
 // were invisible to smart-stamp-all, causing it to fall back to stale templates
 // and stamp products from the wrong week's menu.
+// Shared Saturday-to-Thursday operational range. The Saturday noon turnover
+// is based on Europe/London and the resulting boundary is stored in UTC.
 function getWeekRange(offset = 0): { from: Date; to: Date } {
-  const now = new Date();
-  const ukNow = new Date(now.toLocaleString("en-US", { timeZone: "Europe/London" }));
-  const dayOfWeek = ukNow.getDay();
-  let saturdayDate: Date;
-  if (dayOfWeek === 6) {
-    saturdayDate = new Date(ukNow);
-  } else {
-    const daysBack = dayOfWeek === 0 ? 1 : dayOfWeek + 1;
-    saturdayDate = new Date(ukNow);
-    saturdayDate.setDate(ukNow.getDate() - daysBack);
-  }
-  if (offset !== 0) {
-    saturdayDate.setDate(saturdayDate.getDate() + offset * 7);
-  }
-  const from = new Date(saturdayDate);
-  from.setHours(0, 0, 0, 0);
-  // Thursday 07:00 UK = Saturday + 5 days + 7 hours
-  const to = new Date(saturdayDate);
-  to.setDate(to.getDate() + 5);
-  to.setHours(7, 0, 0, 0);
+  const from = londonSaturday(new Date(), true);
+  from.setUTCDate(from.getUTCDate() + offset * 7);
+  const to = new Date(from);
+  to.setUTCDate(to.getUTCDate() + 5);
+  to.setUTCHours(7, 0, 0, 0);
   return { from, to };
+}
+
+// Mid-afternoon Saturday is safe for timestamp-without-time-zone columns
+// even when the connected server/database interprets BST differently.
+function getSubscriptionWeekFrom(week: Date): Date {
+  return new Date(week.getTime() + 14 * 60 * 60 * 1000);
 }
 
 // Auto-send window: Saturday through Wednesday 20:00 UK time
@@ -424,15 +447,20 @@ function isWithinAutoSendWindow(): boolean {
 const SUB_PATTERN = /meal\s+subscription(?:\s+\d+\s*week)?\s*-\s*(\d+)/i;
 const TWO_WEEK_PATTERN = /2\s*week/i;
 const WEEKLY_SUB_PATTERN = /weekly.*meal.*subscription|meal.*subscription.*weekly/i;
-const SUBSCRIPTION_NAME_PATTERN = /meal\s+subscription|weekly.*meal.*subscription|meal.*subscription.*weekly/i;
+const SUBSCRIPTION_NAME_PATTERN = /meal\s+subscription|\d+\s*meals?\s+subscription|weekly.*meal.*subscription|meal.*subscription.*weekly/i;
 
 function isSubscriptionProductName(name: string): boolean {
   return SUBSCRIPTION_NAME_PATTERN.test(name || "");
 }
 
 function getSubscriptionQuantity(item: { productName: string; quantity?: number }): number {
-  const m = item.productName.match(SUB_PATTERN) || item.productName.match(/-\s*(\d+)\s*$/);
-  return m ? parseInt(m[1], 10) : (item.quantity || 0);
+  const name = item.productName;
+  const match = name.match(/[-–—:]\s*(\d+)\b/) ||
+    name.match(/\b(\d+)\s*meals?\s+subscription\b/i) ||
+    name.match(/\b(\d+)\s*meals?\b/i) ||
+    name.match(/\bmeal\s+subscription\s+(\d+)(?!\s*weeks?\b)/i);
+  const count = match ? Number(match[1]) : Number(item.quantity || 0);
+  return Number.isSafeInteger(count) && count > 0 ? count : 0;
 }
 
 function getSubscriptionSlots(order: { isTuesday: boolean; items: Array<{ productName: string; quantity?: number }> }): Array<{ qty: number; isTuesday: boolean; isDual: boolean }> {
@@ -455,6 +483,21 @@ function getSubscriptionSlots(order: { isTuesday: boolean; items: Array<{ produc
     const isDual = TWO_WEEK_PATTERN.test(item.productName);
     return { qty, isTuesday: isDual ? false : order.isTuesday, isDual };
   }).filter(s => s.qty > 0);
+}
+
+// Old pending URLs use a current-week invite if one exists for exactly the
+// same customer and delivery day. Never create a new invite from an expired URL.
+async function resolveInviteForSelection(token: string) {
+  const old = await storage.getSubscriptionInviteByToken(token);
+  if (!old || old.status !== "pending") return old;
+  const current = getWeekRange(0);
+  if (new Date(old.weekTo).getTime() >= current.from.getTime() - 18 * 3600000) return old;
+  const newer = await storage.getSubscriptionInvites(current.from, current.to);
+  return newer.find(i =>
+    i.customerEmail.trim().toLowerCase() === old.customerEmail.trim().toLowerCase() &&
+    i.isTuesday === old.isTuesday && i.isDual === old.isDual &&
+    (i.status === "pending" || i.status === "completed")
+  ) || old;
 }
 
 // Attempt to auto-send subscription invite emails for any subscription order
@@ -512,7 +555,7 @@ async function autoSendSubscriptionInvites(): Promise<void> {
           token,
           subscriptionQuantity: slot.qty,
           status: "pending",
-          weekFrom: week.from,
+          weekFrom: getSubscriptionWeekFrom(week.from),
           weekTo: week.to,
           deliveryAddress: inviteAddress,
           fulfillmentType: inviteFulfillment,
@@ -604,7 +647,7 @@ async function runSubscriberSync(): Promise<void> {
           token,
           subscriptionQuantity: sub.quantity,
           status: "pending",
-          weekFrom: week.from,
+          weekFrom: getSubscriptionWeekFrom(week.from),
           weekTo: week.to,
           deliveryAddress: inviteAddress,
           fulfillmentType: inviteFulfillment,
@@ -3370,7 +3413,7 @@ export async function registerRoutes(
             token,
             subscriptionQuantity: slot.qty,
             status: "pending",
-            weekFrom: week.from,
+            weekFrom: getSubscriptionWeekFrom(week.from),
             weekTo: week.to,
             deliveryAddress: inviteAddress,
             fulfillmentType: inviteFulfillment,
@@ -3718,13 +3761,21 @@ export async function registerRoutes(
   });
 
   app.get("/api/subscription-invites", async (req, res) => {
+    if (!req.session?.userId) return res.status(401).json({ message: "Not authenticated" });
     try {
-      const from = req.query.from ? new Date(req.query.from as string) : undefined;
-      const to = req.query.to ? new Date(req.query.to as string) : undefined;
+      const weekOffset = req.query.weekOffset === undefined ? undefined : Number(req.query.weekOffset);
+      if (weekOffset !== undefined && (!Number.isInteger(weekOffset) || weekOffset < -52 || weekOffset > 0)) {
+        return res.status(400).json({ message: "Invalid week offset" });
+      }
+      const selectedWeek = weekOffset !== undefined ? getWeekRange(weekOffset) : null;
+      const from = selectedWeek?.from ?? (req.query.from ? new Date(req.query.from as string) : undefined);
+      const to = selectedWeek?.to ?? (req.query.to ? new Date(req.query.to as string) : undefined);
 
+      const week = getWeekRange(0);
+      // Only reconcile when viewing current week. Historical navigation is read-only.
+      if (weekOffset === undefined || weekOffset === 0) {
       // Auto-create invite records (no email) for any subscription orders this week
       // that don't have an invite yet, so admin can manage them immediately.
-      const week = getWeekRange(0);
       const weekOrders = await storage.getOrders(week.from, week.to);
       const weekOrdersWithItems = await Promise.all(
         weekOrders.map(async (o) => ({ ...o, items: await storage.getOrderItems(o.id) }))
@@ -3755,7 +3806,7 @@ export async function registerRoutes(
             token,
             subscriptionQuantity: slot.qty,
             status: "pending",
-            weekFrom: week.from,
+            weekFrom: getSubscriptionWeekFrom(week.from),
             weekTo: week.to,
             deliveryAddress: inviteAddress,
             fulfillmentType: inviteFulfillment,
@@ -3764,6 +3815,36 @@ export async function registerRoutes(
           } as any);
           existingKeys.add(key);
         }
+      }
+
+      // Registered subscribers do not always generate Woo orders every week.
+      // Show them as pending; this GET does not email or charge customers.
+      const subs = await storage.getSubscribers(true);
+      const present = await storage.getSubscriptionInvites(week.from, week.to);
+      const presentIds = new Set(present.map(i => i.subscriberId).filter((id): id is number => id != null));
+      const presentEmails = new Set(present.map(i => i.customerEmail.trim().toLowerCase()));
+      for (const sub of subs) {
+        const email = sub.customerEmail.trim().toLowerCase();
+        if (presentIds.has(sub.id) || presentEmails.has(email)) continue;
+        const addr = await storage.getCustomerDeliveryAddress(sub.customerEmail, sub.customerName);
+        try {
+          await storage.createSubscriptionInvite({
+            orderId: null, subscriberId: sub.id,
+            customerEmail: sub.customerEmail, customerName: sub.customerName,
+            token: crypto.randomBytes(32).toString("hex"),
+            subscriptionQuantity: sub.quantity, status: "pending",
+            weekFrom: getSubscriptionWeekFrom(week.from), weekTo: week.to,
+            deliveryAddress: addr?.deliveryAddress || null,
+            fulfillmentType: addr?.fulfillmentType || "delivery",
+            isTuesday: sub.deliveryDay === "tue", isDual: sub.deliveryDay === "dual",
+            includedOats: sub.includedOats, includedSweetTreats: sub.includedSweetTreats,
+          } as any);
+        } catch (err: any) {
+          if (err?.code !== "23505") throw err;
+        }
+        presentIds.add(sub.id);
+        presentEmails.add(email);
+      }
       }
 
       const invites = await storage.getSubscriptionInvites(from, to);
@@ -3801,7 +3882,7 @@ export async function registerRoutes(
 
   app.get("/api/subscribe/:token", async (req, res) => {
     try {
-      const invite = await storage.getSubscriptionInviteByToken(req.params.token);
+      const invite = await resolveInviteForSelection(req.params.token);
       if (!invite) {
         return res.status(404).json({ message: "Invitation not found or expired" });
       }
@@ -3809,7 +3890,7 @@ export async function registerRoutes(
       // Use the invite's weekFrom to determine which week's products to show —
       // so a late click never shows the next week's menu.
       const inviteWeekDate = invite.weekFrom ? new Date(invite.weekFrom) : undefined;
-      const { weekNumber, categoryName } = await getCurrentWeekInfo(inviteWeekDate);
+      const { weekNumber, categoryName } = await getInviteWeekInfo(invite);
       const weekProducts = await getStrictSubscriptionWeekProducts(categoryName);
 
       let availableMeals: Array<{ name: string; popularity: number }>;
@@ -3894,7 +3975,7 @@ export async function registerRoutes(
 
   app.post("/api/subscribe/:token", async (req, res) => {
     try {
-      const invite = await storage.getSubscriptionInviteByToken(req.params.token);
+      const invite = await resolveInviteForSelection(req.params.token);
       if (!invite) {
         return res.status(404).json({ message: "Invitation not found" });
       }
@@ -4287,7 +4368,7 @@ export async function registerRoutes(
 
       // Anchor product pool to the invite's own week, not today
       const inviteWeekDate = invite.weekFrom ? new Date(invite.weekFrom) : undefined;
-      const { weekNumber, categoryName } = await getCurrentWeekInfo(inviteWeekDate);
+      const { weekNumber, categoryName } = await getInviteWeekInfo(invite);
       const weekProducts = await getStrictSubscriptionWeekProducts(categoryName);
 
       let availableMeals: Array<{ name: string; popularity: number }>;
@@ -5572,7 +5653,7 @@ export async function registerRoutes(
   // ─── Stripe: create payment intent for addon charges ───────────────────────
   app.post("/api/subscribe/:token/create-payment-intent", async (req, res) => {
     try {
-      const invite = await storage.getSubscriptionInviteByToken(req.params.token);
+      const invite = await resolveInviteForSelection(req.params.token);
       if (!invite) return res.status(404).json({ message: "Invitation not found" });
 
       const { amountPence, description, items } = req.body;
@@ -5609,7 +5690,7 @@ export async function registerRoutes(
   // ─── Stripe: confirm payment completed (called after redirect) ──────────────
   app.post("/api/subscribe/:token/confirm-payment", async (req, res) => {
     try {
-      const invite = await storage.getSubscriptionInviteByToken(req.params.token);
+      const invite = await resolveInviteForSelection(req.params.token);
       if (!invite) return res.status(404).json({ message: "Invitation not found" });
 
       const { paymentIntentId } = req.body;

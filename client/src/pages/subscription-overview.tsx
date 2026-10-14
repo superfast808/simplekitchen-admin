@@ -126,12 +126,14 @@ export default function SubscriptionOverviewPage() {
   const weekRange = getCurrentWeekRange(weekOffset);
   const isCurrentWeek = weekOffset === 0;
 
-  const { data: invites = [], isLoading } = useQuery<Invite[]>({
-    queryKey: ["/api/subscription-invites", weekRange.from.toISOString(), weekRange.to.toISOString()],
+  const { data: invites = [], isLoading, isError: invitesFailed, error: invitesError, refetch: retryInvites } = useQuery<Invite[]>({
+    queryKey: ["/api/subscription-invites", weekOffset],
     queryFn: async () => {
-      const url = `/api/subscription-invites?from=${weekRange.from.toISOString()}&to=${weekRange.to.toISOString()}`;
-      const res = await fetch(url, { credentials: "include" });
-      if (!res.ok) throw new Error("Failed to fetch");
+      const res = await fetch(`/api/subscription-invites?weekOffset=${weekOffset}`, { credentials: "include" });
+      if (!res.ok) {
+        const detail = await res.json().catch(() => null);
+        throw new Error(detail?.message || `Subscriptions API returned ${res.status}`);
+      }
       return res.json();
     },
   });
@@ -699,6 +701,12 @@ export default function SubscriptionOverviewPage() {
           {isLoading ? (
             <div className="p-6 space-y-3">
               {[1, 2, 3].map(i => <Skeleton key={i} className="h-12 w-full" />)}
+            </div>
+          ) : invitesFailed ? (
+            <div className="p-8 text-center space-y-3">
+              <p className="text-destructive font-semibold">Subscriptions could not be loaded</p>
+              <p className="text-sm text-muted-foreground">{invitesError instanceof Error ? invitesError.message : "Please check the server logs."}</p>
+              <Button variant="outline" onClick={() => retryInvites()}>Retry loading</Button>
             </div>
           ) : invites.length === 0 ? (
             <div className="p-12 text-center text-muted-foreground space-y-3">
