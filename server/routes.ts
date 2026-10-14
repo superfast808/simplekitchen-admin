@@ -526,11 +526,72 @@ function getSubscriptionSlots(order: { isTuesday: boolean; items: Array<{ produc
   }).filter(s => s.qty > 0);
 }
 
+type InviteEmailContext = {
+  transporter: nodemailer.Transporter;
+  fromEmail: string;
+  baseUrl: string;
+  emailSubject: string;
+  emailBodyTemplate: string;
+};
+
+async function sendTrackedSubscriptionInviteEmail(
+  invite: any,
+  context: InviteEmailContext,
+  dayLabel = ""
+): Promise<boolean> {
+  const attemptAt = new Date();
+  await storage.updateSubscriptionInviteEmailDelivery(invite.id, {
+    lastAttemptAt: attemptAt,
+    lastError: null,
+  });
+
+  if (!invite.customerEmail) {
+    await storage.updateSubscriptionInviteEmailDelivery(invite.id, {
+      lastError: "No customer email address",
+    });
+    return false;
+  }
+
+  const selectUrl = `${context.baseUrl}/subscribe/${invite.token}`;
+  const firstName = String(invite.customerName || "").split(" ")[0];
+  const qty = Number(invite.subscriptionQuantity || 0);
+  const emailBody = context.emailBodyTemplate
+    .replace(/\{\{firstName\}\}/g, firstName)
+    .replace(/\{\{fullName\}\}/g, invite.customerName)
+    .replace(/\{\{qty\}\}/g, String(qty))
+    .replace(/\{\{url\}\}/g, selectUrl);
+
+  try {
+    await context.transporter.sendMail({
+      from: context.fromEmail,
+      to: invite.customerEmail,
+      subject: context.emailSubject
+        .replace(/\{\{firstName\}\}/g, firstName)
+        .replace(/\{\{fullName\}\}/g, invite.customerName)
+        .replace(/\{\{qty\}\}/g, String(qty)) + dayLabel,
+      html: `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">${emailBody}</div>`,
+    });
+
+    await storage.updateSubscriptionInviteEmailDelivery(invite.id, {
+      sentAt: new Date(),
+      lastAttemptAt: attemptAt,
+      lastError: null,
+    });
+    return true;
+  } catch (emailErr: any) {
+    const message = emailErr?.message || String(emailErr);
+    await storage.updateSubscriptionInviteEmailDelivery(invite.id, {
+      lastAttemptAt: attemptAt,
+      lastError: message.slice(0, 1000),
+    });
+    log(`Subscription invite email failed for ${invite.customerName}: ${message}`, "sync");
+    return false;
+  }
+}
+
 // Attempt to auto-send subscription invite emails for any subscription order
 // in the current week that hasn't already been invited.
 async function autoSendSubscriptionInvites(): Promise<void> {
-  // Never send real emails from the development environment — tokens only exist
-  // in the local DB and customers would receive broken links to production.
   if (process.env.NODE_ENV !== "production") return;
   if (!isWithinAutoSendWindow()) return;
 
@@ -540,22 +601,51 @@ async function autoSendSubscriptionInvites(): Promise<void> {
 
     const baseUrl = await getPortalBaseUrl();
     const fromEmail = await getSmtpFromEmail();
-
-    const week = getWeekRange(0);
-    const ordersList = await storage.getOrders(week.from, week.to);
-    const ordersWithItems = await Promise.all(
-      ordersList.map(async (order) => ({ ...order, items: await storage.getOrderItems(order.id) }))
-    );
-
-    const subOrders = ordersWithItems.filter(o => o.items.some(i => SUB_PATTERN.test(i.productName) || WEEKLY_SUB_PATTERN.test(i.productName)));
-    if (subOrders.length === 0) return;
-
-    const existingInvites = await storage.getSubscriptionInvites(week.from, week.to);
-    const alreadyInvitedKeys = new Set(existingInvites.map(i => (i as any).isDual ? `${i.orderId}-dual` : `${i.orderId}-${i.isTuesday}`));
+    if (!fromEmail) return;
 
     const settingsMap = await getSettingsMap();
     const emailSubject = settingsMap.subscription_email_subject || DEFAULT_EMAIL_SUBJECT;
     const emailBodyTemplate = settingsMap.subscription_email_body || DEFAULT_EMAIL_BODY;
+    const emailContext: InviteEmailContext = {
+      transporter,
+      fromEmail,
+      baseUrl,
+      emailSubject,
+      emailBodyTemplate,
+    };
+
+    const week = getWeekRange(0);
+    let existingInvites = await storage.getSubscriptionInvites(week.from, week.to);
+
+    // Retry only invites explicitly known to be unsent. Pre-tracking invites are
+    // backfilled as sent by the startup migration, so deployment cannot mass-mail.
+    for (const invite of existingInvites.filter(i =>
+      (i as any).subscriberId == null &&
+      i.status === "pending" &&
+      !(i as any).inviteEmailSentAt
+    )) {
+      const dayLabel = (invite as any).isDual
+        ? " (Sat + Tue)"
+        : ((invite as any).isTuesday ? " (Tuesday)" : " (Saturday)");
+      const sent = await sendTrackedSubscriptionInviteEmail(invite, emailContext, dayLabel);
+      if (sent) {
+        log(`Retried subscription invite successfully for ${invite.customerName}`, "sync");
+      }
+    }
+
+    const ordersList = await storage.getOrders(week.from, week.to);
+    const ordersWithItems = await Promise.all(
+      ordersList.map(async (order) => ({ ...order, items: await storage.getOrderItems(order.id) }))
+    );
+    const subOrders = ordersWithItems.filter(o =>
+      o.items.some(i => SUB_PATTERN.test(i.productName) || WEEKLY_SUB_PATTERN.test(i.productName))
+    );
+    if (subOrders.length === 0) return;
+
+    existingInvites = await storage.getSubscriptionInvites(week.from, week.to);
+    const alreadyInvitedKeys = new Set(
+      existingInvites.map(i => (i as any).isDual ? `${i.orderId}-dual` : `${i.orderId}-${i.isTuesday}`)
+    );
 
     for (const order of subOrders) {
       const slots = getSubscriptionSlots(order);
@@ -574,7 +664,7 @@ async function autoSendSubscriptionInvites(): Promise<void> {
           }
         }
 
-        await storage.createSubscriptionInvite({
+        const invite = await storage.createSubscriptionInvite({
           orderId: order.id,
           customerEmail: order.customerEmail || "",
           customerName: order.customerName,
@@ -590,32 +680,12 @@ async function autoSendSubscriptionInvites(): Promise<void> {
         } as any);
         alreadyInvitedKeys.add(key);
 
-        const toEmail = order.customerEmail;
-        if (!toEmail) continue;
-
-        const selectUrl = `${baseUrl}/subscribe/${token}`;
-        const firstName = order.customerName.split(" ")[0];
-        const dayLabel = slot.isDual ? " (Sat + Tue)" : (slot.isTuesday ? " (Tuesday)" : " (Saturday)");
-        const emailBody = emailBodyTemplate
-          .replace(/\{\{firstName\}\}/g, firstName)
-          .replace(/\{\{fullName\}\}/g, order.customerName)
-          .replace(/\{\{qty\}\}/g, String(slot.qty))
-          .replace(/\{\{url\}\}/g, selectUrl);
-        const emailHtml = `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">${emailBody}</div>`;
-
-        try {
-          await transporter.sendMail({
-            from: fromEmail,
-            to: toEmail,
-            subject: (emailSubject
-              .replace(/\{\{firstName\}\}/g, firstName)
-              .replace(/\{\{fullName\}\}/g, order.customerName)
-              .replace(/\{\{qty\}\}/g, String(slot.qty))) + (slots.length > 1 || slot.isDual ? dayLabel : ""),
-            html: emailHtml,
-          });
-          log(`Auto-sent subscription invite to ${order.customerName} (${toEmail})${slot.isDual ? " (dual Sat+Tue)" : (slots.length > 1 ? dayLabel : "")}`, "sync");
-        } catch (emailErr: any) {
-          log(`Auto-send subscription email failed for ${order.customerName}: ${(emailErr as Error).message}`, "sync");
+        const dayLabel = slot.isDual
+          ? " (Sat + Tue)"
+          : (slot.isTuesday ? " (Tuesday)" : " (Saturday)");
+        const sent = await sendTrackedSubscriptionInviteEmail(invite, emailContext, dayLabel);
+        if (sent) {
+          log(`Auto-sent subscription invite to ${order.customerName} (${order.customerEmail || "no email"})${dayLabel}`, "sync");
         }
       }
     }
@@ -654,6 +724,29 @@ async function runSubscriberSync(): Promise<void> {
     const emailSubject = settingsMap.subscription_email_subject || DEFAULT_EMAIL_SUBJECT;
     const emailBodyTemplate = settingsMap.subscription_email_body || DEFAULT_EMAIL_BODY;
 
+    const emailContext: InviteEmailContext | null =
+      transporter && fromEmail
+        ? { transporter, fromEmail, baseUrl, emailSubject, emailBodyTemplate }
+        : null;
+
+    // Retry genuinely unsent subscriber invites first. A transient SMTP failure
+    // no longer leaves a permanent invite that every later sync silently skips.
+    if (emailContext) {
+      for (const invite of existingInvites.filter(i =>
+        (i as any).subscriberId != null &&
+        i.status === "pending" &&
+        !(i as any).inviteEmailSentAt
+      )) {
+        const dayLabel = (invite as any).isDual
+          ? " (Sat + Tue)"
+          : ((invite as any).isTuesday ? " (Tuesday)" : " (Saturday)");
+        const sent = await sendTrackedSubscriptionInviteEmail(invite, emailContext, dayLabel);
+        if (sent) {
+          log(`Retried subscriber invite successfully for ${invite.customerName} (${invite.customerEmail})`, "sync");
+        }
+      }
+    }
+
     // ── Auto-invite: create invite for each subscriber missing one this week ──
     for (const sub of activeSubscribers) {
       if (invitedSubscriberIds.has(sub.id)) continue;
@@ -665,8 +758,9 @@ async function runSubscriberSync(): Promise<void> {
       const inviteAddress = pastAddr?.deliveryAddress || null;
       const inviteFulfillment = pastAddr?.fulfillmentType || "delivery";
 
+      let invite: any;
       try {
-        await storage.createSubscriptionInvite({
+        invite = await storage.createSubscriptionInvite({
           orderId: null,
           customerEmail: sub.customerEmail,
           customerName: sub.customerName,
@@ -684,7 +778,6 @@ async function runSubscriberSync(): Promise<void> {
           includedSweetTreats: (sub as any).includedSweetTreats || 0,
         } as any);
       } catch (inviteErr: any) {
-        // Unique index on (subscriber_id, week_from) — invite already exists, skip
         if (inviteErr?.code === "23505") {
           invitedSubscriberIds.add(sub.id);
           continue;
@@ -693,28 +786,11 @@ async function runSubscriberSync(): Promise<void> {
       }
       invitedSubscriberIds.add(sub.id);
 
-      if (transporter && fromEmail) {
-        const selectUrl = `${baseUrl}/subscribe/${token}`;
-        const firstName = sub.customerName.split(" ")[0];
+      if (emailContext) {
         const dayLabel = isDualSub ? " (Sat + Tue)" : (isTuesdaySub ? " (Tuesday)" : " (Saturday)");
-        const emailBody = emailBodyTemplate
-          .replace(/\{\{firstName\}\}/g, firstName)
-          .replace(/\{\{fullName\}\}/g, sub.customerName)
-          .replace(/\{\{qty\}\}/g, String(sub.quantity))
-          .replace(/\{\{url\}\}/g, selectUrl);
-        try {
-          await transporter.sendMail({
-            from: fromEmail,
-            to: sub.customerEmail,
-            subject: emailSubject
-              .replace(/\{\{firstName\}\}/g, firstName)
-              .replace(/\{\{fullName\}\}/g, sub.customerName)
-              .replace(/\{\{qty\}\}/g, String(sub.quantity)) + dayLabel,
-            html: `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">${emailBody}</div>`,
-          });
+        const sent = await sendTrackedSubscriptionInviteEmail(invite, emailContext, dayLabel);
+        if (sent) {
           log(`Subscriber invite sent to ${sub.customerName} (${sub.customerEmail})`, "sync");
-        } catch (emailErr: any) {
-          log(`Subscriber invite email failed for ${sub.customerName}: ${(emailErr as Error).message}`, "sync");
         }
       }
     }
