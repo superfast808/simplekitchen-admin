@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import { OrderDeleteButton } from "@/components/order-delete-button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -104,14 +105,6 @@ export default function TuesdayOrdersPage() {
     return { meals, oats };
   }, [manualOrders, tuesdayWebOrders]);
 
-  const deleteMutation = useMutation({
-    mutationFn: (id: number) => apiRequest("DELETE", `/api/recurring-orders/${id}`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/recurring-orders"] });
-      toast({ title: "Recurring order removed" });
-    },
-  });
-
   const toggleMutation = useMutation({
     mutationFn: ({ id, active }: { id: number; active: boolean }) =>
       apiRequest("PATCH", `/api/recurring-orders/${id}`, { active }),
@@ -129,15 +122,6 @@ export default function TuesdayOrdersPage() {
     },
     onError: (err: Error) => {
       toast({ title: "Failed to copy items", description: err.message, variant: "destructive" });
-    },
-  });
-
-  const deleteManualMutation = useMutation({
-    mutationFn: (id: number) => apiRequest("DELETE", `/api/orders/${id}`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/recurring-orders/previous-orders"] });
-      toast({ title: "Manual order removed" });
     },
   });
 
@@ -336,14 +320,12 @@ export default function TuesdayOrdersPage() {
                           >
                             <Pencil className="w-4 h-4 text-muted-foreground" />
                           </Button>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            onClick={() => deleteMutation.mutate(order.id)}
-                            data-testid={`button-delete-recurring-${order.id}`}
-                          >
-                            <Trash2 className="w-4 h-4 text-muted-foreground" />
-                          </Button>
+                          <OrderDeleteButton
+                            kind="recurring"
+                            orderId={order.id}
+                            customerName={order.customerName}
+                            testId={`button-delete-recurring-${order.id}`}
+                          />
                         </div>
                       </TableCell>
                     </TableRow>
@@ -496,14 +478,14 @@ export default function TuesdayOrdersPage() {
                             >
                               <Pencil className="w-4 h-4 text-muted-foreground" />
                             </Button>
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              onClick={() => deleteManualMutation.mutate(order.id)}
-                              data-testid={`button-delete-manual-${order.id}`}
-                            >
-                              <Trash2 className="w-4 h-4 text-muted-foreground" />
-                            </Button>
+                            {!(order as any).isSubscriptionStamped && (
+                              <OrderDeleteButton
+                                kind="manual"
+                                orderId={order.id}
+                                customerName={order.customerName}
+                                testId={`button-delete-manual-${order.id}`}
+                              />
+                            )}
                           </div>
                         </TableCell>
                       </TableRow>
