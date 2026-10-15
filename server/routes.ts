@@ -1,5 +1,6 @@
 import { registerOperationsAssistant } from "./operations-ai";
 import { registerSubscriptionOrderRepair } from "./subscription-order-repair";
+import { startThursdaySubscriptionReminder, sendThursdayReminderTest, parseSubscriptionStaffRecipients } from "./subscription-staff-reminder";
 import { sendTrackedSubscriptionInvite, type SubscriptionMailContext } from "./subscription-mail";
 import { registerDispatch, setupDispatchTables } from "./dispatch";
 import express from "express";
@@ -390,6 +391,8 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   week1ReferenceDate: "",
   subscription_email_subject: DEFAULT_EMAIL_SUBJECT,
   subscription_email_body: DEFAULT_EMAIL_BODY,
+  subscription_staff_reminder_enabled: "true",
+  subscription_staff_reminder_recipients: "simplekitchenprep@gmail.com",
   portal_url: "https://admin.simplekitchenprep.com",
   smtp_host: "",
   smtp_port: "587",
@@ -772,6 +775,16 @@ async function getPortalBaseUrl(): Promise<string> {
 async function getSmtpFromEmail(): Promise<string> {
   const s = await getSettingsMap();
   return s.smtp_from || process.env.SMTP_FROM_EMAIL || "";
+}
+
+function getThursdayReminderDependencies() {
+  return {
+    getSettings: getSettingsMap,
+    getTransporter: getSmtpTransporter,
+    getFromEmail: getSmtpFromEmail,
+    getPortalBaseUrl,
+    log: (message: string) => log(message, "sync"),
+  };
 }
 
 // Return the active Stripe secret key (DB settings → env var → undefined if not configured)
@@ -1501,6 +1514,9 @@ async function startAutoSync() {
     setTimeout(() => backgroundGeocodeOrders().catch(() => {}), 8000);
   }
 
+  // Staff reminder runs independently of Woo syncing. Each Thursday at 5am
+  // Europe/London, with database-backed duplicate protection across restarts.
+  startThursdaySubscriptionReminder(getThursdayReminderDependencies());
   // Always run subscriber sync on its own schedule regardless of sync_enabled
   startSubscriberSyncScheduler();
   // Always run product sync scheduler (fires at 1pm London time every Saturday)
@@ -3008,6 +3024,13 @@ export async function registerRoutes(
         if (key === "sync_enabled" && value !== "true" && value !== "false") {
           return res.status(400).json({ message: "sync_enabled must be true or false" });
         }
+        if (key === "subscription_staff_reminder_enabled" && value !== "true" && value !== "false") {
+          return res.status(400).json({ message: "Staff reminder must be true or false" });
+        }
+        if (key === "subscription_staff_reminder_recipients") {
+          try { parseSubscriptionStaffRecipients(String(value)); }
+          catch (error: any) { return res.status(400).json({ message: error.message }); }
+        }
         if (key.includes("_day")) {
           const v = parseInt(String(value));
           if (isNaN(v) || v < 0 || v > 6) {
@@ -3033,6 +3056,33 @@ export async function registerRoutes(
       res.json(safe);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Admin-only internal reminder preview: no customer emails, no order
+  // reconciliation, and no scheduled-send marker is modified.
+  app.post("/api/settings/test-subscription-staff-reminder", async (req, res) => {
+    if (!req.session?.userId) return res.status(401).json({ message: "Not authenticated" });
+    try {
+      const result = await sendThursdayReminderTest(getThursdayReminderDependencies());
+      res.json({ success: true, accepted: result.accepted, recipients: result.recipients });
+    } catch (error: any) {
+      res.status(502).json({ message: error?.message || "Internal reminder test failed" });
+    }
+  });
+
+  // View the last few scheduled attempts, without exposing customer details.
+  app.get("/api/settings/subscription-staff-reminder-status", async (req, res) => {
+    if (!req.session?.userId) return res.status(401).json({ message: "Not authenticated" });
+    try {
+      const rows = await pool.query(
+        "SELECT reminder_date, sent_at, last_attempt_at, attempts, last_error " +
+        "FROM subscription_staff_reminder_runs ORDER BY reminder_date DESC LIMIT 4"
+      );
+      res.setHeader("Cache-Control", "no-store");
+      res.json(rows.rows);
+    } catch (error: any) {
+      res.status(500).json({ message: error?.message || "Could not load reminder status" });
     }
   });
 
