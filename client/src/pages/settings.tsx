@@ -208,6 +208,8 @@ export default function SettingsPage() {
   const [week1ReferenceDate, setWeek1ReferenceDate] = useState("");
   const [emailSubject, setEmailSubject] = useState("Choose Your Meals This Week - Simple Kitchen Prep");
   const [emailBody, setEmailBody] = useState("");
+  const [staffReminderEnabled, setStaffReminderEnabled] = useState(true);
+  const [staffReminderRecipients, setStaffReminderRecipients] = useState("simplekitchenprep@gmail.com");
   const [portalUrl, setPortalUrl] = useState("https://admin.simplekitchenprep.com");
   const [smtpHost, setSmtpHost] = useState("");
   const [smtpPort, setSmtpPort] = useState("587");
@@ -241,6 +243,10 @@ export default function SettingsPage() {
       }
       if (settings.subscription_email_subject) setEmailSubject(settings.subscription_email_subject);
       if (settings.subscription_email_body) setEmailBody(settings.subscription_email_body);
+      setStaffReminderEnabled(settings.subscription_staff_reminder_enabled !== "false");
+      if (settings.subscription_staff_reminder_recipients) {
+        setStaffReminderRecipients(settings.subscription_staff_reminder_recipients);
+      }
       if (settings.portal_url) setPortalUrl(settings.portal_url);
       if (settings.smtp_host) setSmtpHost(settings.smtp_host);
       if (settings.smtp_port) setSmtpPort(settings.smtp_port);
@@ -258,7 +264,7 @@ export default function SettingsPage() {
     mutationFn: (data: Record<string, string>) => apiRequest("POST", "/api/settings", data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/settings"] });
-      toast({ title: "Settings saved", description: "Auto-sync schedule updated." });
+      toast({ title: "Settings saved", description: "Your operational schedules and email preferences have been updated." });
     },
     onError: (error: Error) => {
       toast({ title: "Failed to save", description: error.message, variant: "destructive" });
@@ -312,6 +318,35 @@ export default function SettingsPage() {
     },
   });
 
+  const { data: staffReminderHistory } = useQuery<Array<{
+    reminder_date: string;
+    sent_at: string | null;
+    last_attempt_at: string;
+    attempts: number;
+    last_error: string | null;
+  }>>({
+    queryKey: ["/api/settings/subscription-staff-reminder-status"],
+    retry: false,
+  });
+
+  const sendStaffReminderTest = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/settings/test-subscription-staff-reminder", {});
+      return res.json() as Promise<{ accepted: number; recipients: string[] }>;
+    },
+    onSuccess: result => {
+      toast({
+        title: "Test reminder accepted by SMTP",
+        description: "Sent to: " + result.recipients.join(", ") + ". Check the inbox.",
+      });
+    },
+    onError: (error: Error) => toast({
+      title: "Could not send test reminder",
+      description: error.message,
+      variant: "destructive",
+    }),
+  });
+
   const handleSave = () => {
     const data: Record<string, string> = {
       sync_enabled: String(syncEnabled),
@@ -322,6 +357,8 @@ export default function SettingsPage() {
       order_window_close_hour: closeHour,
       subscription_email_subject: emailSubject,
       subscription_email_body: emailBody,
+      subscription_staff_reminder_enabled: String(staffReminderEnabled),
+      subscription_staff_reminder_recipients: staffReminderRecipients.trim(),
       portal_url: portalUrl,
       smtp_host: smtpHost,
       smtp_port: smtpPort,
@@ -765,6 +802,74 @@ export default function SettingsPage() {
               Save your SMTP settings first, then enter any address here to verify the connection works.
             </p>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card data-testid="card-thursday-subscription-reminder">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Mail className="w-4 h-4" /> Thursday Subscription Order Check
+          </CardTitle>
+          <CardDescription>
+            Internal reminder at 5:00 am every Thursday (UK time, including BST/GMT).
+            Reminds the Simple Kitchen team to verify customer meal selections in Orders,
+            Kitchen Production and Labels, and to use Subscriptions → Review and repair if needed.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between gap-4">
+            <Label htmlFor="staff-reminder-enabled">Enable Thursday 5am reminder</Label>
+            <Switch
+              id="staff-reminder-enabled"
+              checked={staffReminderEnabled}
+              onCheckedChange={setStaffReminderEnabled}
+              data-testid="switch-staff-reminder-enabled"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="staff-reminder-recipients">Staff email recipients</Label>
+            <Textarea
+              id="staff-reminder-recipients"
+              rows={2}
+              value={staffReminderRecipients}
+              onChange={e => setStaffReminderRecipients(e.target.value)}
+              placeholder="simplekitchenprep@gmail.com"
+              data-testid="textarea-staff-reminder-recipients"
+            />
+            <p className="text-xs text-muted-foreground">
+              Separate multiple internal staff emails with commas. The reminder never emails customers
+              or changes an order. Save Settings to apply changes before sending a test.
+            </p>
+          </div>
+          <div className="flex items-center gap-3 flex-wrap">
+            <Button
+              variant="outline"
+              type="button"
+              onClick={() => sendStaffReminderTest.mutate()}
+              disabled={sendStaffReminderTest.isPending}
+              data-testid="button-test-thursday-reminder"
+            >
+              <Mail className="w-4 h-4 mr-2" />
+              {sendStaffReminderTest.isPending ? "Sending test…" : "Send test reminder"}
+            </Button>
+            <p className="text-xs text-muted-foreground">
+              A test does not count as the scheduled Thursday email.
+            </p>
+          </div>
+          {staffReminderHistory && staffReminderHistory.length > 0 && (
+            <div className="border-t pt-3 space-y-1">
+              <p className="text-sm font-medium">Most recent scheduled attempt</p>
+              <p className="text-xs text-muted-foreground">
+                {staffReminderHistory[0].reminder_date} ·{" "}
+                {staffReminderHistory[0].sent_at
+                  ? "Accepted by SMTP"
+                  : "Not yet accepted by SMTP"}
+                {staffReminderHistory[0].last_error
+                  ? " · " + staffReminderHistory[0].last_error
+                  : ""}
+              </p>
+            </div>
+          )}
         </CardContent>
       </Card>
 
