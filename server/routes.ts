@@ -3143,7 +3143,7 @@ export async function registerRoutes(
       );
       if (!xmasMode) applyAddDeliveryUpgrades(ordersWithItems);
 
-      const subscriptionItemRe = /meal\s+subscription\s*-\s*\d+/i;
+      const subscriptionItemRe = /\bmeal\s+subscription\b/i;
       const isAddDeliveryOnlyLabel = (items: { productName: string }[]) =>
         items.length > 0 && items.every(i => i.productName.toLowerCase().includes("add delivery"));
       // Print labels for all orders that are not subscription parent orders and not
@@ -3164,7 +3164,7 @@ export async function registerRoutes(
       const marginT = 15.15 * MM;   // top margin
       const hGap    = 2.5   * MM;   // horizontal gap between columns
       const vGap    = 0;            // vertical gap between rows
-      const padX    = 3.5   * MM;   // inner left/right padding
+      const padX    = 4.0   * MM;   // extra safety inset from physical label edges
       const innerW  = labelW - padX * 2;
 
       const doc = new PDFDocument({ size: "A4", margin: 0, autoFirstPage: false });
@@ -3186,9 +3186,11 @@ export async function registerRoutes(
         const labelX = marginL + col * (labelW + hGap);
         const labelY = marginT + row * (labelH + vGap);
 
-        // Clip to label boundary — hard stop for any overflow
+        // Keep ink well inside the physical sticker. Printers may drift 1-2 mm
+        // even when the Avery L7163 PDF is printed at 100% / Actual Size.
         doc.save();
-        doc.rect(labelX, labelY, labelW, labelH).clip();
+        doc.rect(labelX + 1.5 * MM, labelY + 1.5 * MM,
+          labelW - 3 * MM, labelH - 3 * MM).clip();
 
         // Very subtle Simple Kitchen watermark for bag labels. Keep this behind
         // all operational text so customer/order information remains dominant.
@@ -3233,105 +3235,101 @@ export async function registerRoutes(
         const totalsText = categorySummary;
         const noteText = (order.customerDeliveryInstructions || order.notes || "").trim();
 
-        // Pre-measure each section
-        const NOTE_FONT_SIZE = 5.1;
-        const GAP1 = 0.7;  // gap after name
-        const GAP2 = 0.7;  // gap after tag
-        const GAP3 = 0.7;    // gap after address
-        const GAP4 = 0.7;    // gap between items and note
+        // Lay out every element in the SAME measured, padded label rectangle.
+        // The previous implementation measured heights but started at a fixed
+        // top offset, then relied on doc.y; long product lists consequently sat
+        // on cut lines despite ample blank space underneath.
+        const printedName = String(order.customerName || "") + "  #" + String(order.wooId || order.id);
+        const addrText = (order.deliveryAddress || "").trim();
+        const safeTop = labelY + 3.2 * MM;
+        const safeBottom = labelY + labelH - 3.2 * MM;
+        const safeHeight = safeBottom - safeTop;
+        const GAP = 1.4; // PDF points, only inserted between present sections
 
-        doc.font("Helvetica-Bold").fontSize(9);
-        const printedName = `${order.customerName}  #${order.wooId || order.id}`;
-        const nameH = doc.heightOfString(printedName, { width: innerW });
+        type LabelPart = {
+          key: string;
+          text: string;
+          font: string;
+          size: number;
+          minSize: number;
+          color: string;
+          measured: number;
+          drawHeight: number;
+        };
+        const parts: LabelPart[] = [
+          { key: "name", text: printedName, font: "Helvetica-Bold", size: 9.4, minSize: 8.0, color: "#171717", measured: 0, drawHeight: 0 },
+          { key: "tag", text: tag, font: "Helvetica-Bold", size: 7.3, minSize: 6.4, color: "#171717", measured: 0, drawHeight: 0 },
+          { key: "counts", text: totalsText, font: "Helvetica-Bold", size: 6.8, minSize: 5.6, color: "#171717", measured: 0, drawHeight: 0 },
+          { key: "address", text: addrText, font: "Helvetica", size: 6.5, minSize: 5.2, color: "#222222", measured: 0, drawHeight: 0 },
+          { key: "items", text: summaryText, font: "Helvetica", size: 6.2, minSize: 4.7, color: "#202020", measured: 0, drawHeight: 0 },
+          { key: "notes", text: noteText, font: "Helvetica-Oblique", size: 5.6, minSize: 4.7, color: "#aa2222", measured: 0, drawHeight: 0 },
+        ].filter(p => p.text.length > 0);
 
-        doc.font("Helvetica-Bold").fontSize(7);
-        const tagH = doc.heightOfString(tag, { width: innerW });
+        const measure = () => {
+          let height = 0;
+          for (const [index, part] of parts.entries()) {
+            doc.font(part.font).fontSize(part.size);
+            part.measured = doc.heightOfString(part.text, {
+              width: innerW, align: "center", lineGap: 0,
+            });
+            part.drawHeight = part.measured;
+            height += part.measured + (index === 0 ? 0 : GAP);
+          }
+          return height;
+        };
+        let totalHeight = measure();
 
-        doc.font("Helvetica").fontSize(6);
-        const addrText = order.deliveryAddress || "";
-        const addrH = addrText ? doc.heightOfString(addrText, { width: innerW }) : 0;
-
-        doc.font("Helvetica").fontSize(5.8);
-        const itemsH = summaryText ? doc.heightOfString(summaryText, { width: innerW }) : 0;
-
-        doc.font("Helvetica-Bold").fontSize(6.5);
-        const totalsH = doc.heightOfString(totalsText, { width: innerW, lineBreak: false });
-
-        doc.font("Helvetica-Oblique").fontSize(NOTE_FONT_SIZE);
-        const noteH = noteText ? doc.heightOfString(noteText, { width: innerW, lineBreak: false }) : 0;
-        const notesY = labelY + labelH - 2 - (noteH > 0 ? noteH : 0);
-        // Counts now sit directly below delivery/collection tag, rather than at the bottom.
-        // Remaining space is allocated to address and product descriptions.
-
-        // Reserve the compact totals line and notes before allowing long item lists to use the remaining space.
-        const totalContentH =
-          nameH + GAP1 +
-          tagH  + GAP2 +
-          (addrH  > 0 ? addrH  + GAP3 : 0) +
-          (itemsH > 0 ? itemsH + GAP4 : 0) +
-          totalsH +
-          (noteH  > 0 ? GAP4 + noteH   : 0);
-
-        // Vertically center the whole block; never start above top padding
-        const minPadY = 2 * MM;
-        const startY = labelY + minPadY;
-
-        const cx = labelX + padX; // content x (left edge of content area)
-        const opts = { width: innerW, align: "center" as const };
-
-        let cy = startY;
-
-        // Name
-        doc.font("Helvetica-Bold").fontSize(9);
-        doc.text(printedName, cx, cy, { ...opts, height: Math.min(nameH, labelH * 0.35) });
-        cy = Math.min(doc.y, labelY + labelH * 0.4) + GAP1;
-
-        // Tag
-        if (cy < labelY + labelH - 8) {
-          doc.font("Helvetica-Bold").fontSize(7);
-          doc.text(tag, cx, cy, opts);
-          cy = doc.y + GAP2;
-        }
-
-        // Meal-type counts sit near the top, just under the delivery/collection tag.
-        if (cy + totalsH + GAP2 < notesY) {
-          doc.font("Helvetica-Bold").fontSize(6.5).fillColor("black");
-          doc.text(totalsText, cx, cy, { ...opts, lineBreak: false, ellipsis: true, height: totalsH });
-          cy = doc.y + GAP2;
-        }
-
-        // Address
-        if (addrText && cy < labelY + labelH - 10) {
-          doc.font("Helvetica").fontSize(6);
-          const maxAddrH = Math.min(
-            notesY - cy - GAP3 - (itemsH > 0 ? Math.min(itemsH, 18) + GAP4 : 0),
-            24
-          );
-          if (maxAddrH > 7) {
-            doc.text(addrText, cx, cy, { ...opts, height: maxAddrH, ellipsis: true });
-            cy = doc.y + GAP3;
+        // Fit the full wrapped product description rather than squashing it
+        // into one line. Only shrink text when it genuinely needs more space.
+        const shrinkOrder = ["items", "address", "notes", "counts", "name", "tag"];
+        for (const key of shrinkOrder) {
+          const part = parts.find(p => p.key === key);
+          if (!part) continue;
+          while (totalHeight > safeHeight && part.size > part.minSize + 0.01) {
+            part.size = Math.max(part.minSize, part.size - 0.2);
+            totalHeight = measure();
           }
         }
 
-        // Items
-        if (summaryText && cy < notesY - 6) {
-          doc.font("Helvetica").fontSize(5.8);
-          const maxItemH = notesY - cy - GAP4;
-          if (maxItemH > 6) {
-            doc.text(summaryText, cx, cy, { ...opts, height: maxItemH, ellipsis: true });
+        // Exceptional orders may exceed one sticker even at the smallest
+        // readable font. In that case cap a section before it crosses the edge;
+        // PDFKit visibly ellipsizes it rather than printing on the next label.
+        let overflow = Math.max(0, totalHeight - safeHeight);
+        if (overflow > 0) {
+          for (const key of ["items", "address", "notes", "counts", "name"]) {
+            const part = parts.find(p => p.key === key);
+            if (!part || overflow <= 0) continue;
+            const minimumVisible = part.key === "items" ? 10 : 7;
+            const cut = Math.min(overflow, Math.max(0, part.drawHeight - minimumVisible));
+            part.drawHeight -= cut;
+            overflow -= cut;
           }
         }
 
-        // Notes — small italic red text flowing directly below items
-        if (noteText) {
-          doc.font("Helvetica-Oblique").fontSize(NOTE_FONT_SIZE).fillColor("red");
-          const noteY = notesY;
-          const maxNoteH = labelY + labelH - noteY - 1;
-          if (maxNoteH > 4) {
-            doc.text(noteText, cx, noteY, { ...opts, lineBreak: false, ellipsis: true, height: maxNoteH });
-          }
-          doc.fillColor("black");
+        const visibleHeight = parts.reduce((h, p, index) =>
+          h + p.drawHeight + (index === 0 ? 0 : GAP), 0);
+        // A normal label is vertically centred, leaving comfortable clearance
+        // from both the previous and following row's die-cut lines.
+        let textY = safeTop + Math.max(0, (safeHeight - visibleHeight) / 2);
+        const cx = labelX + padX;
+        for (const [index, part] of parts.entries()) {
+          if (index > 0) textY += GAP;
+          const remaining = safeBottom - textY;
+          const h = Math.min(part.drawHeight, remaining);
+          if (h < 4) break;
+          doc.font(part.font).fontSize(part.size).fillColor(part.color);
+          doc.text(part.text, cx, textY, {
+            width: innerW,
+            height: h,
+            align: "center",
+            lineGap: 0,
+            ellipsis: true,
+          });
+          // Do not use doc.y: PDFKit's cursor is affected by text clipping,
+          // and let it drift between rows on dense orders.
+          textY += h;
         }
+        doc.fillColor("black");
 
         doc.restore();
         labelIndex++;
