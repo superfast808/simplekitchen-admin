@@ -15,7 +15,7 @@ type Invite = {
 };
 type Order = {
   id: number; order_date: Date; is_manual: boolean; is_tuesday: boolean;
-  woo_id: number | null; status: string; item_count: number; has_dispatch: boolean;
+  woo_id: number | null; status: string; item_count: number; has_dispatch: boolean; has_payment: boolean;
 };
 type Finding = {
   inviteId: number; customerName: string; day: "sat" | "tue";
@@ -56,6 +56,7 @@ async function linkedOrder(db: PoolClient, id: number | null): Promise<Order | n
   const result = await db.query<Order>(
     "SELECT o.id, o.order_date, o.is_manual, o.is_tuesday, o.woo_id, o.status, " +
     "COUNT(oi.id)::int AS item_count, " +
+    "(COALESCE(o.woo_paid_total,0) > 0 OR COALESCE(o.cash_amount,0) > 0) AS has_payment, " +
     "EXISTS(SELECT 1 FROM dispatch_assignments da WHERE da.order_id=o.id) OR " +
     "EXISTS(SELECT 1 FROM dispatch_events de WHERE de.order_id=o.id) OR " +
     "EXISTS(SELECT 1 FROM dispatch_delivery_proofs dp WHERE dp.order_id=o.id) " +
@@ -80,7 +81,7 @@ async function inspect(db: PoolClient, invite: Invite, week: Week): Promise<Find
     const order = await linkedOrder(db, day.id);
     let issue: Finding["issue"] = "ok";
     if (!order) issue = "missing";
-    else if (!order.is_manual || order.woo_id != null || order.has_dispatch ||
+    else if (!order.is_manual || order.woo_id != null || order.has_payment || order.has_dispatch ||
       ["cancelled", "refunded", "failed", "trash", "delivered"].includes(String(order.status).toLowerCase()))
       issue = "protected";
     else if (order.is_tuesday !== (day.day === "tue")) issue = "wrong_day";
