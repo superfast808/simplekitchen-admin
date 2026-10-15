@@ -1,4 +1,5 @@
 import { registerOperationsAssistant } from "./operations-ai";
+import { registerSubscriptionOrderRepair } from "./subscription-order-repair";
 import { sendTrackedSubscriptionInvite, type SubscriptionMailContext } from "./subscription-mail";
 import { registerDispatch, setupDispatchTables } from "./dispatch";
 import express from "express";
@@ -1863,6 +1864,7 @@ export async function registerRoutes(
   });
 
   registerKitchenAuditRoutes(app);
+  registerSubscriptionOrderRepair(app, getWeekRange);
   registerOperationsAssistant(app);
   registerDebugExport(app);
   registerOrderActions(app);
