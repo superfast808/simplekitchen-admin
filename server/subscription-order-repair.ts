@@ -12,6 +12,7 @@ type Invite = {
   is_tuesday: boolean; selections_order_id: number | null;
   tuesday_selections_order_id: number | null;
   delivery_address: string | null; fulfillment_type: string | null;
+  renewal_order_date: Date | null;
 };
 type Order = {
   id: number; order_date: Date; is_manual: boolean; is_tuesday: boolean;
@@ -20,7 +21,8 @@ type Order = {
 type Finding = {
   inviteId: number; customerName: string; day: "sat" | "tue";
   orderId: number | null;
-  issue: "missing" | "empty" | "outside_window" | "wrong_day" | "protected" | "ok";
+  issue: "missing" | "empty" | "outside_window" | "wrong_day" | "protected" |
+    "renewal_without_choices" | "saved_choices_pending" | "week_mismatch" | "ok";
   canRepair: boolean;
 };
 const ms = (value: string | Date) => new Date(value).getTime();
@@ -39,16 +41,82 @@ function invitationSaturday(invite: Invite): Date {
   return sat;
 }
 
+// The paid Woo renewal is the strongest anchor for an invite created on the
+// wrong calendar week. Include both invite and parent order windows in the
+// read-only audit; do not silently repair ambiguous adjacent-week selections.
+function operationalWeekForInvite(i: Invite, week: Week): {
+  applies: boolean; ambiguous: boolean;
+} {
+  const inviteSat = invitationSaturday(i).getTime();
+  if (inviteSat === week.from.getTime()) return { applies: true, ambiguous: false };
+  const renewal = i.renewal_order_date ? ms(i.renewal_order_date) : Number.NaN;
+  if (Number.isFinite(renewal) && renewal >= week.from.getTime() && renewal <= week.to.getTime() &&
+      Math.abs(inviteSat - week.from.getTime()) <= 7 * 86400000) {
+    return { applies: true, ambiguous: true };
+  }
+  return { applies: false, ambiguous: false };
+}
+
+const INVITE_SELECT = "SELECT si.id, si.customer_name, si.customer_email, si.week_from, si.week_to, " +
+  "si.status, si.is_dual, si.is_tuesday, si.selections_order_id, " +
+  "si.tuesday_selections_order_id, si.delivery_address, si.fulfillment_type, " +
+  "parent.order_date AS renewal_order_date " +
+  "FROM subscription_invites si LEFT JOIN orders parent ON parent.id=si.order_id ";
+
 async function completedInvites(db: PoolClient, week: Week): Promise<Invite[]> {
   const result = await db.query<Invite>(
-    "SELECT id, customer_name, customer_email, week_from, week_to, status, is_dual, is_tuesday, " +
-    "selections_order_id, tuesday_selections_order_id, delivery_address, fulfillment_type " +
-    "FROM subscription_invites WHERE status='completed' " +
-    "AND week_to >= $1::timestamp - INTERVAL '18 hours' " +
-    "AND week_from <= $2::timestamp + INTERVAL '18 hours' ORDER BY id",
+    INVITE_SELECT +
+    "WHERE si.status='completed' AND (" +
+    "(si.week_to >= $1::timestamp - INTERVAL '18 hours' AND " +
+    "si.week_from <= $2::timestamp + INTERVAL '18 hours') OR " +
+    "(parent.order_date >= $1 AND parent.order_date <= $2)) ORDER BY si.id",
     [week.from, week.to]
   );
-  return result.rows.filter(i => invitationSaturday(i).getTime() === week.from.getTime());
+  return result.rows.filter(i => operationalWeekForInvite(i, week).applies);
+}
+
+async function pendingWithSavedChoices(db: PoolClient, week: Week): Promise<Finding[]> {
+  const rows = await db.query<Invite>(
+    INVITE_SELECT +
+    "WHERE si.status <> 'completed' " +
+    "AND EXISTS(SELECT 1 FROM subscription_selections ss WHERE ss.invite_id=si.id) " +
+    "AND ((si.week_to >= $1::timestamp - INTERVAL '18 hours' AND " +
+    "si.week_from <= $2::timestamp + INTERVAL '18 hours') " +
+    "OR (parent.order_date >= $1 AND parent.order_date <= $2))",
+    [week.from, week.to]
+  );
+  return rows.rows.filter(i => operationalWeekForInvite(i, week).applies).map(i => ({
+    inviteId: i.id, customerName: i.customer_name,
+    day: i.is_tuesday ? "tue" as const : "sat" as const,
+    orderId: i.selections_order_id,
+    issue: "saved_choices_pending" as const, canRepair: false,
+  }));
+}
+
+async function unmatchedRenewals(db: PoolClient, week: Week): Promise<Finding[]> {
+  // Deliberately do not treat a paid renewal as proof that meals were chosen.
+  // Surface missing links for staff rather than inventing production meals.
+  const rows = await db.query<{
+    id: number; customer_name: string; is_tuesday: boolean;
+  }>(
+    "SELECT o.id, o.customer_name, o.is_tuesday FROM orders o " +
+    "WHERE o.order_date >= $1 AND o.order_date <= $2 " +
+    "AND o.woo_id IS NOT NULL AND o.is_manual=FALSE " +
+    "AND LOWER(o.status) NOT IN ('cancelled','refunded','failed','trash') " +
+    "AND EXISTS(SELECT 1 FROM order_items oi WHERE oi.order_id=o.id " +
+    "AND oi.product_name ~* 'meal[[:space:]]+subscription') " +
+    "AND NOT EXISTS(SELECT 1 FROM subscription_invites si " +
+    "WHERE si.order_id=o.id AND si.status='completed' " +
+    "AND EXISTS(SELECT 1 FROM subscription_selections ss WHERE ss.invite_id=si.id)) " +
+    "ORDER BY o.customer_name, o.id",
+    [week.from, week.to]
+  );
+  return rows.rows.map(o => ({
+    inviteId: 0, customerName: o.customer_name,
+    day: o.is_tuesday ? "tue" as const : "sat" as const,
+    orderId: o.id,
+    issue: "renewal_without_choices" as const, canRepair: false,
+  }));
 }
 
 async function linkedOrder(db: PoolClient, id: number | null): Promise<Order | null> {
