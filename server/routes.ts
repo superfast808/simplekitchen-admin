@@ -289,6 +289,18 @@ async function getInviteWeekInfo(invite: { weekFrom: Date | string; weekTo?: Dat
   return getCurrentWeekInfo(from);
 }
 
+// The invite's stored timestamp may be Friday 23:00 UTC under BST or
+// Saturday midnight/afternoon. Operational orders must use a consistent
+// Saturday afternoon anchor inside all Sat–Thu Orders, labels and prep windows.
+function getSubscriptionOperationalOrderDate(invite: { weekFrom: Date | string; weekTo?: Date | string | null }): Date {
+  const from = new Date(invite.weekFrom);
+  const to = invite.weekTo ? new Date(invite.weekTo) : null;
+  const reference = to && to.getTime() > from.getTime()
+    ? new Date((from.getTime() + to.getTime()) / 2)
+    : from;
+  return new Date(londonSaturday(reference).getTime() + 14 * 60 * 60 * 1000);
+}
+
 function applyAddDeliveryUpgrades(ordersWithItems: Array<{ customerEmail: string | null; customerName: string; fulfillmentType: string | null; items: Array<{ productName: string }> }>): void {
   const deliveryEmails = new Set<string>();
   const deliveryNames = new Set<string>();
@@ -4081,7 +4093,7 @@ export async function registerRoutes(
           customerName: invite.customerName,
           customerEmail: invite.customerEmail,
           deliveryAddress: resolvedAddress,
-          orderDate: invite.weekFrom,
+          orderDate: getSubscriptionOperationalOrderDate(invite),
           status: "processing",
           fulfillmentType: resolvedFulfillment as "delivery" | "collection",
           isManual: true,
@@ -4107,7 +4119,7 @@ export async function registerRoutes(
           customerName: invite.customerName,
           customerEmail: invite.customerEmail,
           deliveryAddress: resolvedAddress,
-          orderDate: invite.weekFrom,
+          orderDate: getSubscriptionOperationalOrderDate(invite),
           status: "processing",
           fulfillmentType: resolvedFulfillment as "delivery" | "collection",
           isManual: true,
@@ -4263,7 +4275,7 @@ export async function registerRoutes(
         customerName: invite.customerName,
         customerEmail: invite.customerEmail,
         deliveryAddress: resolvedAddress,
-        orderDate: invite.weekFrom,
+        orderDate: getSubscriptionOperationalOrderDate(invite),
         status: "processing",
         fulfillmentType: resolvedFulfillment as "delivery" | "collection",
         isManual: true,
@@ -4468,11 +4480,11 @@ export async function registerRoutes(
         // Update or create Saturday order — recover if stored order was deleted
         let satOrderId: number | null = invite.selectionsOrderId ?? null;
         if (satOrderId) {
-          const upd = await storage.updateOrder(satOrderId, { orderDate: invite.weekFrom, deliveryAddress: resolvedAddress, fulfillmentType: resolvedFulfillment as "delivery" | "collection" });
+          const upd = await storage.updateOrder(satOrderId, { orderDate: getSubscriptionOperationalOrderDate(invite), deliveryAddress: resolvedAddress, fulfillmentType: resolvedFulfillment as "delivery" | "collection" });
           if (!upd) satOrderId = null;
         }
         if (!satOrderId) {
-          const satOrder = await storage.createOrder({ customerName: invite.customerName, customerEmail: invite.customerEmail, deliveryAddress: resolvedAddress, orderDate: invite.weekFrom, status: "processing", fulfillmentType: resolvedFulfillment as "delivery" | "collection", isManual: true, isTuesday: false });
+          const satOrder = await storage.createOrder({ customerName: invite.customerName, customerEmail: invite.customerEmail, deliveryAddress: resolvedAddress, orderDate: getSubscriptionOperationalOrderDate(invite), status: "processing", fulfillmentType: resolvedFulfillment as "delivery" | "collection", isManual: true, isTuesday: false });
           satOrderId = satOrder.id;
           await storage.setSubscriptionInviteSelectionsOrder(id, satOrderId);
         }
@@ -4483,12 +4495,12 @@ export async function registerRoutes(
         // Update or create Tuesday order
         const tueOrderId = (invite as any).tuesdaySelectionsOrderId as number | null;
         if (tueOrderId) {
-          await storage.updateOrder(tueOrderId, { orderDate: invite.weekFrom, deliveryAddress: resolvedAddress, fulfillmentType: resolvedFulfillment as "delivery" | "collection" });
+          await storage.updateOrder(tueOrderId, { orderDate: getSubscriptionOperationalOrderDate(invite), deliveryAddress: resolvedAddress, fulfillmentType: resolvedFulfillment as "delivery" | "collection" });
           await storage.deleteOrderItemsByOrderId(tueOrderId);
           for (const sel of tueSels) { if (!sel.productName?.trim()) continue; await storage.createOrderItem({ orderId: tueOrderId, productId: null, productName: sel.productName, quantity: parseInt(sel.quantity, 10) || 1, price: "7.75" }); }
           for (const ext of tueExtList) { if (!ext.productName?.trim()) continue; await storage.createOrderItem({ orderId: tueOrderId, productId: null, productName: ext.productName, quantity: parseInt(ext.quantity, 10) || 1, price: "0" }); }
         } else {
-          const tueOrder = await storage.createOrder({ customerName: invite.customerName, customerEmail: invite.customerEmail, deliveryAddress: resolvedAddress, orderDate: invite.weekFrom, status: "processing", fulfillmentType: resolvedFulfillment as "delivery" | "collection", isManual: true, isTuesday: true });
+          const tueOrder = await storage.createOrder({ customerName: invite.customerName, customerEmail: invite.customerEmail, deliveryAddress: resolvedAddress, orderDate: getSubscriptionOperationalOrderDate(invite), status: "processing", fulfillmentType: resolvedFulfillment as "delivery" | "collection", isManual: true, isTuesday: true });
           for (const sel of tueSels) { if (!sel.productName?.trim()) continue; await storage.createOrderItem({ orderId: tueOrder.id, productId: null, productName: sel.productName, quantity: parseInt(sel.quantity, 10) || 1, price: "7.75" }); }
           for (const ext of tueExtList) { if (!ext.productName?.trim()) continue; await storage.createOrderItem({ orderId: tueOrder.id, productId: null, productName: ext.productName, quantity: parseInt(ext.quantity, 10) || 1, price: "0" }); }
           await storage.setSubscriptionInviteTuesdayOrder(id, tueOrder.id);
@@ -4528,7 +4540,7 @@ export async function registerRoutes(
       let targetOrderId: number | null = invite.selectionsOrderId ?? null;
       if (targetOrderId) {
         const updated = await storage.updateOrder(targetOrderId, {
-          orderDate: invite.weekFrom,
+          orderDate: getSubscriptionOperationalOrderDate(invite),
           deliveryAddress: resolvedAddress,
           fulfillmentType: resolvedFulfillment as "delivery" | "collection",
         });
@@ -4542,7 +4554,7 @@ export async function registerRoutes(
           customerName: invite.customerName,
           customerEmail: invite.customerEmail,
           deliveryAddress: resolvedAddress || null,
-          orderDate: invite.weekFrom,
+          orderDate: getSubscriptionOperationalOrderDate(invite),
           status: "processing",
           fulfillmentType: (resolvedFulfillment as "delivery" | "collection") || "delivery",
           isManual: true,
@@ -4745,7 +4757,7 @@ export async function registerRoutes(
         customerName: invite.customerName,
         customerEmail: invite.customerEmail,
         deliveryAddress: resolvedAddress || null,
-        orderDate: invite.weekFrom,
+        orderDate: getSubscriptionOperationalOrderDate(invite),
         status: "processing",
         fulfillmentType: resolvedFulfillment,
         isManual: true,
