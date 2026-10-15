@@ -819,7 +819,12 @@ export default function SubscriptionOverviewPage() {
                     </div>
                   </>
                 )}
-                {operationalHealth.needsRepair === 0 && operationalHealth.needsReview === 0 && (
+                {operationalHealth.completedInvites < completed.length && (
+                  <p className="text-sm text-amber-700" role="alert">
+                    The invitations panel shows more completed choices than the operational week audit. Check the week dates before printing; the repair deliberately will not move orders between unrelated weeks.
+                  </p>
+                )}
+                {operationalHealth.completedInvites > 0 && operationalHealth.needsRepair === 0 && operationalHealth.needsReview === 0 && operationalHealth.completedInvites >= completed.length && (
                   <p className="text-xs text-emerald-700">
                     All completed subscription choices in this week have corresponding dated operational orders.
                   </p>
