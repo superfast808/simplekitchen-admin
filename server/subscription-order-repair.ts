@@ -127,6 +127,8 @@ async function restoreOne(inviteId: number, week: Week, actor: string) {
         continue;
       }
       let id = f.orderId;
+      const prior = id ? await linkedOrder(db, id) : null;
+      const orderDateOutsideWeek = !!prior && (ms(prior.order_date) < week.from.getTime() || ms(prior.order_date) > week.to.getTime());
       let action = "";
       if (f.issue === "missing") {
         // Fail closed rather than duplicating an existing unlinked stamped order.
@@ -158,6 +160,12 @@ async function restoreOne(inviteId: number, week: Week, actor: string) {
         action = "Corrected operational week";
       } else {
         action = "Restored empty operational order";
+      }
+      // An empty order can ALSO be outside the current production window.
+      // Restore its items and repair its date in the same transaction.
+      if (f.issue === "empty" && orderDateOutsideWeek && id) {
+        await db.query("UPDATE orders SET order_date=$2 WHERE id=$1", [id, stamp]);
+        action += " and corrected operational week";
       }
       if (f.issue === "missing" || f.issue === "empty") {
         for (const row of valid) {
