@@ -22,7 +22,7 @@ type Finding = {
   inviteId: number; customerName: string; day: "sat" | "tue";
   orderId: number | null;
   issue: "missing" | "empty" | "outside_window" | "wrong_day" | "protected" |
-    "renewal_without_choices" | "saved_choices_pending" | "week_mismatch" | "ok";
+    "renewal_without_choices" | "saved_choices_pending" | "week_mismatch" | "no_saved_selections" | "ok";
   canRepair: boolean;
 };
 const ms = (value: string | Date) => new Date(value).getTime();
@@ -145,10 +145,18 @@ function expectedDays(i: Invite): Array<{ day: "sat" | "tue"; id: number | null 
 
 async function inspect(db: PoolClient, invite: Invite, week: Week): Promise<Finding[]> {
   const findings: Finding[] = [];
+  const assignment = operationalWeekForInvite(invite, week);
   for (const day of expectedDays(invite)) {
     const order = await linkedOrder(db, day.id);
     let issue: Finding["issue"] = "ok";
-    if (!order) issue = "missing";
+    const saved = await db.query(
+      "SELECT 1 FROM subscription_selections WHERE invite_id=$1 " +
+      "AND ($3::boolean=FALSE OR delivery_day=$2) LIMIT 1",
+      [invite.id, day.day, invite.is_dual]
+    );
+    if (assignment.ambiguous) issue = "week_mismatch";
+    else if (!saved.rowCount) issue = "no_saved_selections";
+    else if (!order) issue = "missing";
     else if (!order.is_manual || order.woo_id != null || order.has_payment || order.has_dispatch ||
       ["cancelled", "refunded", "failed", "trash", "delivered"].includes(String(order.status).toLowerCase()))
       issue = "protected";
@@ -280,7 +288,14 @@ export function registerSubscriptionOrderRepair(app: Express, getWeek: (offset: 
     try {
       const week = getWeek(offset);
       const invites = await completedInvites(db, week);
-      const findings = (await Promise.all(invites.map(i => inspect(db, i, week)))).flat();
+      const [completedFindings, pendingFindings, renewalFindings] = await Promise.all([
+        Promise.all(invites.map(i => inspect(db, i, week))).then(rows => rows.flat()),
+        pendingWithSavedChoices(db, week),
+        unmatchedRenewals(db, week),
+      ]);
+      // Include every candidate in diagnostics, but never turn an unmatched
+      // paid renewal into a fictitious meal order.
+      const findings = [...completedFindings, ...pendingFindings, ...renewalFindings];
       res.setHeader("Cache-Control", "no-store");
       res.json({
         weekFrom: week.from, weekTo: week.to,
@@ -290,6 +305,8 @@ export function registerSubscriptionOrderRepair(app: Express, getWeek: (offset: 
         needsReview: findings.filter(f => !f.canRepair && f.issue !== "ok").length,
         missingOrders: findings.filter(f => f.issue === "missing").length,
         outsideWindow: findings.filter(f => f.issue === "outside_window").length,
+        unmatchedRenewals: renewalFindings.length,
+        savedChoicesPending: pendingFindings.length,
         findings: findings.filter(f => f.issue !== "ok"),
       });
     } catch (error: any) {
