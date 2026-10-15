@@ -180,6 +180,19 @@ export async function runStartupMigrations() {
       `);
     }
 
+    // Durable, one-per-UK-Thursday staff reminder ledger. This survives
+    // Docker restarts and stops multiple app instances sending duplicate mail.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS subscription_staff_reminder_runs (
+        reminder_date DATE PRIMARY KEY,
+        last_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        attempts INTEGER NOT NULL DEFAULT 1,
+        sent_at TIMESTAMPTZ,
+        recipient_emails TEXT NOT NULL,
+        last_error TEXT
+      )
+    `);
+
     // Unique partial index: one invite per subscriber per week (NULL subscriber_id rows excluded)
     await client.query(`
       CREATE UNIQUE INDEX IF NOT EXISTS idx_subscription_invites_subscriber_week
