@@ -25,6 +25,23 @@ type Selection = {
   deliveryDay?: string;
 };
 
+type OperationalOrderHealth = {
+  completedInvites: number;
+  operationalOrders: number;
+  needsRepair: number;
+  needsReview: number;
+  missingOrders: number;
+  outsideWindow: number;
+  findings: Array<{
+    inviteId: number;
+    customerName: string;
+    day: "sat" | "tue";
+    orderId: number | null;
+    issue: string;
+    canRepair: boolean;
+  }>;
+};
+
 type Invite = {
   id: number;
   orderId: number | null;
@@ -114,6 +131,7 @@ export default function SubscriptionOverviewPage() {
   const [showSendPanel, setShowSendPanel] = useState(false);
   const [editingInvite, setEditingInvite] = useState<Invite | null>(null);
   const [weekOffset, setWeekOffset] = useState(0);
+  const [confirmOperationalRepair, setConfirmOperationalRepair] = useState(false);
   const [resendingId, setResendingId] = useState<number | null>(null);
   const [sendingPaymentLinkId, setSendingPaymentLinkId] = useState<number | null>(null);
   const [resettingId, setResettingId] = useState<number | null>(null);
@@ -138,6 +156,44 @@ export default function SubscriptionOverviewPage() {
         throw new Error(detail?.message || `Subscriptions API returned ${res.status}`);
       }
       return res.json();
+    },
+  });
+
+  const { data: operationalHealth, isError: operationalHealthFailed, refetch: refreshOperationalHealth } = useQuery<OperationalOrderHealth>({
+    queryKey: ["/api/subscription-order-health", weekOffset],
+    enabled: weekOffset >= -3 && weekOffset <= 0,
+    queryFn: async () => {
+      const res = await fetch("/api/subscription-order-health?weekOffset=" + weekOffset, {
+        credentials: "include", cache: "no-store",
+      });
+      if (!res.ok) throw new Error("Operational order reconciliation check failed");
+      return res.json();
+    },
+  });
+
+  const reconcileOperationalOrders = useMutation({
+    mutationFn: async () => {
+      const result = await apiRequest("POST", "/api/subscription-order-repair", {
+        weekOffset, confirm: "REPAIR_SUBSCRIPTION_ORDERS",
+      });
+      return result.json() as Promise<{
+        inspected: number; fixed: number; needsReview: string[];
+      }>;
+    },
+    onSuccess: data => {
+      setConfirmOperationalRepair(false);
+      queryClient.invalidateQueries({ queryKey: ["/api/subscription-order-health"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/subscription-invites"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/kitchen-audit"] });
+      toast({
+        title: data.fixed > 0 ? "Subscription orders reconciled" : "Reconciliation checked",
+        description: data.fixed + " operational order(s) restored or corrected. " +
+          (data.needsReview.length ? data.needsReview.length + " need manual review." : "No unresolved problems reported."),
+      });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Reconciliation failed", description: error.message, variant: "destructive" });
     },
   });
 
@@ -701,6 +757,91 @@ export default function SubscriptionOverviewPage() {
               Historical invitations predate reliable tracking, so they are not automatically resent.
               Check individual customers before choosing Resend.
             </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {weekOffset >= -3 && (
+        <Card data-testid="subscription-operational-health">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Meal choices → Orders / Labels / Kitchen Production</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {operationalHealthFailed ? (
+              <p className="text-sm text-destructive">Could not check operational orders. Check server logs before printing labels.</p>
+            ) : !operationalHealth ? (
+              <p className="text-sm text-muted-foreground">Checking saved choices against operational orders…</p>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {[
+                    ["Completed subscribers", operationalHealth.completedInvites],
+                    ["Correct orders", operationalHealth.operationalOrders],
+                    ["Can repair", operationalHealth.needsRepair],
+                    ["Manual review", operationalHealth.needsReview],
+                  ].map(([label, num]) => (
+                    <div key={label} className="rounded-lg border p-2 text-center">
+                      <div className="text-xl font-bold tabular-nums">{num}</div>
+                      <div className="text-xs text-muted-foreground">{label}</div>
+                    </div>
+                  ))}
+                </div>
+                {operationalHealth.needsRepair > 0 && (
+                  <>
+                    <p className="text-sm">
+                      {operationalHealth.missingOrders} missing stamped orders,{" "}
+                      {operationalHealth.outsideWindow} orders outside the selected kitchen week.
+                      The repair does not email or charge customers.
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {!confirmOperationalRepair ? (
+                        <Button variant="outline" onClick={() => setConfirmOperationalRepair(true)}>
+                          Review and repair {operationalHealth.needsRepair} order(s)
+                        </Button>
+                      ) : (
+                        <>
+                          <span className="text-sm font-medium self-center">
+                            Repair this week's affected operational orders?
+                          </span>
+                          <Button
+                            disabled={reconcileOperationalOrders.isPending}
+                            onClick={() => reconcileOperationalOrders.mutate()}
+                            data-testid="confirm-subscription-order-repair"
+                          >
+                            {reconcileOperationalOrders.isPending ? "Reconciling…" : "Confirm repair"}
+                          </Button>
+                          <Button variant="outline" disabled={reconcileOperationalOrders.isPending}
+                            onClick={() => setConfirmOperationalRepair(false)}>
+                            Cancel
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </>
+                )}
+                {operationalHealth.needsRepair === 0 && operationalHealth.needsReview === 0 && (
+                  <p className="text-xs text-emerald-700">
+                    All completed subscription choices in this week have corresponding dated operational orders.
+                  </p>
+                )}
+                {!!operationalHealth.findings.length && (
+                  <details className="text-xs">
+                    <summary className="cursor-pointer font-semibold">View affected subscribers</summary>
+                    <div className="pt-2 max-h-36 overflow-y-auto space-y-1">
+                      {operationalHealth.findings.map((item, n) => (
+                        <div key={item.inviteId + "-" + item.day + "-" + n}>
+                          {item.customerName} · {item.day === "tue" ? "Tuesday" : "Saturday"} · {item.issue.replace(/_/g, " ")}
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
+              </>
+            )}
+            <Button type="button" size="sm" variant="ghost"
+              onClick={() => refreshOperationalHealth()}>
+              <RefreshCw className="w-3.5 h-3.5 mr-1" /> Recheck orders
+            </Button>
           </CardContent>
         </Card>
       )}
