@@ -33,7 +33,7 @@ function londonClock(now = new Date()): UKDateParts {
   };
 }
 
-function parseRecipients(raw: string): string[] {
+export function parseSubscriptionStaffRecipients(raw: string): string[] {
   const addresses = [...new Set(raw.split(/[,;\n]+/).map(x => x.trim().toLowerCase()).filter(Boolean))];
   if (addresses.length < 1 || addresses.length > 15 ||
       addresses.some(x => !/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(x))) {
@@ -100,7 +100,7 @@ async function sendMessage(deps: Dependencies, test: boolean): Promise<{
   accepted: number; recipients: string[];
 }> {
   const settings = await deps.getSettings();
-  const recipients = parseRecipients(settings.subscription_staff_reminder_recipients || "");
+  const recipients = parseSubscriptionStaffRecipients(settings.subscription_staff_reminder_recipients || "");
   const transporter = await deps.getTransporter();
   const fromEmail = await deps.getFromEmail();
   if (!transporter || !fromEmail) throw new Error("SMTP is not configured");
@@ -136,7 +136,7 @@ async function checkAndSend(deps: Dependencies): Promise<void> {
   try {
     const settings = await deps.getSettings();
     if (settings.subscription_staff_reminder_enabled !== "true") return;
-    const recipients = parseRecipients(settings.subscription_staff_reminder_recipients || "");
+    const recipients = parseSubscriptionStaffRecipients(settings.subscription_staff_reminder_recipients || "");
     // Do not claim a send if SMTP is not configured; retry on subsequent checks.
     if (!(await deps.getTransporter()) || !(await deps.getFromEmail())) {
       if (lastConfigurationWarning !== london.date) {
