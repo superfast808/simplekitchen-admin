@@ -9,6 +9,7 @@ import { createServer } from "http";
 declare module "express-session" {
   interface SessionData {
     userId: string;
+    mfaVerified?: boolean;
   }
 }
 
@@ -82,15 +83,17 @@ app.use(
 );
 
 app.use((req, res, next) => {
-  if (req.path.startsWith("/api/auth/")) return next();
+  // Permit only login, logout, branding and MFA enrolment while unverified.
+  if (req.path === "/api/auth/login" || req.path === "/api/auth/logout" ||
+      req.path === "/api/auth/logo" || req.path.startsWith("/api/auth/mfa/")) return next();
   if (req.path.startsWith("/api/subscribe/")) return next();
   if (req.path.startsWith("/api/customer/")) return next();
   if (req.path.startsWith("/api/stripe/session-status")) return next();
   if (req.path.startsWith("/api/addon/")) return next();
   if (req.path.startsWith("/api/webhooks/")) return next(); // Stripe webhooks use signature verification
   if (!req.path.startsWith("/api/")) return next();
-  if (!req.session.userId) {
-    return res.status(401).json({ message: "Not authenticated" });
+  if (!req.session.userId || !req.session.mfaVerified) {
+    return res.status(401).json({ message: "Multi-factor verification required" });
   }
   next();
 });
@@ -121,7 +124,7 @@ app.use((req, res, next) => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse && !path.startsWith("/api/customer/") && !path.startsWith("/api/customer-admin/")) {
+      if (capturedJsonResponse && !path.startsWith("/api/auth/") && !path.startsWith("/api/customer/") && !path.startsWith("/api/customer-admin/")) {
         logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
       }
 
