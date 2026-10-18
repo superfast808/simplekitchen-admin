@@ -15,6 +15,18 @@ export const db = drizzle(pool, { schema });
 export async function runStartupMigrations() {
   const client = await pool.connect();
   try {
+    // Initialise the session store in migrations. connect-pg-simple's
+    // createTableIfMissing fallback reads table.sql from disk, which is not
+    // present in the esbuild production bundle on a brand-new database.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS "session" (
+        sid VARCHAR PRIMARY KEY,
+        sess JSON NOT NULL,
+        expire TIMESTAMP(6) NOT NULL
+      )
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON "session" (expire)');
+
     // Fix manual orders that fell into the "gap" between the Thursday 07:00 cutoff and
     // the next Saturday — these orders are invisible because no week window covers them.
     // Snap them back to noon on the Saturday of their own week so they appear correctly.
