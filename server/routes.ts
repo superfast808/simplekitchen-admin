@@ -1,4 +1,5 @@
 import { registerOperationsAssistant } from "./operations-ai";
+import { beginPasswordMfa, registerStaffMfa } from "./mfa";
 import { registerSubscriptionOrderRepair } from "./subscription-order-repair";
 import { startThursdaySubscriptionReminder, sendThursdayReminderTest, parseSubscriptionStaffRecipients } from "./subscription-staff-reminder";
 import { sendTrackedSubscriptionInvite, type SubscriptionMailContext } from "./subscription-mail";
@@ -1685,32 +1686,38 @@ export async function registerRoutes(
     }
   });
 
+  // Password is factor one only. No full session until an enrolled MFA
+  // method is verified or the first method is securely enrolled.
+  const loginAttempts = new Map<string, { attempts: number; blockedUntil: number }>();
   app.post("/api/auth/login", async (req, res) => {
     try {
-      const { username, password } = req.body;
-      if (!username || !password) {
-        return res.status(400).json({ message: "Username and password are required" });
+      const username = String(req.body?.username || "").trim();
+      const password = String(req.body?.password || "");
+      if (!username || !password) return res.status(400).json({ message: "Username and password are required" });
+      const ip = req.ip || "unknown";
+      const key = crypto.createHash("sha256").update(ip + ":" + username.toLowerCase()).digest("hex");
+      const previous = loginAttempts.get(key);
+      if (previous && previous.blockedUntil > Date.now()) {
+        return res.status(429).json({ message: "Too many attempts. Try again in 15 minutes." });
       }
       const user = await storage.getUserByUsername(username);
-      if (!user) {
-        return res.status(401).json({ message: "Invalid credentials" });
-      }
-      const valid = await bcrypt.compare(password, user.password);
+      const valid = user ? await bcrypt.compare(password, user.password) : false;
       if (!valid) {
+        const attempts = (previous ? previous.attempts : 0) + 1;
+        loginAttempts.set(key, { attempts, blockedUntil: attempts >= 8 ? Date.now() + 15 * 60000 : 0 });
         return res.status(401).json({ message: "Invalid credentials" });
       }
-      req.session.regenerate((err) => {
-        if (err) {
-          return res.status(500).json({ message: "Session error" });
-        }
-        req.session.userId = user.id;
-        req.session.save(() => {
-          res.json({ id: user.id, username: user.username });
-        });
-      });
-    } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      loginAttempts.delete(key);
+      return beginPasswordMfa(req, res, user!.id);
+    } catch {
+      return res.status(500).json({ message: "Unable to sign in. Please try again." });
     }
+  });
+
+  registerStaffMfa(app, {
+    getTransporter: getSmtpTransporter,
+    getFromEmail: getSmtpFromEmail,
+    getSettings: getSettingsMap,
   });
 
   app.post("/api/auth/logout", (req, res) => {
@@ -1733,8 +1740,8 @@ export async function registerRoutes(
   });
 
   app.get("/api/auth/me", async (req, res) => {
-    if (!req.session.userId) {
-      return res.status(401).json({ message: "Not authenticated" });
+    if (!req.session.userId || !req.session.mfaVerified) {
+      return res.status(401).json({ message: "Multi-factor verification required" });
     }
     const user = await storage.getUserById(req.session.userId);
     if (!user) {
@@ -1758,8 +1765,8 @@ export async function registerRoutes(
       if (!username || !password) {
         return res.status(400).json({ message: "Username and password are required" });
       }
-      if (password.length < 4) {
-        return res.status(400).json({ message: "Password must be at least 4 characters" });
+      if (password.length < 12) {
+        return res.status(400).json({ message: "Password must be at least 12 characters" });
       }
       const existing = await storage.getUserByUsername(username);
       if (existing) {
