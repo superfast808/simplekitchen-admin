@@ -1688,7 +1688,7 @@ export async function registerRoutes(
 
   // Password is factor one only. No full session until an enrolled MFA
   // method is verified or the first method is securely enrolled.
-  const loginAttempts = new Map<string, { attempts: number; blockedUntil: number }>();
+  const loginAttempts = new Map<string, { attempts: number; blockedUntil: number; lastAttempt: number }>();
   app.post("/api/auth/login", async (req, res) => {
     try {
       const username = String(req.body?.username || "").trim();
@@ -1696,7 +1696,8 @@ export async function registerRoutes(
       if (!username || !password) return res.status(400).json({ message: "Username and password are required" });
       const ip = req.ip || "unknown";
       const key = crypto.createHash("sha256").update(ip + ":" + username.toLowerCase()).digest("hex");
-      const previous = loginAttempts.get(key);
+      const found = loginAttempts.get(key);
+      const previous = found && Date.now() - found.lastAttempt < 15 * 60000 ? found : undefined;
       if (previous && previous.blockedUntil > Date.now()) {
         return res.status(429).json({ message: "Too many attempts. Try again in 15 minutes." });
       }
@@ -1704,7 +1705,7 @@ export async function registerRoutes(
       const valid = user ? await bcrypt.compare(password, user.password) : false;
       if (!valid) {
         const attempts = (previous ? previous.attempts : 0) + 1;
-        loginAttempts.set(key, { attempts, blockedUntil: attempts >= 8 ? Date.now() + 15 * 60000 : 0 });
+        loginAttempts.set(key, { attempts, blockedUntil: attempts >= 8 ? Date.now() + 15 * 60000 : 0, lastAttempt: Date.now() });
         return res.status(401).json({ message: "Invalid credentials" });
       }
       loginAttempts.delete(key);
