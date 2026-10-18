@@ -64,11 +64,11 @@ function decrypt(value: string) {
 const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 function base32(buffer: Buffer) {
   let val = 0, bits = 0, output = "";
-  for (const byte of buffer) {
+  buffer.forEach(byte => {
     val = (val << 8) | byte;
     bits += 8;
     while (bits >= 5) { bits -= 5; output += alphabet[(val >>> bits) & 31]; }
-  }
+  });
   if (bits > 0) output += alphabet[(val << (5 - bits)) & 31];
   return output;
 }
