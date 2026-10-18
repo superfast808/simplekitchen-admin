@@ -33,6 +33,7 @@ declare module "express-session" {
     mfaEmailExpires?: number;
     mfaEmailSentAt?: number;
     mfaEmailAttempts?: number;
+    mfaTotpAttempts?: number;
   }
 }
 
@@ -137,6 +138,7 @@ function clearChallenges(req: Request) {
   req.session.mfaEmailExpires = undefined;
   req.session.mfaEmailSentAt = undefined;
   req.session.mfaEmailAttempts = undefined;
+  req.session.mfaTotpAttempts = undefined;
 }
 async function complete(req: Request, res: any, id: string) {
   clearChallenges(req);
@@ -228,7 +230,7 @@ export function registerStaffMfa(app: Express, hooks: Hooks) {
         rpName: "Simple Kitchen Admin", rpID: rp.rpID,
         userID: new TextEncoder().encode(id), userName: user.username,
         attestationType: "none", authenticatorSelection: { residentKey: "preferred",
-          userVerification: "required" }, preferredAuthenticatorType: "local",
+          userVerification: "required" }, preferredAuthenticatorType: "localDevice",
         supportedAlgorithmIDs: [-7, -257],
         excludeCredentials: existing.rows.map((row: any) => ({ id: row.credential_id })),
       });
@@ -330,6 +332,9 @@ export function registerStaffMfa(app: Express, hooks: Hooks) {
   app.post("/api/auth/mfa/authenticator/verify", async (req, res) => {
     try {
       const a = await actor(req);
+      req.session.mfaTotpAttempts = Number(req.session.mfaTotpAttempts || 0) + 1;
+      if (req.session.mfaTotpAttempts > 8)
+        return res.status(429).json({ message: "Too many authenticator attempts. Sign in again." });
       const value = String(req.body?.code || "").replace(/\s/g, "");
       if (!codeDigits.test(value)) return res.status(400).json({ message: "Enter a six-digit code" });
       if (req.session.mfaTotpSetup) {
