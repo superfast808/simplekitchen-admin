@@ -180,6 +180,37 @@ export async function runStartupMigrations() {
       `);
     }
 
+    // Staff MFA credentials are intentionally separate from the basic user
+    // table so existing accounts remain intact throughout enrolment.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS staff_mfa_passkeys (
+        credential_id TEXT PRIMARY KEY,
+        user_id VARCHAR NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        public_key BYTEA NOT NULL,
+        sign_count BIGINT NOT NULL DEFAULT 0,
+        transports JSONB NOT NULL DEFAULT '[]'::jsonb,
+        name TEXT NOT NULL DEFAULT 'Passkey',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        last_used_at TIMESTAMPTZ
+      )
+    `);
+    await client.query("CREATE INDEX IF NOT EXISTS idx_staff_passkeys_user ON staff_mfa_passkeys(user_id)");
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS staff_mfa_totp (
+        user_id VARCHAR PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        secret_enc TEXT NOT NULL,
+        last_used_step BIGINT NOT NULL DEFAULT -1,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS staff_mfa_email (
+        user_id VARCHAR PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        address TEXT NOT NULL,
+        verified_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+
     // Durable, one-per-UK-Thursday staff reminder ledger. This survives
     // Docker restarts and stops multiple app instances sending duplicate mail.
     await client.query(`
