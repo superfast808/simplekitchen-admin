@@ -14,7 +14,6 @@ jobs:
       SESSION_SECRET: CI-SessionSecret-VeryLong-DoNotEverReuse-OnProduction-12345
       BOOTSTRAP_ADMIN_USERNAME: ci-admin
       BOOTSTRAP_ADMIN_PASSWORD: CI-Admin-Password-Safeguard-2026!
-      NODE_ENV: production
     services:
       postgres:
         image: postgres:17
@@ -46,7 +45,7 @@ jobs:
       - name: Create ephemeral test database schema
         run: npm run db:push -- --force
       - name: Start test admin application
-        run: node dist/index.cjs >/tmp/simplekitchen-mfa.log 2>&1 & echo $! >/tmp/simplekitchen-mfa.pid
+        run: NODE_ENV=production node dist/index.cjs >/tmp/simplekitchen-mfa.log 2>&1 & echo $! >/tmp/simplekitchen-mfa.pid
       - name: Exercise enrolment and protected API
         run: |
           node script/mfa-smoke.mjs || (cat /tmp/simplekitchen-mfa.log && exit 1)
