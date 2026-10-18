@@ -1,0 +1,24 @@
+name: Validate staff MFA
+on:
+  push:
+    branches:
+      - feature/mandatory-passkey-mfa-2026-10-18
+  pull_request:
+    branches:
+      - fix/subscriptions-preserve-operations-2026-10-14
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci
+      - name: Install pinned MFA dependencies
+        run: npm install --no-save --package-lock=false @simplewebauthn/server@13.2.2 qrcode@1.5.4
+      - name: Type-check
+        run: npm run check
+      - name: Build client and server
+        run: npm run build
