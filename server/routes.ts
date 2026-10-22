@@ -1,4 +1,5 @@
 import { registerOperationsAssistant } from "./operations-ai";
+import { beginPasswordMfa, registerStaffMfa } from "./mfa";
 import { registerSubscriptionOrderRepair } from "./subscription-order-repair";
 import { startThursdaySubscriptionReminder, sendThursdayReminderTest, parseSubscriptionStaffRecipients } from "./subscription-staff-reminder";
 import { sendTrackedSubscriptionInvite, type SubscriptionMailContext } from "./subscription-mail";
@@ -1685,32 +1686,39 @@ export async function registerRoutes(
     }
   });
 
+  // Password is factor one only. No full session until an enrolled MFA
+  // method is verified or the first method is securely enrolled.
+  const loginAttempts = new Map<string, { attempts: number; blockedUntil: number; lastAttempt: number }>();
   app.post("/api/auth/login", async (req, res) => {
     try {
-      const { username, password } = req.body;
-      if (!username || !password) {
-        return res.status(400).json({ message: "Username and password are required" });
+      const username = String(req.body?.username || "").trim();
+      const password = String(req.body?.password || "");
+      if (!username || !password) return res.status(400).json({ message: "Username and password are required" });
+      const ip = req.ip || "unknown";
+      const key = crypto.createHash("sha256").update(ip + ":" + username.toLowerCase()).digest("hex");
+      const found = loginAttempts.get(key);
+      const previous = found && Date.now() - found.lastAttempt < 15 * 60000 ? found : undefined;
+      if (previous && previous.blockedUntil > Date.now()) {
+        return res.status(429).json({ message: "Too many attempts. Try again in 15 minutes." });
       }
       const user = await storage.getUserByUsername(username);
-      if (!user) {
-        return res.status(401).json({ message: "Invalid credentials" });
-      }
-      const valid = await bcrypt.compare(password, user.password);
+      const valid = user ? await bcrypt.compare(password, user.password) : false;
       if (!valid) {
+        const attempts = (previous ? previous.attempts : 0) + 1;
+        loginAttempts.set(key, { attempts, blockedUntil: attempts >= 8 ? Date.now() + 15 * 60000 : 0, lastAttempt: Date.now() });
         return res.status(401).json({ message: "Invalid credentials" });
       }
-      req.session.regenerate((err) => {
-        if (err) {
-          return res.status(500).json({ message: "Session error" });
-        }
-        req.session.userId = user.id;
-        req.session.save(() => {
-          res.json({ id: user.id, username: user.username });
-        });
-      });
-    } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      loginAttempts.delete(key);
+      return beginPasswordMfa(req, res, user!.id);
+    } catch {
+      return res.status(500).json({ message: "Unable to sign in. Please try again." });
     }
+  });
+
+  registerStaffMfa(app, {
+    getTransporter: getSmtpTransporter,
+    getFromEmail: getSmtpFromEmail,
+    getSettings: getSettingsMap,
   });
 
   app.post("/api/auth/logout", (req, res) => {
@@ -1733,8 +1741,8 @@ export async function registerRoutes(
   });
 
   app.get("/api/auth/me", async (req, res) => {
-    if (!req.session.userId) {
-      return res.status(401).json({ message: "Not authenticated" });
+    if (!req.session.userId || !req.session.mfaVerified) {
+      return res.status(401).json({ message: "Multi-factor verification required" });
     }
     const user = await storage.getUserById(req.session.userId);
     if (!user) {
@@ -1758,8 +1766,8 @@ export async function registerRoutes(
       if (!username || !password) {
         return res.status(400).json({ message: "Username and password are required" });
       }
-      if (password.length < 4) {
-        return res.status(400).json({ message: "Password must be at least 4 characters" });
+      if (password.length < 12) {
+        return res.status(400).json({ message: "Password must be at least 12 characters" });
       }
       const existing = await storage.getUserByUsername(username);
       if (existing) {
@@ -1991,21 +1999,45 @@ export async function registerRoutes(
 
   app.post("/api/orders", async (req, res) => {
     try {
-      const { items, saveAsConsistent, ...orderData } = req.body;
+      // Staff-added orders may target the selected historical/current week.
+      // Customer checkouts and their Thursday cutoff are unchanged.
+      const { items, saveAsConsistent, manualWeekStart, ...orderData } = req.body || {};
       if (!orderData.customerName || typeof orderData.customerName !== "string") {
         return res.status(400).json({ message: "Customer name is required" });
       }
-      // When no explicit orderDate is provided, default to now — but if we're past the
-      // Thursday 07:00 cutoff the current time falls in the gap between weeks and the
-      // order would be invisible. Snap it back to the current week's Saturday so it
-      // always appears in the expected week view.
       let resolvedOrderDate: Date;
-      if (orderData.orderDate) {
+      let wasAddedAfterCutoff = false;
+      if (manualWeekStart !== undefined) {
+        // UK calendar Saturday supplied by the Orders filter. Saturday 12:00Z
+        // is safely within the same Sat–Thu production window, even in BST.
+        if (typeof manualWeekStart !== "string" ||
+            !/^\d{4}-\d{2}-\d{2}$/.test(manualWeekStart) ||
+            orderData.orderDate !== undefined) {
+          return res.status(400).json({ message: "Choose one valid Saturday production week" });
+        }
+        const anchor = new Date(manualWeekStart + "T12:00:00.000Z");
+        if (Number.isNaN(anchor.getTime()) || anchor.getUTCDay() !== 6 ||
+            anchor.toISOString().slice(0, 10) !== manualWeekStart) {
+          return res.status(400).json({ message: "Production week must start on a Saturday" });
+        }
+        if (Math.abs(Date.now() - anchor.getTime()) > 370 * 86400000) {
+          return res.status(400).json({ message: "Selected production week is outside the one-year limit" });
+        }
+        resolvedOrderDate = anchor;
+        const cutoff = new Date(anchor);
+        cutoff.setUTCDate(cutoff.getUTCDate() + 5);
+        cutoff.setUTCHours(7, 0, 0, 0);
+        wasAddedAfterCutoff = Date.now() > cutoff.getTime();
+      } else if (orderData.orderDate) {
+        // Existing internal callers can still provide explicit dates.
         resolvedOrderDate = new Date(orderData.orderDate);
+        if (Number.isNaN(resolvedOrderDate.getTime()))
+          return res.status(400).json({ message: "Invalid manual order date" });
       } else {
         const now = new Date();
         const week = getWeekRange(0);
-        resolvedOrderDate = now > week.to ? week.from : now;
+        // Legacy callers: ensure orders after Thu 7am are still visible.
+        resolvedOrderDate = now > week.to ? getSubscriptionWeekFrom(week.from) : now;
       }
       const order = await storage.createOrder({
         ...orderData,
@@ -2053,7 +2085,18 @@ export async function registerRoutes(
         }
       }
       const orderItems = await storage.getOrderItems(order.id);
-      res.json({ ...order, items: orderItems });
+      if (wasAddedAfterCutoff) {
+        // Record late staff adjustments, without altering the customer's
+        // original order notes or payment/subscription data.
+        await pool.query(
+          "INSERT INTO order_action_audit (order_id, actor_id, action, details) VALUES ($1,$2,$3,$4)",
+          [order.id, String(req.session.userId), "manual_order_after_cutoff",
+            JSON.stringify({ weekStart: manualWeekStart, isTuesday: !!order.isTuesday })],
+        ).catch((error: any) => {
+          log("Late manual order audit failed for #" + order.id + ": " + String(error?.message || error), "orders");
+        });
+      }
+      res.json({ ...order, items: orderItems, addedAfterCutoff: wasAddedAfterCutoff });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }

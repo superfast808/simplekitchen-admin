@@ -10,6 +10,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import { StaffMfaSettings } from "@/components/staff-mfa-settings";
+import { StaffMfaRecovery } from "@/components/staff-mfa-recovery";
 import { Save, RefreshCw, Upload, Trash2, Image, UserPlus, X, CalendarDays, Mail, CreditCard, Package } from "lucide-react";
 
 const DAYS = [
@@ -501,7 +503,9 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
+      <StaffMfaSettings />
       <UserManagementCard />
+      <StaffMfaRecovery />
 
       <Card>
         <CardHeader>

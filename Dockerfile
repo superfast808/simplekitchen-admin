@@ -3,7 +3,8 @@ FROM node:20-bookworm-slim AS build
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm ci \
+    && npm install --no-save --package-lock=false @simplewebauthn/server@13.2.3 qrcode@1.5.4
 
 COPY . .
 RUN npm run build
@@ -18,6 +19,7 @@ ENV NODE_ENV=production \
 
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev \
+    && npm install --no-save --omit=dev --package-lock=false @simplewebauthn/server@13.2.3 qrcode@1.5.4 \
     && npm cache clean --force
 
 COPY --from=build /app/dist ./dist

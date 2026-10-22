@@ -1,0 +1,51 @@
+name: Validate staff MFA
+on:
+  push:
+    branches:
+      - feature/mandatory-passkey-mfa-2026-10-18
+  pull_request:
+    branches:
+      - fix/subscriptions-preserve-operations-2026-10-14
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://ci:ci-pass@localhost:5432/simplekitchen_ci
+      SESSION_SECRET: CI-SessionSecret-VeryLong-DoNotEverReuse-OnProduction-12345
+      BOOTSTRAP_ADMIN_USERNAME: ci-admin
+      BOOTSTRAP_ADMIN_PASSWORD: CI-Admin-Password-Safeguard-2026!
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci-pass
+          POSTGRES_DB: simplekitchen_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d simplekitchen_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci
+      - name: Install pinned MFA dependencies
+        run: npm install --no-save --package-lock=false @simplewebauthn/server@13.2.3 qrcode@1.5.4
+      - name: Type-check (legacy application has existing unrelated type errors)
+        run: npm run check -- --target ES2020
+        continue-on-error: true
+      - name: Build client and server
+        run: npm run build
+      - name: Create ephemeral test database schema
+        run: npm run db:push -- --force
+      - name: Start test admin application
+        run: NODE_ENV=production node dist/index.cjs >/tmp/simplekitchen-mfa.log 2>&1 & echo $! >/tmp/simplekitchen-mfa.pid
+      - name: Exercise enrolment and protected API
+        run: |
+          node script/mfa-smoke.mjs || (cat /tmp/simplekitchen-mfa.log && exit 1)

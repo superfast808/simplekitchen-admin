@@ -15,6 +15,18 @@ export const db = drizzle(pool, { schema });
 export async function runStartupMigrations() {
   const client = await pool.connect();
   try {
+    // Initialise the session store in migrations. connect-pg-simple's
+    // createTableIfMissing fallback reads table.sql from disk, which is not
+    // present in the esbuild production bundle on a brand-new database.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS "session" (
+        sid VARCHAR PRIMARY KEY,
+        sess JSON NOT NULL,
+        expire TIMESTAMP(6) NOT NULL
+      )
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON "session" (expire)');
+
     // Fix manual orders that fell into the "gap" between the Thursday 07:00 cutoff and
     // the next Saturday — these orders are invisible because no week window covers them.
     // Snap them back to noon on the Saturday of their own week so they appear correctly.
@@ -179,6 +191,37 @@ export async function runStartupMigrations() {
         WHERE invite_email_last_attempt_at IS NULL
       `);
     }
+
+    // Staff MFA credentials are intentionally separate from the basic user
+    // table so existing accounts remain intact throughout enrolment.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS staff_mfa_passkeys (
+        credential_id TEXT PRIMARY KEY,
+        user_id VARCHAR NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        public_key BYTEA NOT NULL,
+        sign_count BIGINT NOT NULL DEFAULT 0,
+        transports JSONB NOT NULL DEFAULT '[]'::jsonb,
+        name TEXT NOT NULL DEFAULT 'Passkey',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        last_used_at TIMESTAMPTZ
+      )
+    `);
+    await client.query("CREATE INDEX IF NOT EXISTS idx_staff_passkeys_user ON staff_mfa_passkeys(user_id)");
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS staff_mfa_totp (
+        user_id VARCHAR PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        secret_enc TEXT NOT NULL,
+        last_used_step BIGINT NOT NULL DEFAULT -1,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS staff_mfa_email (
+        user_id VARCHAR PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        address TEXT NOT NULL,
+        verified_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
 
     // Durable, one-per-UK-Thursday staff reminder ledger. This survives
     // Docker restarts and stops multiple app instances sending duplicate mail.

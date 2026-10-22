@@ -3,7 +3,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { OrderActions } from "@/components/order-actions";
 import { OrderDeleteButton } from "@/components/order-delete-button";
-import { format } from "date-fns";
+import { format, startOfWeek } from "date-fns";
 import { useState, useMemo } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -444,7 +444,7 @@ export default function OrdersPage() {
               </Button>
             </>
           )}
-          <ManualOrderDialog open={showManualDialog} onOpenChange={setShowManualDialog} />
+          <ManualOrderDialog open={showManualDialog} onOpenChange={setShowManualDialog} displayedFrom={from} displayedTo={to} dateMode={dateFilter.mode} />
         </div>
       </div>
 
@@ -1232,12 +1232,17 @@ function ProductSelect({ value, onChange, products, testId }: {
   );
 }
 
-function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+function ManualOrderDialog({ open, onOpenChange, displayedFrom, displayedTo, dateMode }: {
+  open: boolean; onOpenChange: (v: boolean) => void;
+  displayedFrom: Date; displayedTo: Date;
+  dateMode: "window" | "month" | "custom";
+}) {
   const { toast } = useToast();
   const [customerName, setCustomerName] = useState("");
   const [address, setAddress] = useState("");
   const [fulfillmentType, setFulfillmentType] = useState<"delivery" | "collection">("delivery");
   const [isTuesday, setIsTuesday] = useState(false);
+  const [alternateWeekStart, setAlternateWeekStart] = useState("");
   const [notes, setNotes] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<"" | "cash" | "bank_transfer">("");
   const [cashAmount, setCashAmount] = useState("");
@@ -1246,20 +1251,42 @@ function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
 
   const { data: products } = useQuery<any[]>({ queryKey: ["/api/products"] });
 
+  // Window mode always assigns to the displayed Saturday. Month and Custom
+  // span multiple weeks, so staff choose the intended production Saturday.
+  const displayedSaturday = format(startOfWeek(displayedFrom, { weekStartsOn: 6 }), "yyyy-MM-dd");
+  const suggestedSaturday = dateMode === "window" ? displayedSaturday :
+    format(startOfWeek(new Date(), { weekStartsOn: 6 }), "yyyy-MM-dd");
+  const chosenWeekStart = dateMode === "window" ? displayedSaturday : (alternateWeekStart || suggestedSaturday);
+  const anchor = new Date(chosenWeekStart + "T12:00:00.000Z");
+  const isValidWeek = !Number.isNaN(anchor.getTime()) && anchor.getUTCDay() === 6 &&
+    anchor.toISOString().slice(0, 10) === chosenWeekStart;
+  const cutoff = new Date(anchor);
+  cutoff.setUTCDate(cutoff.getUTCDate() + 5);
+  cutoff.setUTCHours(7, 0, 0, 0);
+  const afterCutoff = isValidWeek && Date.now() > cutoff.getTime();
+
   const createMutation = useMutation({
-    mutationFn: (data: any) => apiRequest("POST", "/api/orders", data),
-    onSuccess: () => {
+    mutationFn: async (data: any) => {
+      const response = await apiRequest("POST", "/api/orders", data);
+      return response.json() as Promise<{ addedAfterCutoff?: boolean }>;
+    },
+    onSuccess: (created) => {
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
       queryClient.invalidateQueries({ queryKey: ["/api/recurring-orders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/product-totals"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/kitchen-production"] });
       toast({
-        title: "Manual order created",
-        description: saveAsConsistent ? "Customer saved for future weeks." : undefined,
+        title: created.addedAfterCutoff ? "Late manual order added to selected week" : "Manual order created",
+        description: created.addedAfterCutoff
+          ? "Included in the selected week. Regenerate labels and kitchen prep sheets."
+          : saveAsConsistent ? "Customer saved for future weeks." : undefined,
       });
       onOpenChange(false);
       setCustomerName("");
       setAddress("");
       setFulfillmentType("delivery");
       setIsTuesday(false);
+      setAlternateWeekStart("");
       setNotes("");
       setPaymentMethod("");
       setCashAmount("");
@@ -1277,8 +1304,13 @@ function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
       toast({ title: "Please fill in customer name and at least one item", variant: "destructive" });
       return;
     }
+    if (!isValidWeek) {
+      toast({ title: "Select a Saturday", description: "Manual orders belong to a production week beginning on Saturday.", variant: "destructive" });
+      return;
+    }
     createMutation.mutate({
       customerName,
+      manualWeekStart: chosenWeekStart,
       deliveryAddress: fulfillmentType === "delivery" ? (address || null) : null,
       fulfillmentType,
       isTuesday,
@@ -1307,6 +1339,32 @@ function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
           <DialogTitle>Add Manual Order</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
+          <div className="rounded-lg border bg-muted/40 p-3 space-y-2" data-testid="manual-order-production-week">
+            <Label htmlFor="manual-week-start">Production week for this order</Label>
+            {dateMode === "window" ? (
+              <p className="text-sm font-semibold">
+                {format(displayedFrom, "EEE d MMM")} – {format(displayedTo, "EEE d MMM yyyy")} · week shown
+              </p>
+            ) : (
+              <>
+                <p className="text-xs text-muted-foreground">
+                  Month/Custom shows several weeks. Choose the Saturday of the production week to receive this order.
+                </p>
+                <Input id="manual-week-start" type="date" value={chosenWeekStart}
+                  onChange={event => setAlternateWeekStart(event.target.value)}
+                  data-testid="input-manual-week-start" />
+              </>
+            )}
+            {afterCutoff ? (
+              <p className="text-xs font-medium text-amber-700 dark:text-amber-300" data-testid="manual-order-late-notice">
+                After the Thursday 7 am cutoff: staff can still add this order to the selected week.
+                It will be included in Orders, labels and kitchen production totals.
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground">This order will be assigned to the selected production week.</p>
+            )}
+            {!isValidWeek && <p className="text-xs text-destructive">Select a Saturday to continue.</p>}
+          </div>
           <div>
             <Label>Customer Name</Label>
             <Input
@@ -1433,7 +1491,7 @@ function ManualOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
               Save as consistent customer
             </Label>
           </div>
-          <Button onClick={handleSubmit} disabled={createMutation.isPending} className="w-full" data-testid="button-submit-manual-order">
+          <Button onClick={handleSubmit} disabled={createMutation.isPending || !isValidWeek} className="w-full" data-testid="button-submit-manual-order">
             {createMutation.isPending ? "Creating..." : "Create Order"}
           </Button>
         </div>
