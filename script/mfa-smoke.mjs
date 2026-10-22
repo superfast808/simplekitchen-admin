@@ -75,6 +75,27 @@ async function main() {
     "Verified staff session should access /api/auth/me");
   assert((await request("GET", "/api/orders")).status === 200,
     "Verified staff session should access Orders");
+  // A staff member can assign a manual order into a selected earlier week.
+  const sat = new Date();
+  const dow = sat.getUTCDay();
+  sat.setUTCDate(sat.getUTCDate() - (dow === 6 ? 0 : dow === 0 ? 1 : dow + 1) - 14);
+  const selectedWeek = sat.toISOString().slice(0, 10);
+  const created = await request("POST", "/api/orders", {
+    customerName: "Kitchen manual week check", fulfillmentType: "collection",
+    saveAsConsistent: false, manualWeekStart: selectedWeek,
+    items: [{ productName: "Kitchen test meal", quantity: 2 }],
+  });
+  assert(created.status === 200 && created.data?.addedAfterCutoff,
+    "Past-production-week manual order must be permitted");
+  const weekFrom = selectedWeek + "T00:00:00Z";
+  const weekTo = new Date(weekFrom);
+  weekTo.setUTCDate(weekTo.getUTCDate() + 5);
+  weekTo.setUTCHours(7, 0, 0, 0);
+  const list = await request("GET", "/api/orders?from=" + encodeURIComponent(weekFrom)
+    + "&to=" + encodeURIComponent(weekTo.toISOString()));
+  assert(list.status === 200 && list.data.some(o => o.id === created.data.id),
+    "Staff manual order must appear in the intended operational week");
+
   assert((await request("POST", "/api/auth/logout", {})).status === 200,
     "Logout should succeed");
   const again = await request("POST", "/api/auth/login", {
