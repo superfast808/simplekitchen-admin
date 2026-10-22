@@ -1999,21 +1999,45 @@ export async function registerRoutes(
 
   app.post("/api/orders", async (req, res) => {
     try {
-      const { items, saveAsConsistent, ...orderData } = req.body;
+      // Staff-added orders may target the selected historical/current week.
+      // Customer checkouts and their Thursday cutoff are unchanged.
+      const { items, saveAsConsistent, manualWeekStart, ...orderData } = req.body || {};
       if (!orderData.customerName || typeof orderData.customerName !== "string") {
         return res.status(400).json({ message: "Customer name is required" });
       }
-      // When no explicit orderDate is provided, default to now — but if we're past the
-      // Thursday 07:00 cutoff the current time falls in the gap between weeks and the
-      // order would be invisible. Snap it back to the current week's Saturday so it
-      // always appears in the expected week view.
       let resolvedOrderDate: Date;
-      if (orderData.orderDate) {
+      let wasAddedAfterCutoff = false;
+      if (manualWeekStart !== undefined) {
+        // UK calendar Saturday supplied by the Orders filter. Saturday 12:00Z
+        // is safely within the same Sat–Thu production window, even in BST.
+        if (typeof manualWeekStart !== "string" ||
+            !/^\d{4}-\d{2}-\d{2}$/.test(manualWeekStart) ||
+            orderData.orderDate !== undefined) {
+          return res.status(400).json({ message: "Choose one valid Saturday production week" });
+        }
+        const anchor = new Date(manualWeekStart + "T12:00:00.000Z");
+        if (Number.isNaN(anchor.getTime()) || anchor.getUTCDay() !== 6 ||
+            anchor.toISOString().slice(0, 10) !== manualWeekStart) {
+          return res.status(400).json({ message: "Production week must start on a Saturday" });
+        }
+        if (Math.abs(Date.now() - anchor.getTime()) > 370 * 86400000) {
+          return res.status(400).json({ message: "Selected production week is outside the one-year limit" });
+        }
+        resolvedOrderDate = anchor;
+        const cutoff = new Date(anchor);
+        cutoff.setUTCDate(cutoff.getUTCDate() + 5);
+        cutoff.setUTCHours(7, 0, 0, 0);
+        wasAddedAfterCutoff = Date.now() > cutoff.getTime();
+      } else if (orderData.orderDate) {
+        // Existing internal callers can still provide explicit dates.
         resolvedOrderDate = new Date(orderData.orderDate);
+        if (Number.isNaN(resolvedOrderDate.getTime()))
+          return res.status(400).json({ message: "Invalid manual order date" });
       } else {
         const now = new Date();
         const week = getWeekRange(0);
-        resolvedOrderDate = now > week.to ? week.from : now;
+        // Legacy callers: ensure orders after Thu 7am are still visible.
+        resolvedOrderDate = now > week.to ? getSubscriptionWeekFrom(week.from) : now;
       }
       const order = await storage.createOrder({
         ...orderData,
@@ -2061,7 +2085,18 @@ export async function registerRoutes(
         }
       }
       const orderItems = await storage.getOrderItems(order.id);
-      res.json({ ...order, items: orderItems });
+      if (wasAddedAfterCutoff) {
+        // Record late staff adjustments, without altering the customer's
+        // original order notes or payment/subscription data.
+        await pool.query(
+          "INSERT INTO order_action_audit (order_id, actor_id, action, details) VALUES ($1,$2,$3,$4)",
+          [order.id, String(req.session.userId), "manual_order_after_cutoff",
+            JSON.stringify({ weekStart: manualWeekStart, isTuesday: !!order.isTuesday })],
+        ).catch((error: any) => {
+          log("Late manual order audit failed for #" + order.id + ": " + String(error?.message || error), "orders");
+        });
+      }
+      res.json({ ...order, items: orderItems, addedAfterCutoff: wasAddedAfterCutoff });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
