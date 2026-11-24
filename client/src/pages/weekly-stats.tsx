@@ -11,7 +11,8 @@ import {
   Truck, UserPlus, UserCheck, TrendingUp, TrendingDown, Globe, Stamp, Package,
   Banknote, CreditCard, ShoppingBag, RefreshCw,
 } from "lucide-react";
-import { DeliveryDatePills, getOrderWindow } from "@/components/date-filter";
+import { DeliveryDatePills, getOrderWindow, displayEnd } from "@/components/date-filter";
+import { operationalWeek } from "@shared/week";
 
 type OrderItem = { productName: string; quantity: number; price: string };
 type OrderWithItems = {
@@ -52,14 +53,9 @@ function getWeekRange(offset: number): { from: Date; to: Date; isCurrent: boolea
   return { from, to, isCurrent: offset === 0 };
 }
 
-/** True after Thursday 07:00 UK — the production cutoff when this week's meal count is locked. */
+/** True once web orders have closed (Wednesday 23:59 UK) until the next week opens Saturday noon. */
 function isWeekFinalized(): boolean {
-  const now = new Date();
-  const ukNow = new Date(now.toLocaleString("en-US", { timeZone: "Europe/London" }));
-  const day = ukNow.getDay(); // 4 = Thursday
-  const hour = ukNow.getHours();
-  // Thursday 7am or later (but before Saturday when the new week starts)
-  return (day === 4 && hour >= 7) || day === 5; // Thu≥7am or Friday
+  return Date.now() > operationalWeek(0).ordersClose.getTime();
 }
 
 function filterItems(
@@ -268,12 +264,12 @@ export default function WeeklyStatsPage() {
         <div>
           <h1 className="text-2xl font-bold" data-testid="text-weekly-stats-title">Weekly Stats</h1>
           <p className="text-sm text-muted-foreground" data-testid="text-weekly-stats-range">
-            {format(from, "EEE, MMM d")} – {format(to, "EEE d MMM, yyyy")} 07:00
+            {format(from, "EEE, MMM d")} 12:00 – {format(displayEnd(from, to), "EEE d MMM, yyyy")} 23:59
           </p>
           <DeliveryDatePills weekStart={from} /><DebugExportButton page="weekly-stats" from={from} to={to}/>
           {weekFinalized && (
             <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1 font-medium" data-testid="text-stats-cutoff-notice">
-              ✓ Meals finalised — orders locked as of Thu 7am
+              ✓ Meals finalised — orders closed Wednesday night
             </p>
           )}
         </div>
