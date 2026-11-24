@@ -10,7 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from "@/components/ui/table";
-import { RefreshCw, Trash2, Plus, ShoppingCart, Download, Tag, Pencil, CalendarCheck, Banknote, MessageSquare, UserCheck, ChevronDown, ChevronUp, ChevronsUpDown, Stamp, Search, X, UserPlus, ArrowUpFromLine, CheckCircle2, AlertCircle, ChevronLeft, ChevronRight, Link2, Mail, FileDown } from "lucide-react";
+import { RefreshCw, Trash2, Plus, ShoppingCart, Download, Tag, Pencil, CalendarCheck, Banknote, MessageSquare, UserCheck, ChevronDown, ChevronUp, ChevronsUpDown, Stamp, Search, X, UserPlus, ArrowUpFromLine, CheckCircle2, AlertCircle, ChevronLeft, ChevronRight, Link2, Mail, FileDown, Store } from "lucide-react";
+import { Link } from "wouter";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -80,6 +81,22 @@ export default function OrdersPage() {
   const { data: allRecurringOrders } = useQuery<RecurringOrderWithItems[]>({
     queryKey: ["/api/recurring-orders"],
     select: (data) => data.filter((c: any) => c.active !== false),
+  });
+
+  // Sale-or-return shops are tracked on the Shop Sales & Returns page.
+  const { data: sorShops } = useQuery<{ shops: { key: string }[] }>({ queryKey: ["/api/shop-returns/shops"] });
+  const shopKeyOf = (name: string) => name.normalize("NFKC").trim().replace(/\s+/g, " ").toLowerCase();
+  const sorShopKeys = useMemo(() => new Set((sorShops?.shops ?? []).map(s => s.key)), [sorShops]);
+  const toggleShopMutation = useMutation({
+    mutationFn: ({ name, on }: { name: string; on: boolean }) => on
+      ? apiRequest("POST", "/api/shop-returns/shops", { name })
+      : apiRequest("DELETE", `/api/shop-returns/shops/${encodeURIComponent(shopKeyOf(name))}`),
+    onSuccess: (_d, { name, on }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/shop-returns/shops"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/shop-returns/week"] });
+      toast({ title: on ? `${name} is now a sale-or-return shop` : `${name} is no longer a sale-or-return shop` });
+    },
+    onError: (error: Error) => toast({ title: "Couldn't update shop", description: error.message, variant: "destructive" }),
   });
 
   type CustomerGroup = {
@@ -557,6 +574,9 @@ export default function OrdersPage() {
                 >
                   {deduplicateMutation.isPending ? "Cleaning…" : "Remove duplicates"}
                 </Button>
+                <Button asChild size="sm" variant="outline" className="h-8 w-full text-xs sm:h-7 sm:w-auto" data-testid="button-shop-returns">
+                  <Link href="/shop-returns"><Store className="w-3 h-3 mr-1" />Shop Sales &amp; Returns</Link>
+                </Button>
                 <Button size="sm" variant="outline" className="h-8 w-full text-xs sm:h-7 sm:w-auto" onClick={() => setShowAddConsistentDialog(true)} data-testid="button-add-consistent">
                   <Plus className="w-3 h-3 mr-1" />Add Customer
                 </Button>
@@ -579,6 +599,9 @@ export default function OrdersPage() {
                       <TableRow key={group.customerName} data-testid={`row-consistent-${group.customerName}`}>
                         <TableCell className="align-top pt-3">
                           <div className="font-medium">{group.customerName}</div>
+                          {sorShopKeys.has(shopKeyOf(group.customerName)) && (
+                            <Badge variant="secondary" className="mt-1 text-[11px]"><Store className="w-3 h-3 mr-1" />Sale or return</Badge>
+                          )}
                           {group.saturday && group.saturday.items.length > 0 && (() => {
                             const satStamped = allOrders?.some(
                               o => o.isManual && !o.isTuesday && o.customerName.toLowerCase() === group.customerName.toLowerCase()
@@ -650,6 +673,15 @@ export default function OrdersPage() {
                               />
                               <span className="text-sm text-amber-600 dark:text-amber-400">Tuesday</span>
                             </label>
+                            <label className="flex items-center gap-2 cursor-pointer select-none border-t pt-2" title="Shop takes stock on a sale-or-return basis">
+                              <Checkbox
+                                checked={sorShopKeys.has(shopKeyOf(group.customerName))}
+                                disabled={toggleShopMutation.isPending}
+                                onCheckedChange={(checked) => toggleShopMutation.mutate({ name: group.customerName, on: !!checked })}
+                                data-testid={`checkbox-sor-${group.customerName}`}
+                              />
+                              <span className="text-sm">Sale or return shop</span>
+                            </label>
                           </div>
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground align-top pt-3">
@@ -703,6 +735,11 @@ export default function OrdersPage() {
                                   <Stamp className="w-3 h-3 mr-1" />Stamp Tue
                                 </Button>
                               </>
+                            )}
+                            {sorShopKeys.has(shopKeyOf(group.customerName)) && (
+                              <Button asChild size="sm" variant="outline" className="h-8 w-full justify-start text-xs border-emerald-400 text-emerald-700 dark:text-emerald-400 sm:h-7 sm:w-auto sm:justify-center" data-testid={`button-sor-${group.customerName}`}>
+                                <Link href={`/shop-returns?shop=${encodeURIComponent(shopKeyOf(group.customerName))}`}><Store className="w-3 h-3 mr-1" />Sales &amp; returns</Link>
+                              </Button>
                             )}
                           </div>
                         </TableCell>

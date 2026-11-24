@@ -38,6 +38,7 @@ import LoginPage from "@/pages/login";
 import SystemStatusPage from "@/pages/system-status";
 import CustomerPortal from "@/pages/customer-portal";
 import ChristmasManagement from "@/pages/christmas-management";
+import ShopReturnsPage from "@/pages/shop-returns";
 
 function isPublicRoute(location: string) {
   return (
@@ -84,6 +85,7 @@ function PageRouter() {
       <Route path="/possible-duplicates" component={PossibleDuplicatesPage} />
       <Route path="/ingredients" component={IngredientsPage} />
       <Route path="/manual-stock" component={ManualStockPage} />
+      <Route path="/shop-returns" component={ShopReturnsPage} />
       <Route path="/routes/tuesday" component={TuesdayDeliveryRoutesPage} />
       <Route path="/dispatch/locations" component={DriverLocations} />
       <Route path="/dispatch/dev/tuesday">{() => <DispatchDevelopment day="tuesday" />}</Route>
