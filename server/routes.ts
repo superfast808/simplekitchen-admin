@@ -4,6 +4,7 @@ import { registerSubscriptionOrderRepair } from "./subscription-order-repair";
 import { startThursdaySubscriptionReminder, sendThursdayReminderTest, parseSubscriptionStaffRecipients } from "./subscription-staff-reminder";
 import { sendTrackedSubscriptionInvite, type SubscriptionMailContext } from "./subscription-mail";
 import { registerDispatch, setupDispatchTables } from "./dispatch";
+import { registerShopReturns, setupShopReturnTables } from "./shop-returns";
 import express from "express";
 import type { Express } from "express";
 import { createServer, type Server } from "http";
@@ -1907,6 +1908,8 @@ export async function registerRoutes(
   registerCustomerPortal(app);
   await setupDispatchTables();
   registerDispatch(app);
+  await setupShopReturnTables();
+  registerShopReturns(app, getWeekRange);
 
   app.get("/api/woo-connection", async (req, res) => {
     if(!req.session?.userId)return res.status(401).json({message:"Unauthorized"});
