@@ -1,40 +1,26 @@
 import { useState } from "react";
-import { format, startOfMonth, endOfMonth, addDays, subDays } from "date-fns";
+import { format, startOfMonth, endOfMonth, addDays } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ChevronLeft, ChevronRight, Calendar } from "lucide-react";
+import { operationalWeek, operationalWeekOf } from "@shared/week";
 
 export type DateRange = { from: Date; to: Date };
 
+/**
+ * The ordering week: Saturday 12:00 → Wednesday 23:59:59 UK time for web
+ * orders. The window runs on to the next Saturday noon so staff stamps made
+ * while the shop is closed still land in the right week. See shared/week.ts.
+ */
 export function getOrderWindow(offset: number): { from: Date; to: Date } {
-  const now = new Date();
-  const ukNow = new Date(now.toLocaleString("en-US", { timeZone: "Europe/London" }));
-  const dayOfWeek = ukNow.getDay();
-
-  let saturdayDate: Date;
-  if (dayOfWeek === 6) {
-    saturdayDate = new Date(ukNow);
-  } else {
-    const daysBack = dayOfWeek === 0 ? 1 : dayOfWeek + 1;
-    saturdayDate = subDays(ukNow, daysBack);
-  }
-
-  if (offset !== 0) {
-    saturdayDate = addDays(saturdayDate, offset * 7);
-  }
-
-  const from = new Date(saturdayDate);
-  from.setHours(0, 0, 0, 0);
-
-  // Orders are finalised at Thursday 07:00 UK time — 5 days after the Saturday window start.
-  // This is the kitchen's production cutoff: both the orders table and weekly stats use this
-  // boundary so the meal count is always consistent between the two views.
-  const thursday = addDays(saturdayDate, 5);
-  const to = new Date(thursday);
-  to.setHours(7, 0, 0, 0);
-
+  const { from, to } = operationalWeek(offset);
   return { from, to };
+}
+
+/** Saturday key ("YYYY-MM-DD") of the week on screen; the current week for Month/Custom views. */
+export function screenWeekKey(filter: { mode: string; windowOffset: number }): string {
+  return operationalWeek(filter.mode === "window" ? filter.windowOffset : 0).key;
 }
 
 export function getDeliveryDatesForWindow(windowFrom: Date): { saturday: Date; tuesday: Date } {
@@ -45,13 +31,8 @@ export function getDeliveryDatesForWindow(windowFrom: Date): { saturday: Date; t
 }
 
 export function getDeliveryDateForOrder(orderDate: Date | string, isTuesday: boolean): Date {
-  const d = new Date(orderDate);
-  const dayOfWeek = d.getDay();
-  const daysBack = dayOfWeek === 6 ? 0 : dayOfWeek === 0 ? 1 : dayOfWeek + 1;
-  const windowSat = new Date(d);
-  windowSat.setDate(d.getDate() - daysBack);
-  windowSat.setHours(0, 0, 0, 0);
-  return isTuesday ? addDays(windowSat, 10) : addDays(windowSat, 7);
+  const { from } = operationalWeekOf(new Date(orderDate));
+  return isTuesday ? addDays(from, 10) : addDays(from, 7);
 }
 
 export function useDateFilter() {
@@ -114,7 +95,7 @@ export function DateFilter({
           onClick={() => { setMode("window"); setWindowOffset(0); }}
           data-testid={`button-${testIdPrefix}-mode-week`}
         >
-          Sat–Thu
+          Sat–Wed
         </Button>
         {showMonth && (
           <Button
@@ -178,10 +159,17 @@ export function DateFilter({
   );
 }
 
+/** For an ordering week show its Wednesday close, not the Saturday-noon window end. */
+export function displayEnd(from: Date, to: Date): Date {
+  const isOrderWeek = from.getDay() === 6 && from.getHours() === 12 && from.getMinutes() === 0 &&
+    to.getTime() - from.getTime() > 6 * 86400000 && to.getTime() - from.getTime() < 8 * 86400000;
+  return isOrderWeek ? addDays(from, 4) : to;
+}
+
 export function DateRangeLabel({ from, to }: { from: Date; to: Date }) {
   return (
     <span className="text-sm text-muted-foreground">
-      {format(from, "EEE, MMM d")} – {format(to, "EEE, MMM d, yyyy")}
+      {format(from, "EEE, MMM d")} – {format(displayEnd(from, to), "EEE, MMM d, yyyy")}
     </span>
   );
 }

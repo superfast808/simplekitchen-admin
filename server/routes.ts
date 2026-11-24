@@ -5,6 +5,7 @@ import { startThursdaySubscriptionReminder, sendThursdayReminderTest, parseSubsc
 import { sendTrackedSubscriptionInvite, type SubscriptionMailContext } from "./subscription-mail";
 import { registerDispatch, setupDispatchTables } from "./dispatch";
 import { registerShopReturns, setupShopReturnTables } from "./shop-returns";
+import { operationalWeek, operationalWeekByKey, staffOrderDate, type OperationalWeek } from "@shared/week";
 import express from "express";
 import type { Express } from "express";
 import { createServer, type Server } from "http";
@@ -446,6 +447,15 @@ function getWeekRange(offset = 0): { from: Date; to: Date } {
 // even when the connected server/database interprets BST differently.
 function getSubscriptionWeekFrom(week: Date): Date {
   return new Date(week.getTime() + 14 * 60 * 60 * 1000);
+}
+
+// Staff stamp/amend/remove actions work on the week shown on screen, sent as
+// its Saturday key. Older clients that send nothing get the current week.
+// Returns null for a malformed key so the route can answer 400.
+function staffWeek(req: { body?: any; query?: any }): OperationalWeek | null {
+  const key = req.body?.weekStart ?? req.query?.weekStart;
+  if (key === undefined || key === null || key === "") return operationalWeek(0);
+  return operationalWeekByKey(key);
 }
 
 // Auto-send window: Saturday through Wednesday 20:00 UK time
@@ -1909,7 +1919,7 @@ export async function registerRoutes(
   await setupDispatchTables();
   registerDispatch(app);
   await setupShopReturnTables();
-  registerShopReturns(app, getWeekRange);
+  registerShopReturns(app);
 
   app.get("/api/woo-connection", async (req, res) => {
     if(!req.session?.userId)return res.status(401).json({message:"Unauthorized"});
@@ -2027,20 +2037,16 @@ export async function registerRoutes(
           return res.status(400).json({ message: "Selected production week is outside the one-year limit" });
         }
         resolvedOrderDate = anchor;
-        const cutoff = new Date(anchor);
-        cutoff.setUTCDate(cutoff.getUTCDate() + 5);
-        cutoff.setUTCHours(7, 0, 0, 0);
-        wasAddedAfterCutoff = Date.now() > cutoff.getTime();
+        const chosenWeek = operationalWeekByKey(manualWeekStart);
+        wasAddedAfterCutoff = !!chosenWeek && Date.now() > chosenWeek.ordersClose.getTime();
       } else if (orderData.orderDate) {
         // Existing internal callers can still provide explicit dates.
         resolvedOrderDate = new Date(orderData.orderDate);
         if (Number.isNaN(resolvedOrderDate.getTime()))
           return res.status(400).json({ message: "Invalid manual order date" });
       } else {
-        const now = new Date();
-        const week = getWeekRange(0);
-        // Legacy callers: ensure orders after Thu 7am are still visible.
-        resolvedOrderDate = now > week.to ? getSubscriptionWeekFrom(week.from) : now;
+        // Legacy callers: after Wednesday's close, anchor to the week's Saturday noon.
+        resolvedOrderDate = staffOrderDate(operationalWeek(0));
       }
       const order = await storage.createOrder({
         ...orderData,
@@ -5028,18 +5034,9 @@ export async function registerRoutes(
         const effectiveName = (orderUpdate.customerName || existing.customerName) as string;
         const effectiveIsTuesday = updates.isTuesday !== undefined ? !!updates.isTuesday : !!existing.isTuesday;
 
-        // Current week: most recent Saturday → following Wednesday
-        const ukNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/London" }));
-        const dow = ukNow.getDay();
-        const daysBack = dow === 6 ? 0 : dow === 0 ? 1 : dow + 1;
-        const weekStart = new Date(ukNow);
-        weekStart.setDate(weekStart.getDate() - daysBack);
-        weekStart.setHours(0, 0, 0, 0);
-        const weekEnd = new Date(weekStart);
-        weekEnd.setDate(weekEnd.getDate() + 4);
-        weekEnd.setHours(23, 59, 59, 999);
-
-        const weekOrders = await storage.getOrders(weekStart, weekEnd);
+        // The week on screen (Saturday 12:00 → next Saturday 11:59), else this week.
+        const syncWeek = staffWeek(req) ?? operationalWeek(0);
+        const weekOrders = await storage.getOrders(syncWeek.from, syncWeek.to);
         const matchingOrders = weekOrders.filter(o =>
           o.isManual &&
           o.customerName.toLowerCase().trim() === effectiveName.toLowerCase().trim() &&
@@ -5087,7 +5084,8 @@ export async function registerRoutes(
   // Subscription orders (linked via selections_order_id / tuesday_selections_order_id) are protected.
   app.delete("/api/recurring-orders/stamps-this-week", async (req, res) => {
     try {
-      const week = getWeekRange(0);
+      const week = staffWeek(req);
+      if (!week) return res.status(400).json({ message: "Invalid week" });
       const thisWeekOrders = await storage.getOrders(week.from, week.to);
       const manualOrders = thisWeekOrders.filter(o => o.isManual);
 
@@ -5137,11 +5135,13 @@ export async function registerRoutes(
       const itemsToUse = (req.body.items && Array.isArray(req.body.items))
         ? req.body.items
         : templateItems;
+      const week = staffWeek(req);
+      if (!week) return res.status(400).json({ message: "Invalid week" });
       const order = await storage.createOrder({
         customerName: ro.customerName,
         deliveryAddress: ro.deliveryAddress || null,
         fulfillmentType: ro.fulfillmentType,
-        orderDate: new Date(),
+        orderDate: staffOrderDate(week),
         status: "processing",
         isManual: true,
         isTuesday: ro.isTuesday,
@@ -5197,6 +5197,8 @@ export async function registerRoutes(
 
   app.post("/api/recurring-orders/generate", async (req, res) => {
     try {
+      const week = staffWeek(req);
+      if (!week) return res.status(400).json({ message: "Invalid week" });
       const recurringOrdersList = await storage.getRecurringOrders();
       const active = recurringOrdersList.filter(ro => ro.active && ro.isTuesday !== false);
       if (active.length === 0) {
@@ -5212,7 +5214,7 @@ export async function registerRoutes(
           customerName: ro.customerName,
           deliveryAddress: ro.deliveryAddress || null,
           fulfillmentType: ro.fulfillmentType,
-          orderDate: new Date(),
+          orderDate: staffOrderDate(week),
           status: "processing",
           isManual: true,
           isTuesday: ro.isTuesday,
@@ -5238,6 +5240,8 @@ export async function registerRoutes(
 
   app.post("/api/recurring-orders/generate-saturday", async (req, res) => {
     try {
+      const week = staffWeek(req);
+      if (!week) return res.status(400).json({ message: "Invalid week" });
       const recurringOrdersList = await storage.getRecurringOrders();
       const active = recurringOrdersList.filter(ro => ro.active && ro.isTuesday === false);
       if (active.length === 0) {
@@ -5253,7 +5257,7 @@ export async function registerRoutes(
           customerName: ro.customerName,
           deliveryAddress: ro.deliveryAddress || null,
           fulfillmentType: ro.fulfillmentType,
-          orderDate: new Date(),
+          orderDate: staffOrderDate(week),
           status: "processing",
           isManual: true,
           isTuesday: false,
@@ -5282,14 +5286,15 @@ export async function registerRoutes(
   // using each customer's most recent actual order as the template and mapping to the current week's menu.
   app.post("/api/recurring-orders/smart-stamp-all", async (req, res) => {
     try {
-      const week = getWeekRange(0);
+      const week = staffWeek(req);
+      if (!week) return res.status(400).json({ message: "Invalid week" });
       // Meal price floor: anything at or above this price is a "meal" (included in subscription).
       // Using a floor rather than an exact price makes the stamp robust across price changes
       // (e.g. £7.50 → £7.75) without needing a code deploy each time.
       const MEAL_PRICE_FLOOR = 6.00;
 
       // Resolve current week's menu
-      const { categoryName } = await getCurrentWeekInfo();
+      const { categoryName } = await getCurrentWeekInfo(week.from);
       const allProducts = await storage.getProducts();
       const weekProducts = allProducts.filter(p => p.category === categoryName);
       const menuProducts = weekProducts.length > 0 ? weekProducts : allProducts;
@@ -5551,7 +5556,7 @@ export async function registerRoutes(
           customerName: ro.customerName,
           deliveryAddress: ro.deliveryAddress || null,
           fulfillmentType: ro.fulfillmentType,
-          orderDate: new Date(),
+          orderDate: staffOrderDate(week),
           status: "processing",
           isManual: true,
           isTuesday: ro.isTuesday,

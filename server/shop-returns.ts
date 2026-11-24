@@ -1,5 +1,6 @@
 import type { Express, Request } from "express";
 import { pool } from "./db";
+import { operationalWeek } from "@shared/week";
 
 /**
  * Sale-or-return tracking for shops that are also consistent customers.
@@ -11,7 +12,6 @@ import { pool } from "./db";
  * order id, so "Remove All Stamps" followed by a re-stamp keeps the counts.
  */
 
-type Week = { from: Date; to: Date };
 type Day = "sat" | "tue";
 
 const INACTIVE_STATUSES = ["cancelled", "refunded", "failed", "trash"];
@@ -20,7 +20,6 @@ const HISTORY_WEEKS = 6;
 export const shopKey = (name: string) => name.normalize("NFKC").trim().replace(/\s+/g, " ").toLowerCase();
 const productKey = shopKey;
 const SQL_KEY = (col: string) => `LOWER(REGEXP_REPLACE(TRIM(${col}), '\\s+', ' ', 'g'))`;
-const isoDate = (d: Date) => d.toISOString().slice(0, 10);
 const toPence = (price: unknown) => {
   const n = Number(price);
   return Number.isFinite(n) && n > 0 ? Math.round(n * 100) : 0;
@@ -84,7 +83,7 @@ function summarise(lines: Line[]) {
   return { supplied, sold, returned, toCount, owedPence };
 }
 
-export function registerShopReturns(app: Express, getWeekRange: (offset?: number) => Week) {
+export function registerShopReturns(app: Express) {
   const userOf = (req: Request) => String((req.session as any)?.userId ?? "");
 
   async function listShops() {
@@ -155,8 +154,8 @@ export function registerShopReturns(app: Express, getWeekRange: (offset?: number
       const shops = await listShops();
       // weeks[0] is the selected week, weeks[1..] go back in time for history.
       const weeks = Array.from({ length: HISTORY_WEEKS + 1 }, (_, i) => {
-        const w = getWeekRange(offset - i);
-        return { ...w, start: isoDate(w.from) };
+        const w = operationalWeek(offset - i);
+        return { from: w.from, to: w.to, start: w.key };
       });
       const current = weeks[0];
       const base = { week: { offset, start: current.start, from: current.from, to: current.to } };

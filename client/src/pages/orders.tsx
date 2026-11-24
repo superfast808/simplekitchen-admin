@@ -3,7 +3,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { OrderActions } from "@/components/order-actions";
 import { OrderDeleteButton } from "@/components/order-delete-button";
-import { format, startOfWeek } from "date-fns";
+import { format } from "date-fns";
 import { useState, useMemo } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -21,7 +21,8 @@ import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { DateFilter, DateRangeLabel, DeliveryDatePills, useDateFilter, getDeliveryDateForOrder } from "@/components/date-filter";
+import { DateFilter, DateRangeLabel, DeliveryDatePills, useDateFilter, getDeliveryDateForOrder, screenWeekKey, displayEnd } from "@/components/date-filter";
+import { operationalWeek, operationalWeekByKey, operationalWeekOf } from "@shared/week";
 import { OrderSourceFilter, useOrderSourceFilter } from "@/components/order-source-filter";
 import type { Order, OrderItem, RecurringOrder, RecurringOrderItem } from "@shared/schema";
 
@@ -73,6 +74,10 @@ export default function OrdersPage() {
   const [showAddConsistentDialog, setShowAddConsistentDialog] = useState(false);
 
   const { from, to } = dateFilter;
+  // Stamp, amend and remove always act on the week on screen.
+  const weekStart = screenWeekKey(dateFilter);
+  const weekIsCurrent = weekStart === operationalWeek(0).key;
+  const weekName = weekIsCurrent ? "This Week" : `w/c ${format(operationalWeekByKey(weekStart)!.from, "d MMM")}`;
 
   const { data: allOrders, isLoading, isFetching } = useQuery<OrderWithItems[]>({
     queryKey: ["/api/orders", `?from=${from.toISOString()}&to=${to.toISOString()}`],
@@ -141,6 +146,7 @@ export default function OrdersPage() {
       if (existing) {
         return apiRequest("PATCH", `/api/recurring-orders/${existing.id}`, {
           items,
+          weekStart,
           deliveryAddress: order.deliveryAddress || null,
           fulfillmentType: order.fulfillmentType || "delivery",
         });
@@ -195,7 +201,7 @@ export default function OrdersPage() {
   const [confirmRemoveStamps, setConfirmRemoveStamps] = useState(false);
 
   const removeStampsMutation = useMutation({
-    mutationFn: () => apiRequest("DELETE", "/api/recurring-orders/stamps-this-week"),
+    mutationFn: () => apiRequest("DELETE", `/api/recurring-orders/stamps-this-week?weekStart=${weekStart}`),
     onSuccess: async (res) => {
       const data = await res.json();
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
@@ -208,7 +214,7 @@ export default function OrdersPage() {
   });
 
   const smartStampAllMutation = useMutation({
-    mutationFn: () => apiRequest("POST", "/api/recurring-orders/smart-stamp-all"),
+    mutationFn: () => apiRequest("POST", "/api/recurring-orders/smart-stamp-all", { weekStart }),
     onSuccess: async (res) => {
       const data = await res.json();
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
@@ -536,11 +542,11 @@ export default function OrdersPage() {
                   data-testid="button-smart-stamp-all"
                 >
                   <Stamp className="w-3 h-3 mr-1" />
-                  {smartStampAllMutation.isPending ? "Stamping…" : "Stamp All This Week"}
+                  {smartStampAllMutation.isPending ? "Stamping…" : `Stamp All ${weekName}`}
                 </Button>
                 {confirmRemoveStamps ? (
                   <div className="col-span-2 flex min-w-0 flex-wrap items-center gap-1 sm:col-span-1">
-                    <span className="w-full text-xs text-destructive font-medium sm:w-auto">Remove all this week's stamps?</span>
+                    <span className="w-full text-xs text-destructive font-medium sm:w-auto">Remove all stamps for {weekIsCurrent ? "this week" : weekName}?</span>
                     <Button
                       size="sm" variant="destructive" className="h-8 flex-1 text-xs sm:h-7 sm:flex-none"
                       onClick={() => removeStampsMutation.mutate()}
@@ -1152,6 +1158,7 @@ export default function OrdersPage() {
       {stampingCustomer && (
         <StampDialog
           customer={stampingCustomer}
+          weekStart={weekStart}
           open={!!stampingCustomer}
           onOpenChange={(v) => { if (!v) setStampingCustomer(null); }}
         />
@@ -1159,6 +1166,7 @@ export default function OrdersPage() {
       {editingConsistentCustomer && (
         <EditConsistentDialog
           customer={editingConsistentCustomer}
+          weekStart={weekStart}
           open={!!editingConsistentCustomer}
           onOpenChange={(v) => { if (!v) setEditingConsistentCustomer(null); }}
         />
@@ -1290,17 +1298,14 @@ function ManualOrderDialog({ open, onOpenChange, displayedFrom, displayedTo, dat
 
   // Window mode always assigns to the displayed Saturday. Month and Custom
   // span multiple weeks, so staff choose the intended production Saturday.
-  const displayedSaturday = format(startOfWeek(displayedFrom, { weekStartsOn: 6 }), "yyyy-MM-dd");
-  const suggestedSaturday = dateMode === "window" ? displayedSaturday :
-    format(startOfWeek(new Date(), { weekStartsOn: 6 }), "yyyy-MM-dd");
+  const displayedSaturday = operationalWeekOf(displayedFrom).key;
+  const suggestedSaturday = dateMode === "window" ? displayedSaturday : operationalWeek(0).key;
   const chosenWeekStart = dateMode === "window" ? displayedSaturday : (alternateWeekStart || suggestedSaturday);
   const anchor = new Date(chosenWeekStart + "T12:00:00.000Z");
   const isValidWeek = !Number.isNaN(anchor.getTime()) && anchor.getUTCDay() === 6 &&
     anchor.toISOString().slice(0, 10) === chosenWeekStart;
-  const cutoff = new Date(anchor);
-  cutoff.setUTCDate(cutoff.getUTCDate() + 5);
-  cutoff.setUTCHours(7, 0, 0, 0);
-  const afterCutoff = isValidWeek && Date.now() > cutoff.getTime();
+  const chosenWeek = isValidWeek ? operationalWeekByKey(chosenWeekStart) : null;
+  const afterCutoff = !!chosenWeek && Date.now() > chosenWeek.ordersClose.getTime();
 
   const createMutation = useMutation({
     mutationFn: async (data: any) => {
@@ -1380,7 +1385,7 @@ function ManualOrderDialog({ open, onOpenChange, displayedFrom, displayedTo, dat
             <Label htmlFor="manual-week-start">Production week for this order</Label>
             {dateMode === "window" ? (
               <p className="text-sm font-semibold">
-                {format(displayedFrom, "EEE d MMM")} – {format(displayedTo, "EEE d MMM yyyy")} · week shown
+                {format(displayedFrom, "EEE d MMM")} – {format(displayEnd(displayedFrom, displayedTo), "EEE d MMM yyyy")} · week shown
               </p>
             ) : (
               <>
@@ -1394,7 +1399,7 @@ function ManualOrderDialog({ open, onOpenChange, displayedFrom, displayedTo, dat
             )}
             {afterCutoff ? (
               <p className="text-xs font-medium text-amber-700 dark:text-amber-300" data-testid="manual-order-late-notice">
-                After the Thursday 7 am cutoff: staff can still add this order to the selected week.
+                After Wednesday night's close: staff can still add this order to the selected week.
                 It will be included in Orders, labels and kitchen production totals.
               </p>
             ) : (
@@ -1741,8 +1746,9 @@ function EditOrderDialog({ order, open, onOpenChange }: { order: OrderWithItems;
   );
 }
 
-function StampDialog({ customer, open, onOpenChange }: {
+function StampDialog({ customer, weekStart, open, onOpenChange }: {
   customer: RecurringOrderWithItems;
+  weekStart: string;
   open: boolean;
   onOpenChange: (v: boolean) => void;
 }) {
@@ -1756,7 +1762,7 @@ function StampDialog({ customer, open, onOpenChange }: {
   const { data: products } = useQuery<any[]>({ queryKey: ["/api/products"] });
 
   const stampMutation = useMutation({
-    mutationFn: (items: any[]) => apiRequest("POST", `/api/recurring-orders/${customer.id}/stamp`, { items }),
+    mutationFn: (items: any[]) => apiRequest("POST", `/api/recurring-orders/${customer.id}/stamp`, { items, weekStart }),
     onSuccess: async () => {
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
       toast({ title: `Order created for ${customer.customerName}` });
@@ -1856,8 +1862,9 @@ function StampDialog({ customer, open, onOpenChange }: {
   );
 }
 
-function EditConsistentDialog({ customer, open, onOpenChange }: {
+function EditConsistentDialog({ customer, weekStart, open, onOpenChange }: {
   customer: RecurringOrderWithItems;
+  weekStart: string;
   open: boolean;
   onOpenChange: (v: boolean) => void;
 }) {
@@ -1878,7 +1885,7 @@ function EditConsistentDialog({ customer, open, onOpenChange }: {
   const { data: products } = useQuery<any[]>({ queryKey: ["/api/products"] });
 
   const updateMutation = useMutation({
-    mutationFn: (data: any) => apiRequest("PATCH", `/api/recurring-orders/${customer.id}`, data),
+    mutationFn: (data: any) => apiRequest("PATCH", `/api/recurring-orders/${customer.id}`, { ...data, weekStart }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/recurring-orders"] });
       toast({ title: "Consistent customer updated" });

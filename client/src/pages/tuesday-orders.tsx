@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from "@/components/ui/table";
 import { Plus, Pencil, Trash2, Play, CalendarCheck, ShoppingCart, CalendarDays, Copy, CheckCircle2, AlertCircle, Globe, Minus, RotateCcw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { useDateFilter, DateFilter, DateRangeLabel, getDeliveryDatesForWindow } from "@/components/date-filter";
+import { useDateFilter, DateFilter, DateRangeLabel, getDeliveryDatesForWindow, screenWeekKey } from "@/components/date-filter";
 import { format } from "date-fns";
 import { useMemo } from "react";
 import type { RecurringOrder, RecurringOrderItem, Order, OrderItem } from "@shared/schema";
@@ -107,7 +107,7 @@ export default function TuesdayOrdersPage() {
 
   const toggleMutation = useMutation({
     mutationFn: ({ id, active }: { id: number; active: boolean }) =>
-      apiRequest("PATCH", `/api/recurring-orders/${id}`, { active }),
+      apiRequest("PATCH", `/api/recurring-orders/${id}`, { active, weekStart: screenWeekKey(dateFilter) }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/recurring-orders"] });
     },
@@ -115,7 +115,7 @@ export default function TuesdayOrdersPage() {
 
   const copyItemsMutation = useMutation({
     mutationFn: ({ targetId, items }: { targetId: number; items: { productName: string; quantity: number }[] }) =>
-      apiRequest("PATCH", `/api/recurring-orders/${targetId}`, { items }),
+      apiRequest("PATCH", `/api/recurring-orders/${targetId}`, { items, weekStart: screenWeekKey(dateFilter) }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/recurring-orders"] });
       toast({ title: "Items copied from Saturday order" });
@@ -134,7 +134,7 @@ export default function TuesdayOrdersPage() {
   });
 
   const generateMutation = useMutation({
-    mutationFn: () => apiRequest("POST", "/api/recurring-orders/generate"),
+    mutationFn: () => apiRequest("POST", "/api/recurring-orders/generate", { weekStart: screenWeekKey(dateFilter) }),
     onSuccess: async (res) => {
       const data = await res.json();
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
